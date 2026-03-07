@@ -1,4 +1,5 @@
-import { createPublicClient, http, type Address, type PublicClient } from 'viem';
+import { createPublicClient, http, type Address, type PublicClient, type Chain, defineChain } from 'viem';
+import { mainnet, base } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
 import { getChainConfig } from '../../config/chains';
 import type {
@@ -13,6 +14,19 @@ import type {
   VaultVersion,
   VaultInfoV2,
 } from '../../types';
+
+const sei = defineChain({
+  id: 1329,
+  name: 'SEI',
+  nativeCurrency: { name: 'SEI', symbol: 'SEI', decimals: 18 },
+  rpcUrls: { default: { http: ['https://sei-evm-rpc.publicnode.com'] } },
+});
+
+const VIEM_CHAINS: Record<number, Chain> = {
+  1: mainnet,
+  8453: base,
+  1329: sei,
+};
 
 /**
  * Cache of public clients per chain.
@@ -35,6 +49,7 @@ export function getPublicClient(chainId: number): PublicClient {
   const rpcUrl = ENV_RPC_URLS[chainId] || chainConfig.rpcUrls[0];
 
   const client = createPublicClient({
+    chain: VIEM_CHAINS[chainId],
     batch: { multicall: true },
     transport: http(rpcUrl, {
       batch: true,
