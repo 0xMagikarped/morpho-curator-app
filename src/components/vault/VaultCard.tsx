@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { Component, useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../ui/Card';
 import { ChainBadge } from '../ui/ChainBadge';
@@ -8,7 +8,27 @@ import { ProgressBar } from '../ui/ProgressBar';
 import { Button } from '../ui/Button';
 import { useVaultInfo, useVaultAllocation, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
 import { formatTokenAmount, formatWadPercent, formatDuration, formatCountdown } from '../../lib/utils/format';
+import { truncateAddress } from '../../lib/utils/format';
 import type { Address } from 'viem';
+
+class VaultCardErrorBoundary extends Component<{ address: string; children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <Card>
+          <div className="py-4 text-center space-y-1">
+            <p className="text-xs text-danger">Failed to load vault</p>
+            <p className="text-[10px] text-text-tertiary font-mono">{truncateAddress(this.props.address)}</p>
+            <p className="text-[10px] text-text-tertiary">{this.state.error.message}</p>
+          </div>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface VaultCardProps {
   chainId: number;
@@ -16,6 +36,14 @@ interface VaultCardProps {
 }
 
 export function VaultCard({ chainId, vaultAddress }: VaultCardProps) {
+  return (
+    <VaultCardErrorBoundary address={vaultAddress}>
+      <VaultCardInner chainId={chainId} vaultAddress={vaultAddress} />
+    </VaultCardErrorBoundary>
+  );
+}
+
+function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
   const navigate = useNavigate();
   const { data: vault, isLoading } = useVaultInfo(chainId, vaultAddress);
   const { data: allocation } = useVaultAllocation(chainId, vaultAddress);
@@ -67,7 +95,7 @@ export function VaultCard({ chainId, vaultAddress }: VaultCardProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-text-primary">{vault.name}</h3>
+          <h3 className="text-sm font-semibold text-text-primary">{String(vault.name)}</h3>
           <ChainBadge chainId={chainId} />
           <VersionBadge version={vault.version as 'v1' | 'v2'} />
         </div>
