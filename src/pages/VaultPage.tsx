@@ -51,7 +51,7 @@ export function VaultPage() {
   const chainId = chainIdStr ? parseInt(chainIdStr) : undefined;
   const vaultAddress = address as Address | undefined;
 
-  const { data: vault } = useVaultInfo(chainId, vaultAddress);
+  const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
   const { addTrackedVault } = useAppStore();
 
@@ -59,6 +59,19 @@ export function VaultPage() {
     return (
       <div className="text-center py-12">
         <p className="text-text-tertiary">Invalid vault URL.</p>
+        <Button variant="ghost" className="mt-4" onClick={() => navigate('/')}>
+          Back to Dashboard
+        </Button>
+      </div>
+    );
+  }
+
+  if (error && !vault) {
+    return (
+      <div className="max-w-6xl mx-auto text-center py-12 space-y-3">
+        <p className="text-danger text-sm">Failed to load vault</p>
+        <p className="text-text-tertiary text-xs font-mono">{vaultAddress}</p>
+        <p className="text-text-tertiary text-xs">{error instanceof Error ? error.message : 'RPC call failed — the vault may not exist on this chain, or the RPC endpoint is unavailable.'}</p>
         <Button variant="ghost" className="mt-4" onClick={() => navigate('/')}>
           Back to Dashboard
         </Button>
@@ -91,7 +104,7 @@ export function VaultPage() {
             &larr;
           </button>
           <h1 className="text-lg font-bold text-text-primary">
-            {vault?.name ?? 'Loading...'}
+            {vault?.name ?? (isLoading ? 'Loading...' : 'Vault')}
           </h1>
           {vault && (
             <div className="flex gap-1.5">
