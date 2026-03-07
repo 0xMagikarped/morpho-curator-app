@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@theme {
+  /* Background tokens */
+  --color-bg-root: #08090C;
+  --color-bg-surface: #0F1117;
+  --color-bg-elevated: #171923;
+  --color-bg-hover: #1E2130;
+  --color-bg-active: #252A3A;
+
+  /* Brand accent */
+  --color-accent-primary: #00E676;
+  --color-accent-primary-muted: #00E67620;
+  --color-accent-primary-hover: #00FF8A;
+
+  /* Semantic */
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-info: #3B82F6;
+  --color-migration: #A855F7;
+
+  /* Chain identity */
+  --color-chain-sei: #C8102E;
+  --color-chain-ethereum: #627EEA;
+  --color-chain-base: #0052FF;
+
+  /* Oracle grade */
+  --color-grade-a: #22C55E;
+  --color-grade-b: #3B82F6;
+  --color-grade-c: #F59E0B;
+  --color-grade-d: #F97316;
+  --color-grade-f: #EF4444;
+
+  /* Risk */
+  --color-risk-normal: #22C55E;
+  --color-risk-elevated: #F59E0B;
+  --color-risk-critical: #EF4444;
+
+  /* Version */
+  --color-version-v1: #3B82F6;
+  --color-version-v2: #A855F7;
+
+  /* Text */
+  --color-text-primary: #F0F0F5;
+  --color-text-secondary: #8B8FA3;
+  --color-text-tertiary: #5A5F73;
+  --color-text-on-accent: #08090C;
+
+  /* Borders */
+  --color-border-subtle: #1E2130;
+  --color-border-default: #2A2F42;
+  --color-border-focus: #00E676;
+
+  /* Typography */
+  --font-sans: 'Inter', 'Geist Sans', system-ui, sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', monospace;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--color-bg-root);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+
+/* Shimmer animation for skeleton loaders */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-surface) 25%,
+    var(--color-bg-hover) 50%,
+    var(--color-bg-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
