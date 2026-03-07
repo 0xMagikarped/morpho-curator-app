@@ -50,9 +50,9 @@ export function getPublicClient(chainId: number): PublicClient {
 
   const client = createPublicClient({
     chain: VIEM_CHAINS[chainId],
-    batch: { multicall: true },
     transport: http(rpcUrl, {
       batch: true,
+      batchSize: 20,
       fetchOptions: { cache: 'no-store' },
     }),
   });
