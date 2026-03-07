@@ -11,6 +11,7 @@ import {
   fetchPendingGuardian,
   fetchPendingCap,
 } from '../data/rpcClient';
+import { isApiSupportedChain, fetchVaultFromApi } from '../data/morphoApi';
 
 // ============================================================
 // Vault Summary (enriched from on-chain data)
@@ -140,6 +141,37 @@ async function enrichVaultSummary(
   version: VaultVersion,
   walletAddress?: Address,
 ): Promise<VaultSummary> {
+  // Use Morpho GraphQL API for supported chains (Ethereum, Base)
+  if (isApiSupportedChain(chainId)) {
+    const apiData = await fetchVaultFromApi(chainId, vaultAddress);
+    const info = apiData.info;
+
+    let role: VaultSummary['role'] = 'none';
+    if (walletAddress) {
+      const lowerWallet = walletAddress.toLowerCase();
+      if (info.owner.toLowerCase() === lowerWallet) role = 'owner';
+      else if (info.curator.toLowerCase() === lowerWallet) role = 'curator';
+      // Note: isAllocator requires an RPC call — skip for dashboard summary on API chains
+    }
+
+    return {
+      address: vaultAddress,
+      chainId,
+      name: info.name,
+      symbol: info.symbol,
+      version: info.version,
+      tvl: info.totalAssets,
+      fee: info.fee,
+      timelock: info.timelock,
+      sharePrice: info.totalSupply > 0n
+        ? (info.totalAssets * (10n ** 18n)) / info.totalSupply
+        : 10n ** 18n,
+      role,
+      supplyQueueLength: apiData.allocation.supplyQueue.length,
+    };
+  }
+
+  // Fallback: RPC for unsupported chains (SEI)
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) throw new Error(`Unknown chain: ${chainId}`);
 

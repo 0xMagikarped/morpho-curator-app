@@ -14,15 +14,34 @@ import {
   fetchPendingGuardian,
   checkIsAllocator,
 } from '../data/rpcClient';
+import { isApiSupportedChain, fetchVaultFromApi } from '../data/morphoApi';
 import type { VaultRole, AllocationState, MarketInfo, PendingAction } from '../../types';
 import { getEmergencyRole } from '../../types';
 import { calcUtilization } from '../utils/format';
 
-/**
- * Fetch full vault info from on-chain.
- */
-export function useVaultInfo(chainId: number | undefined, vaultAddress: Address | undefined) {
+// ============================================================
+// Shared API data hook — single GraphQL query for supported chains
+// ============================================================
+
+function useVaultApiData(chainId: number | undefined, vaultAddress: Address | undefined) {
   return useQuery({
+    queryKey: ['vault-api-data', chainId, vaultAddress],
+    queryFn: () => fetchVaultFromApi(chainId!, vaultAddress!),
+    enabled: !!chainId && !!vaultAddress && isApiSupportedChain(chainId),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+// ============================================================
+// useVaultInfo
+// ============================================================
+
+export function useVaultInfo(chainId: number | undefined, vaultAddress: Address | undefined) {
+  const useApi = !!chainId && isApiSupportedChain(chainId);
+  const apiQuery = useVaultApiData(chainId, vaultAddress);
+
+  const rpcQuery = useQuery({
     queryKey: ['vault-info', chainId, vaultAddress],
     queryFn: async () => {
       if (!chainId || !vaultAddress) throw new Error('Missing params');
@@ -30,29 +49,39 @@ export function useVaultInfo(chainId: number | undefined, vaultAddress: Address 
       const assetInfo = await fetchTokenInfo(chainId, info.asset);
       return { ...info, assetInfo };
     },
-    enabled: !!chainId && !!vaultAddress,
-    staleTime: 30_000, // 30s — balance between freshness and RPC load
-    refetchInterval: 60_000, // Auto-refresh every 60s
+    enabled: !!chainId && !!vaultAddress && !useApi,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
+
+  if (useApi) {
+    return {
+      ...apiQuery,
+      data: apiQuery.data?.info,
+    };
+  }
+  return rpcQuery;
 }
 
-/**
- * Fetch vault supply/withdraw queues and per-market allocation state.
- */
+// ============================================================
+// useVaultAllocation
+// ============================================================
+
 export function useVaultAllocation(chainId: number | undefined, vaultAddress: Address | undefined) {
-  return useQuery({
+  const useApi = !!chainId && isApiSupportedChain(chainId);
+  const apiQuery = useVaultApiData(chainId, vaultAddress);
+
+  const rpcQuery = useQuery({
     queryKey: ['vault-allocation', chainId, vaultAddress],
     queryFn: async () => {
       if (!chainId || !vaultAddress) throw new Error('Missing params');
 
       const queues = await fetchVaultQueues(chainId, vaultAddress);
 
-      // Unique market IDs from both queues
       const allMarketIds = [
         ...new Set([...queues.supplyQueue, ...queues.withdrawQueue]),
       ];
 
-      // Fetch caps, market state, and vault position for each market
       const allocations: AllocationState[] = await Promise.all(
         allMarketIds.map(async (marketId) => {
           const [cap, state, position] = await Promise.all([
@@ -61,7 +90,6 @@ export function useVaultAllocation(chainId: number | undefined, vaultAddress: Ad
             fetchVaultMarketPosition(chainId, vaultAddress, marketId),
           ]);
 
-          // Calculate supply assets from shares
           const supplyAssets =
             state.totalSupplyShares > 0n
               ? (position.supplyShares * state.totalSupplyAssets) / state.totalSupplyShares
@@ -84,14 +112,26 @@ export function useVaultAllocation(chainId: number | undefined, vaultAddress: Ad
         totalAllocated: allocations.reduce((sum, a) => sum + a.supplyAssets, 0n),
       };
     },
-    enabled: !!chainId && !!vaultAddress,
+    enabled: !!chainId && !!vaultAddress && !useApi,
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
+
+  if (useApi) {
+    return {
+      ...apiQuery,
+      data: apiQuery.data?.allocation,
+    };
+  }
+  return rpcQuery;
 }
 
+// ============================================================
+// useVaultMarkets
+// ============================================================
+
 /**
- * Fetch market info for markets in a vault's queues.
+ * Fetch market info via RPC. For API-supported chains, use useVaultMarketsFromApi instead.
  */
 export function useVaultMarkets(
   chainId: number | undefined,
@@ -125,7 +165,7 @@ export function useVaultMarkets(
             state,
             loanToken,
             collateralToken,
-            supplyAPY: 0, // TODO: calculate from IRM
+            supplyAPY: 0,
             borrowAPY: 0,
             utilization,
           } as MarketInfo;
@@ -134,14 +174,30 @@ export function useVaultMarkets(
 
       return markets;
     },
-    enabled: !!chainId && !!marketIds?.length,
+    enabled: !!chainId && !!marketIds?.length && !isApiSupportedChain(chainId ?? 0),
     staleTime: 60_000,
   });
 }
 
 /**
- * Check connected wallet's role for a vault.
+ * Combined hook for API-supported chains: returns markets from the shared API query.
+ * Use this instead of useVaultMarkets when you have the vaultAddress.
  */
+export function useVaultMarketsFromApi(
+  chainId: number | undefined,
+  vaultAddress: Address | undefined,
+) {
+  const apiQuery = useVaultApiData(chainId, vaultAddress);
+  return {
+    ...apiQuery,
+    data: apiQuery.data?.markets,
+  };
+}
+
+// ============================================================
+// useVaultRole
+// ============================================================
+
 export function useVaultRole(
   chainId: number | undefined,
   vaultAddress: Address | undefined,
@@ -180,9 +236,10 @@ export function useVaultRole(
   };
 }
 
-/**
- * Fetch all pending actions for a vault.
- */
+// ============================================================
+// useVaultPendingActions
+// ============================================================
+
 export function useVaultPendingActions(
   chainId: number | undefined,
   vaultAddress: Address | undefined,
@@ -195,7 +252,6 @@ export function useVaultPendingActions(
 
       const actions: PendingAction[] = [];
 
-      // Check pending timelock
       const pendingTimelock = await fetchPendingTimelock(chainId, vaultAddress);
       if (pendingTimelock) {
         actions.push({
@@ -206,7 +262,6 @@ export function useVaultPendingActions(
         });
       }
 
-      // Check pending guardian
       const pendingGuardian = await fetchPendingGuardian(chainId, vaultAddress);
       if (pendingGuardian) {
         actions.push({
@@ -217,7 +272,6 @@ export function useVaultPendingActions(
         });
       }
 
-      // Check pending caps for each market
       if (marketIds) {
         const pendingCaps = await Promise.all(
           marketIds.map((id) => fetchPendingCap(chainId, vaultAddress, id)),
