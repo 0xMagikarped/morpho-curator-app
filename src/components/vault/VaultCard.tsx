@@ -62,6 +62,12 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
     );
   }
 
+  // Debug: log vault object to find what causes React error #310
+  if (typeof window !== 'undefined') {
+    console.log('[VaultCard] vault:', JSON.stringify(vault, (_, v) => typeof v === 'bigint' ? v.toString() : v));
+    console.log('[VaultCard] allocation:', JSON.stringify(allocation, (_, v) => typeof v === 'bigint' ? v.toString() : v));
+  }
+
   const roles: { key: string; role: 'owner' | 'curator' | 'allocator' | 'guardian' | 'sentinel' }[] = [];
   if (role.isOwner) roles.push({ key: 'owner', role: 'owner' });
   if (role.isCurator) roles.push({ key: 'curator', role: 'curator' });
