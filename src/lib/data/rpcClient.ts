@@ -35,7 +35,11 @@ export function getPublicClient(chainId: number): PublicClient {
   const rpcUrl = ENV_RPC_URLS[chainId] || chainConfig.rpcUrls[0];
 
   const client = createPublicClient({
-    transport: http(rpcUrl),
+    batch: { multicall: true },
+    transport: http(rpcUrl, {
+      batch: true,
+      fetchOptions: { cache: 'no-store' },
+    }),
   });
 
   clientCache.set(chainId, client);
