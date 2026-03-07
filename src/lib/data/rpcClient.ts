@@ -286,23 +286,21 @@ export async function fetchVaultQueues(chainId: number, vaultAddress: Address, v
 
   const client = getPublicClient(chainId);
 
-  let supplyQueueLength: bigint;
-  let withdrawQueueLength: bigint;
-  try {
-    supplyQueueLength = await client.readContract({
+  // Read both lengths in parallel
+  const [supplyQueueLength, withdrawQueueLength] = await Promise.all([
+    client.readContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: 'supplyQueueLength',
-    });
-    withdrawQueueLength = await client.readContract({
+    }),
+    client.readContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: 'withdrawQueueLength',
-    });
-  } catch {
-    return { supplyQueue: [] as MarketId[], withdrawQueue: [] as MarketId[] };
-  }
+    }),
+  ]);
 
+  // Read all queue entries in parallel (viem batches these via multicall)
   const supplyPromises = Array.from({ length: Number(supplyQueueLength) }, (_, i) =>
     client.readContract({
       address: vaultAddress,

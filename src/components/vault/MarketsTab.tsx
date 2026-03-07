@@ -15,13 +15,14 @@ interface MarketsTabProps {
 export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
   const chainConfig = getChainConfig(chainId);
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
-  const { data: allocation, isLoading: allocLoading } = useVaultAllocation(chainId, vaultAddress);
+  const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const marketIds = allocation
     ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
     : undefined;
-  const { data: markets, isLoading: marketsLoading } = useVaultMarkets(chainId, marketIds);
+  const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarkets(chainId, marketIds);
 
   const isLoading = allocLoading || marketsLoading;
+  const error = allocError || marketsError;
 
   if (isLoading) {
     return (
@@ -30,6 +31,17 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
           <div key={i} className="h-16 bg-bg-hover rounded animate-shimmer" />
         ))}
       </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="py-8 text-center">
+        <p className="text-danger text-sm">Failed to load markets</p>
+        <p className="text-text-tertiary text-xs mt-1">
+          {error instanceof Error ? error.message : 'RPC call failed — try refreshing the page.'}
+        </p>
+      </Card>
     );
   }
 
