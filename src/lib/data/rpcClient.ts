@@ -19,6 +19,12 @@ import type {
  */
 const clientCache = new Map<number, PublicClient>();
 
+const ENV_RPC_URLS: Record<number, string | undefined> = {
+  1: import.meta.env.VITE_ETH_RPC_URL,
+  8453: import.meta.env.VITE_BASE_RPC_URL,
+  1329: import.meta.env.VITE_SEI_RPC_URL,
+};
+
 export function getPublicClient(chainId: number): PublicClient {
   const existing = clientCache.get(chainId);
   if (existing) return existing;
@@ -26,8 +32,10 @@ export function getPublicClient(chainId: number): PublicClient {
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
 
+  const rpcUrl = ENV_RPC_URLS[chainId] || chainConfig.rpcUrls[0];
+
   const client = createPublicClient({
-    transport: http(chainConfig.rpcUrls[0]),
+    transport: http(rpcUrl),
   });
 
   clientCache.set(chainId, client);
