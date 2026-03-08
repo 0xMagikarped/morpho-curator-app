@@ -4,8 +4,9 @@
  * vault conversion rates, and computes the oracle price.
  */
 
-import { createPublicClient, http, type Address, type PublicClient } from 'viem';
+import { type Address, type PublicClient } from 'viem';
 import { getChainConfig } from '../../config/chains';
+import { getPublicClient } from '../data/rpcClient';
 import { oracleIntrospectionAbi, chainlinkFeedAbi, metaMorphoV1Abi } from '../contracts/abis';
 
 // ============================================================
@@ -213,9 +214,7 @@ export async function decodeOracle(
     throw new Error(`Unsupported chain: ${chainId}`);
   }
 
-  const client = createPublicClient({
-    transport: http(chainConfig.rpcUrls[0]),
-  });
+  const client = getPublicClient(chainId);
 
   // Step 1: Read all 9 immutables + price() in one multicall batch
   const immutableResults = await client.multicall({

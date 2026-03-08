@@ -1,5 +1,6 @@
-import { createPublicClient, http, type Address, type PublicClient } from 'viem';
+import { type Address, type PublicClient } from 'viem';
 import { getChainConfig } from '../../config/chains';
+import { getPublicClient } from '../data/rpcClient';
 import { chainlinkFeedAbi } from '../contracts/abis';
 
 // ============================================================
@@ -590,9 +591,7 @@ export async function validateOracleConfig(
     ];
   }
 
-  const client = createPublicClient({
-    transport: http(chainConfig.rpcUrls[0]),
-  });
+  const client = getPublicClient(config.chainId);
 
   const [liveness, decimals, priceSanity, vaultCompat, overflow] = await Promise.all([
     checkFeedLiveness(client, config),

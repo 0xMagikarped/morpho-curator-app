@@ -45,7 +45,7 @@ export function VaultCard({ chainId, vaultAddress }: VaultCardProps) {
 
 function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
   const navigate = useNavigate();
-  const { data: vault, isLoading } = useVaultInfo(chainId, vaultAddress);
+  const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const { data: allocation } = useVaultAllocation(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
   const { data: pendingActions } = useVaultPendingActions(
@@ -54,10 +54,29 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
     allocation?.supplyQueue,
   );
 
-  if (isLoading || !vault) {
+  // useMemo MUST be before any early return (Rules of Hooks)
+  const activePending = useMemo(() => {
+    if (!pendingActions) return undefined;
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    return pendingActions.filter((a) => a.validAt > now);
+  }, [pendingActions]);
+
+  if (isLoading) {
     return (
       <Card>
         <div className="h-32 animate-shimmer rounded" />
+      </Card>
+    );
+  }
+
+  if (error || !vault) {
+    return (
+      <Card>
+        <div className="py-4 text-center space-y-1">
+          <p className="text-xs text-danger">Failed to load vault</p>
+          <p className="text-[10px] text-text-tertiary font-mono">{truncateAddress(vaultAddress)}</p>
+          <p className="text-[10px] text-text-tertiary">{error instanceof Error ? error.message : 'Vault data unavailable'}</p>
+        </div>
       </Card>
     );
   }
@@ -79,12 +98,6 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
   const utilization = vault.totalAssets > 0n
     ? Number((totalAllocated * 10000n) / vault.totalAssets) / 100
     : 0;
-
-  const activePending = useMemo(() => {
-    if (!pendingActions) return undefined;
-    const now = BigInt(Math.floor(Date.now() / 1000));
-    return pendingActions.filter((a) => a.validAt > now);
-  }, [pendingActions]);
 
   return (
     <Card

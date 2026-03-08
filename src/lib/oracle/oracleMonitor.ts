@@ -1,5 +1,5 @@
-import { createPublicClient, http, type Address } from 'viem';
-import { getChainConfig } from '../../config/chains';
+import type { Address } from 'viem';
+import { getPublicClient } from '../data/rpcClient';
 import { oracleAbi } from '../contracts/abis';
 import type { OracleHealth } from './oracleTypes';
 
@@ -25,8 +25,10 @@ export async function checkOracleHealth(
     };
   }
 
-  const chainConfig = getChainConfig(chainId);
-  if (!chainConfig) {
+  let client;
+  try {
+    client = getPublicClient(chainId);
+  } catch {
     return {
       address: oracleAddress,
       chainId,
@@ -37,10 +39,6 @@ export async function checkOracleHealth(
       error: 'Unknown chain',
     };
   }
-
-  const client = createPublicClient({
-    transport: http(chainConfig.rpcUrls[0]),
-  });
 
   const start = performance.now();
   try {

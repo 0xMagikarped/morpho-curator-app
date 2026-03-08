@@ -213,27 +213,80 @@ async function detectVaultVersion(
   }
 }
 
+/** ABI fragment for V2 vaults that use lowercase morpho() instead of MORPHO() */
+const morphoLowercaseAbi = [
+  {
+    inputs: [],
+    name: 'morpho',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'sentinel',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
 export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address) {
   const client = getPublicClient(chainId);
 
-  // Fetch fields common to both V1 and V2
-  const [name, symbol, asset, morpho, owner, curator, timelock, fee, totalAssets, totalSupply, lastTotalAssets, feeRecipient] =
-    await Promise.all([
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'MORPHO' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'fee' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalAssets' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalSupply' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'lastTotalAssets' }),
-      client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'feeRecipient' }),
-    ]);
-
+  // Detect version first — this determines which ABI calls to make
   const version = await detectVaultVersion(client, chainId, vaultAddress);
+
+  // Use multicall with allowFailure to handle V1/V2 ABI differences.
+  // ERC-4626 fields (name, symbol, asset, totalAssets, totalSupply) are common.
+  // MetaMorpho fields (owner, curator, timelock, fee, feeRecipient, lastTotalAssets) are common.
+  // MORPHO() is V1-only; morpho() is V2. guardian() is V1-only; sentinel() is V2.
+  const results = await client.multicall({
+    contracts: [
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' },             // 0
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' },            // 1
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' },             // 2
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'MORPHO' },            // 3 (V1)
+      { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'morpho' },         // 4 (V2)
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' },             // 5
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' },           // 6
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' },          // 7
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'fee' },               // 8
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalAssets' },       // 9
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalSupply' },       // 10
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'lastTotalAssets' },   // 11
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'feeRecipient' },      // 12
+      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'guardian' },          // 13 (V1)
+      { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'sentinel' },       // 14 (V2)
+    ],
+    allowFailure: true,
+  });
+
+  const ZERO = '0x0000000000000000000000000000000000000000' as Address;
+
+  // Extract results with safe fallbacks
+  const name = results[0].status === 'success' ? results[0].result : '';
+  const symbol = results[1].status === 'success' ? results[1].result : '';
+  const asset = results[2].status === 'success' ? results[2].result : ZERO;
+
+  // V1 uses MORPHO() (uppercase), V2 uses morpho() (lowercase)
+  const morphoV1 = results[3].status === 'success' ? results[3].result : null;
+  const morphoV2 = results[4].status === 'success' ? results[4].result : null;
+  const morphoBlue = (morphoV1 ?? morphoV2 ?? getChainConfig(chainId)?.morphoBlue ?? ZERO) as Address;
+
+  // Validate that we got at least a name — otherwise this isn't a valid vault
+  if (!name && results[0].status === 'failure') {
+    throw new Error(`Contract at ${vaultAddress} is not a valid MetaMorpho vault`);
+  }
+
+  const owner = results[5].status === 'success' ? results[5].result : ZERO;
+  const curator = results[6].status === 'success' ? results[6].result : ZERO;
+  const timelock = results[7].status === 'success' ? results[7].result : 0n;
+  const fee = results[8].status === 'success' ? results[8].result : 0n;
+  const totalAssets = results[9].status === 'success' ? results[9].result : 0n;
+  const totalSupply = results[10].status === 'success' ? results[10].result : 0n;
+  const lastTotalAssets = results[11].status === 'success' ? results[11].result : 0n;
+  const feeRecipient = results[12].status === 'success' ? results[12].result : ZERO;
 
   const base = {
     address: vaultAddress,
@@ -241,10 +294,10 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
     name,
     symbol,
     asset: asset as Address,
-    morphoBlue: morpho,
+    morphoBlue,
     owner,
     curator,
-    allocators: [] as Address[], // Populated separately — no on-chain enumeration
+    allocators: [] as Address[],
     timelock,
     fee,
     feeRecipient,
@@ -254,35 +307,23 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
   };
 
   if (version === 'v2') {
-    // V2-specific fields (sentinel, managementFee, adapters, gates) require V2 ABI reads.
-    // Currently returning stubs — V2 data will show placeholder values until implemented.
+    const sentinel = results[14].status === 'success' ? results[14].result as Address : ZERO;
     return {
       ...base,
       version: 'v2' as const,
-      sentinel: '0x0000000000000000000000000000000000000000' as Address,
+      sentinel,
       managementFee: 0n,
       adapters: [],
       gates: {
-        receiveShares: '0x0000000000000000000000000000000000000000' as Address,
-        sendShares: '0x0000000000000000000000000000000000000000' as Address,
-        receiveAssets: '0x0000000000000000000000000000000000000000' as Address,
-        sendAssets: '0x0000000000000000000000000000000000000000' as Address,
+        receiveShares: ZERO,
+        sendShares: ZERO,
+        receiveAssets: ZERO,
+        sendAssets: ZERO,
       },
     } satisfies VaultInfoV2;
   }
 
-  // V1: fetch guardian
-  let guardian: Address = '0x0000000000000000000000000000000000000000';
-  try {
-    guardian = await client.readContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'guardian',
-    });
-  } catch {
-    // guardian() failed — vault may use a non-standard ABI
-  }
-
+  const guardian = results[13].status === 'success' ? results[13].result as Address : ZERO;
   return {
     ...base,
     version: 'v1' as const,

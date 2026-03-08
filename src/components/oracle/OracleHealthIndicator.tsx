@@ -6,7 +6,7 @@ interface OracleHealthIndicatorProps {
 
 export function OracleHealthIndicator({ health }: OracleHealthIndicatorProps) {
   if (!health) {
-    return <span className="inline-block w-2 h-2 rounded-full bg-text-tertiary" title="Unknown" />;
+    return <span className="inline-block w-2 h-2 rounded-full bg-text-tertiary animate-pulse" title="Checking..." />;
   }
 
   if (health.isResponding) {

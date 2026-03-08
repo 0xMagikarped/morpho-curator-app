@@ -68,7 +68,12 @@ function OracleRow({
         {label && <p className="text-[10px] text-text-tertiary mt-0.5">{label}</p>}
       </div>
       <div className="flex items-center gap-2">
-        {health?.isResponding && (
+        {health && !health.isResponding && health.error && (
+          <span className="text-danger text-[10px] max-w-[120px] truncate" title={health.error}>
+            {health.error.length > 20 ? health.error.slice(0, 20) + '...' : health.error}
+          </span>
+        )}
+        {health?.latencyMs != null && health.latencyMs > 0 && (
           <span className="text-text-tertiary">{health.latencyMs}ms</span>
         )}
         {risk && <OracleRiskBadge grade={risk.grade} score={risk.overall} compact />}

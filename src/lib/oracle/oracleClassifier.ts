@@ -1,5 +1,6 @@
-import { createPublicClient, http, getAddress, type Address } from 'viem';
+import { getAddress, type Address, type PublicClient } from 'viem';
 import { getChainConfig } from '../../config/chains';
+import { getPublicClient } from '../data/rpcClient';
 import { oracleIntrospectionAbi } from '../contracts/abis';
 import type { OracleInfo, OracleType, OracleFeedInfo } from './oracleTypes';
 
@@ -37,9 +38,12 @@ export async function classifyOracle(
     return makeUnknown(chainId, oracleAddress);
   }
 
-  const client = createPublicClient({
-    transport: http(chainConfig.rpcUrls[0]),
-  });
+  let client: PublicClient;
+  try {
+    client = getPublicClient(chainId);
+  } catch {
+    return makeUnknown(chainId, oracleAddress);
+  }
 
   try {
     // Try introspection-based classification first (most accurate)
@@ -126,7 +130,7 @@ function makeUnknown(chainId: number, address: Address): OracleInfo {
 }
 
 async function classifyByIntrospection(
-  client: ReturnType<typeof createPublicClient>,
+  client: PublicClient,
   oracleAddress: Address,
 ): Promise<{ type: OracleType; label: string; feeds: Address[]; feedInfo: OracleFeedInfo } | null> {
   try {
