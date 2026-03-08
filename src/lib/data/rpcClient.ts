@@ -282,6 +282,15 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
     throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
 
+  // Validate this is actually a MetaMorpho vault, not just any ERC-4626 vault.
+  // MetaMorpho vaults must have MORPHO()/morpho() AND curator() AND timelock().
+  const hasMorphoRef = morphoV1 !== null || morphoV2 !== null;
+  const hasCurator = curator !== null;
+  const hasTimelock = timelock !== null;
+  if (!hasMorphoRef && !hasCurator && !hasTimelock) {
+    throw new Error(`${name} (${vaultAddress}) is not a MetaMorpho vault — missing MORPHO/curator/timelock functions`);
+  }
+
   const morphoBlue = morphoV1 ?? morphoV2 ?? getChainConfig(chainId)?.morphoBlue ?? ZERO;
 
   const base = {
