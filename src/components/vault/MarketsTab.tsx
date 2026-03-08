@@ -3,8 +3,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { UtilizationBar } from '../risk/UtilizationBar';
-import { useVaultInfo, useVaultAllocation, useVaultMarkets, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
-import { isApiSupportedChain } from '../../lib/data/morphoApi';
+import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { formatTokenAmount, formatPercent, truncateAddress } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
@@ -16,15 +15,8 @@ interface MarketsTabProps {
 export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
   const chainConfig = getChainConfig(chainId);
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
-  const useApi = isApiSupportedChain(chainId);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
-  const marketIds = allocation
-    ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
-    : undefined;
-  // For API-supported chains, markets come from the shared API query
-  const rpcMarkets = useVaultMarkets(chainId, marketIds);
-  const apiMarkets = useVaultMarketsFromApi(chainId, vaultAddress);
-  const { data: markets, isLoading: marketsLoading, error: marketsError } = useApi ? apiMarkets : rpcMarkets;
+  const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
 
   const isLoading = allocLoading || marketsLoading;
   const error = allocError || marketsError;

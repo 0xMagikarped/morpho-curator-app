@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import type { MarketId, AllocationState, MarketInfo, TokenInfo } from '../../types';
+import type { MarketId, AllocationState, MarketInfo, TokenInfo, VaultInfo } from '../../types';
 
 const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 
@@ -158,35 +158,13 @@ async function queryApi<T>(query: string, variables: Record<string, unknown>): P
 // ============================================================
 
 export interface ApiVaultData {
-  // Vault info (same shape as fetchVaultBasicInfo + fetchTokenInfo)
-  info: {
-    address: Address;
-    chainId: number;
-    name: string;
-    symbol: string;
-    asset: Address;
-    morphoBlue: Address;
-    owner: Address;
-    curator: Address;
-    allocators: Address[];
-    timelock: bigint;
-    fee: bigint;
-    feeRecipient: Address;
-    totalAssets: bigint;
-    totalSupply: bigint;
-    lastTotalAssets: bigint;
-    version: 'v1';
-    guardian: Address;
-    assetInfo: TokenInfo;
-  };
-  // Allocation data
+  info: VaultInfo & { assetInfo: TokenInfo };
   allocation: {
     supplyQueue: MarketId[];
     withdrawQueue: MarketId[];
     allocations: AllocationState[];
     totalAllocated: bigint;
   };
-  // Market info
   markets: MarketInfo[];
 }
 

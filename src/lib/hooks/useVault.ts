@@ -14,23 +14,114 @@ import {
   fetchPendingGuardian,
   checkIsAllocator,
 } from '../data/rpcClient';
-import { isApiSupportedChain, fetchVaultFromApi } from '../data/morphoApi';
+import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../data/morphoApi';
 import type { VaultRole, AllocationState, MarketInfo, PendingAction } from '../../types';
-import { getEmergencyRole } from '../../types';
+import type { VaultInfoV1 } from '../../types';
 import { calcUtilization } from '../utils/format';
 
 // ============================================================
-// Shared API data hook — single GraphQL query for supported chains
+// Shared: fetch full vault data (API with RPC fallback)
 // ============================================================
 
-function useVaultApiData(chainId: number | undefined, vaultAddress: Address | undefined) {
+/**
+ * Single query that fetches all vault data. For Ethereum/Base, uses the
+ * Morpho GraphQL API (1 request). Falls back to RPC on API failure or
+ * for unsupported chains (SEI).
+ */
+function useVaultFullData(chainId: number | undefined, vaultAddress: Address | undefined) {
   return useQuery({
-    queryKey: ['vault-api-data', chainId, vaultAddress],
-    queryFn: () => fetchVaultFromApi(chainId!, vaultAddress!),
-    enabled: !!chainId && !!vaultAddress && isApiSupportedChain(chainId),
+    queryKey: ['vault-full-data', chainId, vaultAddress],
+    queryFn: async (): Promise<ApiVaultData> => {
+      if (!chainId || !vaultAddress) throw new Error('Missing params');
+
+      // Try API first for supported chains
+      if (isApiSupportedChain(chainId)) {
+        try {
+          return await fetchVaultFromApi(chainId, vaultAddress);
+        } catch (apiError) {
+          console.warn('[useVaultFullData] API failed, falling back to RPC:', apiError);
+          // Fall through to RPC
+        }
+      }
+
+      // RPC fallback
+      return fetchVaultDataViaRpc(chainId, vaultAddress);
+    },
+    enabled: !!chainId && !!vaultAddress,
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
+}
+
+/** Fetch full vault data from RPC (used for SEI and as API fallback). */
+async function fetchVaultDataViaRpc(
+  chainId: number,
+  vaultAddress: Address,
+): Promise<ApiVaultData> {
+  const vaultInfo = await fetchVaultBasicInfo(chainId, vaultAddress);
+  const assetInfo = await fetchTokenInfo(chainId, vaultInfo.asset);
+
+  const queues = await fetchVaultQueues(chainId, vaultAddress, vaultInfo.version);
+  const allMarketIds = [
+    ...new Set([...queues.supplyQueue, ...queues.withdrawQueue]),
+  ];
+
+  // Fetch per-market data in parallel
+  const [allocations, markets] = await Promise.all([
+    Promise.all(
+      allMarketIds.map(async (marketId) => {
+        const [cap, state, position] = await Promise.all([
+          fetchMarketCap(chainId, vaultAddress, marketId),
+          fetchMarketState(chainId, marketId),
+          fetchVaultMarketPosition(chainId, vaultAddress, marketId),
+        ]);
+        const supplyAssets =
+          state.totalSupplyShares > 0n
+            ? (position.supplyShares * state.totalSupplyAssets) / state.totalSupplyShares
+            : 0n;
+        return {
+          marketId,
+          supplyAssets,
+          supplyCap: cap.cap,
+          availableLiquidity: state.totalSupplyAssets - state.totalBorrowAssets,
+        } as AllocationState;
+      }),
+    ),
+    Promise.all(
+      allMarketIds.map(async (id) => {
+        const [params, state] = await Promise.all([
+          fetchMarketParams(chainId, id),
+          fetchMarketState(chainId, id),
+        ]);
+        const [loanToken, collateralToken] = await Promise.all([
+          fetchTokenInfo(chainId, params.loanToken),
+          fetchTokenInfo(chainId, params.collateralToken),
+        ]);
+        return {
+          id,
+          params,
+          state,
+          loanToken,
+          collateralToken,
+          supplyAPY: 0,
+          borrowAPY: 0,
+          utilization: calcUtilization(state.totalBorrowAssets, state.totalSupplyAssets),
+        } as MarketInfo;
+      }),
+    ),
+  ]);
+
+  const info = { ...vaultInfo, assetInfo };
+
+  return {
+    info,
+    allocation: {
+      ...queues,
+      allocations,
+      totalAllocated: allocations.reduce((sum, a) => sum + a.supplyAssets, 0n),
+    },
+    markets,
+  };
 }
 
 // ============================================================
@@ -38,29 +129,11 @@ function useVaultApiData(chainId: number | undefined, vaultAddress: Address | un
 // ============================================================
 
 export function useVaultInfo(chainId: number | undefined, vaultAddress: Address | undefined) {
-  const useApi = !!chainId && isApiSupportedChain(chainId);
-  const apiQuery = useVaultApiData(chainId, vaultAddress);
-
-  const rpcQuery = useQuery({
-    queryKey: ['vault-info', chainId, vaultAddress],
-    queryFn: async () => {
-      if (!chainId || !vaultAddress) throw new Error('Missing params');
-      const info = await fetchVaultBasicInfo(chainId, vaultAddress);
-      const assetInfo = await fetchTokenInfo(chainId, info.asset);
-      return { ...info, assetInfo };
-    },
-    enabled: !!chainId && !!vaultAddress && !useApi,
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
-  if (useApi) {
-    return {
-      ...apiQuery,
-      data: apiQuery.data?.info,
-    };
-  }
-  return rpcQuery;
+  const query = useVaultFullData(chainId, vaultAddress);
+  return {
+    ...query,
+    data: query.data?.info,
+  };
 }
 
 // ============================================================
@@ -68,66 +141,15 @@ export function useVaultInfo(chainId: number | undefined, vaultAddress: Address 
 // ============================================================
 
 export function useVaultAllocation(chainId: number | undefined, vaultAddress: Address | undefined) {
-  const useApi = !!chainId && isApiSupportedChain(chainId);
-  const apiQuery = useVaultApiData(chainId, vaultAddress);
-
-  const rpcQuery = useQuery({
-    queryKey: ['vault-allocation', chainId, vaultAddress],
-    queryFn: async () => {
-      if (!chainId || !vaultAddress) throw new Error('Missing params');
-
-      const queues = await fetchVaultQueues(chainId, vaultAddress);
-
-      const allMarketIds = [
-        ...new Set([...queues.supplyQueue, ...queues.withdrawQueue]),
-      ];
-
-      const allocations: AllocationState[] = await Promise.all(
-        allMarketIds.map(async (marketId) => {
-          const [cap, state, position] = await Promise.all([
-            fetchMarketCap(chainId, vaultAddress, marketId),
-            fetchMarketState(chainId, marketId),
-            fetchVaultMarketPosition(chainId, vaultAddress, marketId),
-          ]);
-
-          const supplyAssets =
-            state.totalSupplyShares > 0n
-              ? (position.supplyShares * state.totalSupplyAssets) / state.totalSupplyShares
-              : 0n;
-
-          const availableLiquidity = state.totalSupplyAssets - state.totalBorrowAssets;
-
-          return {
-            marketId,
-            supplyAssets,
-            supplyCap: cap.cap,
-            availableLiquidity,
-          };
-        }),
-      );
-
-      return {
-        ...queues,
-        allocations,
-        totalAllocated: allocations.reduce((sum, a) => sum + a.supplyAssets, 0n),
-      };
-    },
-    enabled: !!chainId && !!vaultAddress && !useApi,
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
-  if (useApi) {
-    return {
-      ...apiQuery,
-      data: apiQuery.data?.allocation,
-    };
-  }
-  return rpcQuery;
+  const query = useVaultFullData(chainId, vaultAddress);
+  return {
+    ...query,
+    data: query.data?.allocation,
+  };
 }
 
 // ============================================================
-// useVaultMarkets
+// useVaultMarkets (RPC-only, for non-API chains)
 // ============================================================
 
 /**
@@ -180,17 +202,16 @@ export function useVaultMarkets(
 }
 
 /**
- * Combined hook for API-supported chains: returns markets from the shared API query.
- * Use this instead of useVaultMarkets when you have the vaultAddress.
+ * Returns markets from the shared full-data query (works for all chains).
  */
 export function useVaultMarketsFromApi(
   chainId: number | undefined,
   vaultAddress: Address | undefined,
 ) {
-  const apiQuery = useVaultApiData(chainId, vaultAddress);
+  const query = useVaultFullData(chainId, vaultAddress);
   return {
-    ...apiQuery,
-    data: apiQuery.data?.markets,
+    ...query,
+    data: query.data?.markets,
   };
 }
 
@@ -203,27 +224,38 @@ export function useVaultRole(
   vaultAddress: Address | undefined,
 ): VaultRole & { isLoading: boolean } {
   const { address: userAddress } = useAccount();
+  const fullData = useVaultFullData(chainId, vaultAddress);
 
   const { data, isLoading } = useQuery({
     queryKey: ['vault-role', chainId, vaultAddress, userAddress],
     queryFn: async () => {
-      if (!chainId || !vaultAddress || !userAddress) {
+      if (!chainId || !vaultAddress || !userAddress || !fullData.data) {
         return { isOwner: false, isCurator: false, isAllocator: false, isEmergencyRole: false };
       }
 
-      const info = await fetchVaultBasicInfo(chainId, vaultAddress);
-      const isAllocator = await checkIsAllocator(chainId, vaultAddress, userAddress);
+      const info = fullData.data.info;
+      // isAllocator requires an on-chain call (not available in API)
+      let isAllocator = false;
+      try {
+        isAllocator = await checkIsAllocator(chainId, vaultAddress, userAddress);
+      } catch {
+        // RPC call failed — skip allocator check
+      }
 
       const lowerUser = userAddress.toLowerCase();
-      const emergencyRoleAddr = getEmergencyRole(info);
+      const emergencyAddr = info.version === 'v1'
+        ? (info as VaultInfoV1).guardian
+        : info.version === 'v2'
+          ? info.sentinel
+          : ('0x0000000000000000000000000000000000000000' as Address);
       return {
         isOwner: info.owner.toLowerCase() === lowerUser,
         isCurator: info.curator.toLowerCase() === lowerUser,
         isAllocator,
-        isEmergencyRole: emergencyRoleAddr.toLowerCase() === lowerUser,
+        isEmergencyRole: emergencyAddr.toLowerCase() === lowerUser,
       };
     },
-    enabled: !!chainId && !!vaultAddress && !!userAddress,
+    enabled: !!chainId && !!vaultAddress && !!userAddress && !!fullData.data,
     staleTime: 60_000,
   });
 
