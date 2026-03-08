@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
-import { useVaultInfo, useVaultAllocation, useVaultMarkets, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
 import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { formatTokenAmount, formatCountdown, parseTokenAmount } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
@@ -19,11 +19,11 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const role = useVaultRole(chainId, vaultAddress);
-  const { data: allocation } = useVaultAllocation(chainId, vaultAddress);
+  const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
+  const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
   const marketIds = allocation
     ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
     : undefined;
-  const { data: markets } = useVaultMarkets(chainId, marketIds);
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
   const { writeContract, data: txHash, isPending } = useWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
@@ -76,6 +76,20 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
       args: [marketId],
     });
   };
+
+  if (allocLoading || marketsLoading) {
+    return <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 bg-bg-hover rounded animate-shimmer" />)}</div>;
+  }
+
+  if (allocError || marketsError) {
+    const err = allocError || marketsError;
+    return (
+      <Card className="py-8 text-center">
+        <p className="text-danger text-sm">Failed to load caps data</p>
+        <p className="text-text-tertiary text-xs mt-1">{err instanceof Error ? err.message : 'Data fetch failed.'}</p>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-4">

@@ -6,7 +6,7 @@ import { VaultOracleDashboard } from '../oracle/VaultOracleDashboard';
 import { RiskAlertBanner } from '../risk/RiskAlertBanner';
 import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
-import { useVaultInfo, useVaultRole, useVaultAllocation, useVaultMarkets } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultRole, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
 import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
@@ -20,16 +20,9 @@ interface OverviewTabProps {
 
 export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
   const chainConfig = getChainConfig(chainId);
-  const { data: vault, isLoading } = useVaultInfo(chainId, vaultAddress);
+  const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
-  const { data: allocation } = useVaultAllocation(chainId, vaultAddress);
-
-  const marketIds = useMemo(() => {
-    if (!allocation) return undefined;
-    return [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])];
-  }, [allocation]);
-
-  const { data: markets } = useVaultMarkets(chainId, marketIds);
+  const { data: markets } = useVaultMarketsFromApi(chainId, vaultAddress);
   const { data: sharePriceHistory } = useSharePriceHistory(chainId, vaultAddress);
 
   const oracleAddresses = useMemo(() => {
@@ -84,6 +77,17 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
 
   if (isLoading || !vault) {
     return <div className="animate-shimmer space-y-4"><div className="h-24 bg-bg-hover rounded" /><div className="h-24 bg-bg-hover rounded" /></div>;
+  }
+
+  if (error && !vault) {
+    return (
+      <Card className="py-8 text-center">
+        <p className="text-danger text-sm">Failed to load vault overview</p>
+        <p className="text-text-tertiary text-xs mt-1">
+          {error instanceof Error ? error.message : 'Data fetch failed — try refreshing.'}
+        </p>
+      </Card>
+    );
   }
 
   const sharePrice = calcSharePrice(vault.totalAssets, vault.totalSupply, vault.assetInfo.decimals);

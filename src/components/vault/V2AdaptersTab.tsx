@@ -1,7 +1,7 @@
 import type { Address } from 'viem';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { useVaultAllocation, useVaultMarkets } from '../../lib/hooks/useVault';
+import { useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { truncateAddress } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
@@ -12,14 +12,20 @@ interface V2AdaptersTabProps {
 
 export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
   const chainConfig = getChainConfig(chainId);
-  const { data: allocation, isLoading: allocLoading } = useVaultAllocation(chainId, vaultAddress);
-  const marketIds = allocation
-    ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
-    : undefined;
-  const { data: markets, isLoading: marketsLoading } = useVaultMarkets(chainId, marketIds);
+  const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
 
-  if (allocLoading || marketsLoading) {
+  if (marketsLoading) {
     return <div className="animate-shimmer h-32 bg-bg-hover rounded" />;
+  }
+
+  if (marketsError) {
+    const err = marketsError;
+    return (
+      <Card className="py-8 text-center">
+        <p className="text-danger text-sm">Failed to load adapters</p>
+        <p className="text-text-tertiary text-xs mt-1">{err instanceof Error ? err.message : 'Data fetch failed.'}</p>
+      </Card>
+    );
   }
 
   return (
