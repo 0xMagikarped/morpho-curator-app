@@ -21,6 +21,18 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
   const isLoading = allocLoading || marketsLoading;
   const error = allocError || marketsError;
 
+  // V2 vaults don't have direct market queues — they allocate through adapters
+  if (vault?.version === 'v2') {
+    return (
+      <Card className="py-8 text-center">
+        <p className="text-text-secondary text-sm">V2 vaults allocate through adapters, not direct market queues.</p>
+        <p className="text-text-tertiary text-xs mt-1">
+          Check the <span className="text-accent-primary font-medium">Adapters</span> tab to see allocation targets.
+        </p>
+      </Card>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-3">

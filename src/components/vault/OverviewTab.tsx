@@ -10,7 +10,7 @@ import { useVaultInfo, useVaultRole, useVaultMarketsFromApi } from '../../lib/ho
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
 import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
-import { getEmergencyRole, getEmergencyRoleLabel } from '../../types';
+import { getEmergencyRole } from '../../types';
 import type { RiskAlert } from '../../lib/risk/riskTypes';
 
 interface OverviewTabProps {
@@ -116,7 +116,13 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
           <InfoItem label="Asset" value={vault.assetInfo.symbol} />
           <InfoItem label="Decimals" value={vault.assetInfo.decimals.toString()} />
           <InfoItem label="Performance Fee" value={formatWadPercent(vault.fee)} />
-          <InfoItem label="Timelock" value={formatDuration(vault.timelock)} />
+          {vault.version === 'v2' && vault.managementFee > 0n && (
+            <InfoItem label="Management Fee" value={formatWadPercent(vault.managementFee)} />
+          )}
+          <InfoItem
+            label={vault.version === 'v2' ? 'Timelock' : 'Timelock'}
+            value={vault.version === 'v2' ? 'Per-function' : formatDuration(vault.timelock)}
+          />
           <div>
             <span className="text-[10px] text-text-tertiary uppercase">Share Price</span>
             <div className="flex items-center gap-2 mt-0.5">
@@ -175,13 +181,20 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
             isConnected={role.isCurator}
             isEmpty={isZeroAddr(vault.curator)}
           />
-          <RoleItem
-            label={getEmergencyRoleLabel(vault.version)}
-            address={getEmergencyRole(vault)}
-            explorerUrl={chainConfig?.blockExplorer}
-            isConnected={role.isEmergencyRole}
-            isEmpty={isZeroAddr(getEmergencyRole(vault))}
-          />
+          {vault.version === 'v1' ? (
+            <RoleItem
+              label="Guardian"
+              address={getEmergencyRole(vault)}
+              explorerUrl={chainConfig?.blockExplorer}
+              isConnected={role.isEmergencyRole}
+              isEmpty={isZeroAddr(getEmergencyRole(vault))}
+            />
+          ) : (
+            <div>
+              <span className="text-xs text-text-tertiary">Sentinel</span>
+              <p className="text-sm text-text-tertiary mt-0.5">Per-address (isSentinel)</p>
+            </div>
+          )}
           <div>
             <span className="text-xs text-text-tertiary">Fee Recipient</span>
             <p className="text-sm font-mono text-text-primary mt-0.5">

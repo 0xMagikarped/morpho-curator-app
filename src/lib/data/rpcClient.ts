@@ -437,6 +437,82 @@ export async function fetchVaultQueues(chainId: number, vaultAddress: Address, v
   };
 }
 
+/** ABI fragment for reading adapter contracts */
+const adapterAbi = [
+  { inputs: [], name: 'realAssets', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'name', outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'VAULT', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'MORPHO', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+] as const;
+
+export interface V2AdapterData {
+  address: Address;
+  realAssets: bigint;
+  name: string | null;
+  /** For vault adapters: the underlying V1 vault address */
+  underlyingVault: Address | null;
+  /** For market adapters: the Morpho Blue address */
+  morphoBlue: Address | null;
+  type: 'vault-v1' | 'market-v1' | 'unknown';
+}
+
+/**
+ * Fetch all adapters for a V2 vault, including their realAssets and type.
+ */
+export async function fetchV2Adapters(chainId: number, vaultAddress: Address): Promise<V2AdapterData[]> {
+  const client = getPublicClient(chainId);
+
+  // Read adaptersLength
+  const length = await safeRead<bigint>(client, {
+    address: vaultAddress,
+    abi: vaultV2Abi,
+    functionName: 'adaptersLength',
+  });
+
+  if (!length || length === 0n) return [];
+
+  // Read all adapter addresses
+  const adapterAddresses = await Promise.all(
+    Array.from({ length: Number(length) }, (_, i) =>
+      safeRead<Address>(client, {
+        address: vaultAddress,
+        abi: vaultV2Abi,
+        functionName: 'adapters',
+        args: [BigInt(i)],
+      }),
+    ),
+  );
+
+  // For each adapter, read realAssets + probe type (vault adapter vs market adapter)
+  const results = await Promise.all(
+    adapterAddresses
+      .filter((addr): addr is Address => addr !== null)
+      .map(async (addr) => {
+        const [realAssets, name, underlyingVault, morpho] = await Promise.all([
+          safeRead<bigint>(client, { address: addr, abi: adapterAbi, functionName: 'realAssets' }),
+          safeRead<string>(client, { address: addr, abi: adapterAbi, functionName: 'name' }),
+          safeRead<Address>(client, { address: addr, abi: adapterAbi, functionName: 'VAULT' }),
+          safeRead<Address>(client, { address: addr, abi: adapterAbi, functionName: 'MORPHO' }),
+        ]);
+
+        let type: V2AdapterData['type'] = 'unknown';
+        if (underlyingVault) type = 'vault-v1';
+        else if (morpho) type = 'market-v1';
+
+        return {
+          address: addr,
+          realAssets: realAssets ?? 0n,
+          name,
+          underlyingVault: underlyingVault ?? null,
+          morphoBlue: morpho ?? null,
+          type,
+        };
+      }),
+  );
+
+  return results;
+}
+
 export async function fetchMarketCap(
   chainId: number,
   vaultAddress: Address,

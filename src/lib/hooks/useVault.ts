@@ -4,6 +4,7 @@ import type { Address } from 'viem';
 import {
   fetchVaultBasicInfo,
   fetchVaultQueues,
+  fetchV2Adapters,
   fetchMarketCap,
   fetchPendingCap,
   fetchMarketState,
@@ -14,6 +15,7 @@ import {
   fetchPendingGuardian,
   checkIsAllocator,
 } from '../data/rpcClient';
+import type { V2AdapterData } from '../data/rpcClient';
 import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../data/morphoApi';
 import type { VaultRole, AllocationState, MarketInfo, PendingAction } from '../../types';
 import type { VaultInfoV1 } from '../../types';
@@ -213,6 +215,22 @@ export function useVaultMarketsFromApi(
     ...query,
     data: query.data?.markets,
   };
+}
+
+// ============================================================
+// useV2Adapters
+// ============================================================
+
+export function useV2Adapters(
+  chainId: number | undefined,
+  vaultAddress: Address | undefined,
+) {
+  return useQuery<V2AdapterData[]>({
+    queryKey: ['v2-adapters', chainId, vaultAddress],
+    queryFn: () => fetchV2Adapters(chainId!, vaultAddress!),
+    enabled: !!chainId && !!vaultAddress,
+    staleTime: 30_000,
+  });
 }
 
 // ============================================================
