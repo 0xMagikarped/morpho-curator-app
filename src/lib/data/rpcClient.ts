@@ -150,14 +150,49 @@ export async function fetchOraclePrice(
 // Vault reads
 // ============================================================
 
+/** ABI for V2 factory — uses isVaultV2() not isMetaMorpho() */
+const vaultV2FactoryAbi = [
+  {
+    inputs: [{ name: '', type: 'address' }],
+    name: 'isVaultV2',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+/** ABI fragment for reading V2 vault view functions */
+const vaultV2Abi = [
+  { inputs: [], name: 'curator', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'owner', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'adaptersLength', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: '', type: 'uint256' }], name: 'adapters', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: '', type: 'address' }], name: 'isAdapter', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: '', type: 'address' }], name: 'isSentinel', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: '', type: 'address' }], name: 'isAllocator', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'performanceFee', outputs: [{ name: '', type: 'uint96' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'managementFee', outputs: [{ name: '', type: 'uint96' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'performanceFeeRecipient', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'managementFeeRecipient', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'receiveSharesGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'sendSharesGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'receiveAssetsGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'sendAssetsGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'liquidityAdapter', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'name', outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'symbol', outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'asset', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'totalAssets', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'totalSupply', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
+] as const;
+
 /**
  * Detect vault version using per-chain factory addresses.
  *
  * Strategy:
- * 1. If the chain has a V1 factory, call isMetaMorpho(vault) on it.
- * 2. If the chain has a V2 factory, call isMetaMorpho(vault) on it.
- * 3. If no factory addresses are known (e.g., SEI), fall back to
- *    probing V2-specific function selectors (sentinel()).
+ * 1. If the chain has a V2 factory, call isVaultV2(vault) on it.
+ * 2. If the chain has a V1 factory, call isMetaMorpho(vault) on it.
+ * 3. Fallback: probe adaptersLength() — a V2-only function.
  * 4. Default to V1 if all checks fail.
  */
 async function detectVaultVersion(
@@ -168,22 +203,22 @@ async function detectVaultVersion(
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) return 'v1';
 
-  // Try V2 factory first — if it recognizes this vault, it's V2
+  // Try V2 factory first — uses isVaultV2() (NOT isMetaMorpho)
   if (chainConfig.vaultFactories.v2) {
     try {
       const isV2 = await client.readContract({
         address: chainConfig.vaultFactories.v2,
-        abi: metaMorphoFactoryAbi,
-        functionName: 'isMetaMorpho',
+        abi: vaultV2FactoryAbi,
+        functionName: 'isVaultV2',
         args: [vaultAddress],
       });
       if (isV2) return 'v2';
     } catch {
-      // Factory call failed — factory may not have isMetaMorpho, continue
+      // Factory call failed, continue
     }
   }
 
-  // Try V1 factory — if it recognizes this vault, it's V1
+  // Try V1 factory — uses isMetaMorpho()
   if (chainConfig.vaultFactories.v1) {
     try {
       const isV1 = await client.readContract({
@@ -198,38 +233,18 @@ async function detectVaultVersion(
     }
   }
 
-  // Fallback: No factory addresses known (e.g., SEI).
-  // Probe for V2-specific function: sentinel() selector = 0x2a26417d
-  // If it returns without reverting, it's V2.
+  // Fallback: probe adaptersLength() — V2-only function
   try {
-    await client.call({
-      to: vaultAddress,
-      data: '0x2a26417d', // sentinel()
+    await client.readContract({
+      address: vaultAddress,
+      abi: vaultV2Abi,
+      functionName: 'adaptersLength',
     });
     return 'v2';
   } catch {
-    // sentinel() reverted — this is a V1 vault
     return 'v1';
   }
 }
-
-/** ABI fragment for V2 vaults that use lowercase morpho() instead of MORPHO() */
-const morphoLowercaseAbi = [
-  {
-    inputs: [],
-    name: 'morpho',
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'sentinel',
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-] as const;
 
 /** Safe readContract that returns null on failure instead of throwing */
 async function safeRead<T>(
@@ -245,26 +260,25 @@ async function safeRead<T>(
 
 export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address) {
   const client = getPublicClient(chainId);
-
-  // Detect version first — this determines which ABI calls to make
   const version = await detectVaultVersion(client, chainId, vaultAddress);
-
   const ZERO = '0x0000000000000000000000000000000000000000' as Address;
 
-  // Use Promise.allSettled with individual reads — each can fail independently.
-  // This works on all chains (no multicall3 dependency).
+  if (version === 'v2') {
+    return fetchV2VaultInfo(client, chainId, vaultAddress, ZERO);
+  }
+  return fetchV1VaultInfo(client, chainId, vaultAddress, ZERO);
+}
+
+/** Fetch V1 MetaMorpho vault info */
+async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddress: Address, ZERO: Address) {
   const [
-    name, symbol, asset,
-    morphoV1, morphoV2,
-    owner, curator, timelock, fee,
-    totalAssets, totalSupply, lastTotalAssets,
-    feeRecipient, guardian, sentinel,
+    name, symbol, asset, morpho, owner, curator, timelock, fee,
+    totalAssets, totalSupply, lastTotalAssets, feeRecipient, guardian,
   ] = await Promise.all([
     safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' }),
     safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'MORPHO' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'morpho' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' }),
     safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' }),
@@ -274,32 +288,19 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
     safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'lastTotalAssets' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'feeRecipient' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'guardian' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'sentinel' }),
   ]);
 
-  // Validate that we got at least a name — otherwise this isn't a valid vault
   if (!name) {
     throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
 
-  // Validate this is actually a MetaMorpho vault, not just any ERC-4626 vault.
-  // MetaMorpho vaults must have MORPHO()/morpho() AND curator() AND timelock().
-  const hasMorphoRef = morphoV1 !== null || morphoV2 !== null;
-  const hasCurator = curator !== null;
-  const hasTimelock = timelock !== null;
-  if (!hasMorphoRef && !hasCurator && !hasTimelock) {
-    throw new Error(`${name} (${vaultAddress}) is not a MetaMorpho vault — missing MORPHO/curator/timelock functions`);
-  }
-
-  const morphoBlue = morphoV1 ?? morphoV2 ?? getChainConfig(chainId)?.morphoBlue ?? ZERO;
-
-  const base = {
+  return {
     address: vaultAddress,
     chainId,
     name,
     symbol: symbol ?? '',
     asset: asset ?? ZERO,
-    morphoBlue,
+    morphoBlue: morpho ?? getChainConfig(chainId)?.morphoBlue ?? ZERO,
     owner: owner ?? ZERO,
     curator: curator ?? ZERO,
     allocators: [] as Address[],
@@ -309,29 +310,75 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
     totalAssets: totalAssets ?? 0n,
     totalSupply: totalSupply ?? 0n,
     lastTotalAssets: lastTotalAssets ?? 0n,
-  };
-
-  if (version === 'v2') {
-    return {
-      ...base,
-      version: 'v2' as const,
-      sentinel: sentinel ?? ZERO,
-      managementFee: 0n,
-      adapters: [],
-      gates: {
-        receiveShares: ZERO,
-        sendShares: ZERO,
-        receiveAssets: ZERO,
-        sendAssets: ZERO,
-      },
-    } satisfies VaultInfoV2;
-  }
-
-  return {
-    ...base,
     version: 'v1' as const,
     guardian: guardian ?? ZERO,
   };
+}
+
+/** Fetch V2 vault info — completely different interface from V1 */
+async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddress: Address, ZERO: Address) {
+  const [
+    name, symbol, asset, owner, curator,
+    totalAssets, totalSupply,
+    performanceFee, managementFee,
+    performanceFeeRecipient, managementFeeRecipient,
+    adaptersLength,
+    receiveSharesGate, sendSharesGate, receiveAssetsGate, sendAssetsGate,
+  ] = await Promise.all([
+    safeRead<string>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'name' }),
+    safeRead<string>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'symbol' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'asset' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'owner' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'curator' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'totalAssets' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'totalSupply' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'performanceFee' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'managementFee' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'performanceFeeRecipient' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'managementFeeRecipient' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'adaptersLength' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'receiveSharesGate' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'sendSharesGate' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'receiveAssetsGate' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'sendAssetsGate' }),
+  ]);
+
+  if (!name) {
+    throw new Error(`Contract at ${vaultAddress} is not a Morpho V2 vault (name() failed)`);
+  }
+
+  return {
+    address: vaultAddress,
+    chainId,
+    name,
+    symbol: symbol ?? '',
+    asset: asset ?? ZERO,
+    morphoBlue: getChainConfig(chainId)?.morphoBlue ?? ZERO,
+    owner: owner ?? ZERO,
+    curator: curator ?? ZERO,
+    allocators: [] as Address[],
+    // V2 has per-function timelocks, no single timelock value
+    timelock: 0n,
+    // V2 uses performanceFee (not fee)
+    fee: performanceFee ?? 0n,
+    feeRecipient: performanceFeeRecipient ?? ZERO,
+    totalAssets: totalAssets ?? 0n,
+    totalSupply: totalSupply ?? 0n,
+    lastTotalAssets: 0n, // V2 doesn't have lastTotalAssets
+    version: 'v2' as const,
+    // V2-specific: sentinel is checked per-address, not a single address
+    sentinel: ZERO,
+    managementFee: managementFee ?? 0n,
+    managementFeeRecipient: managementFeeRecipient ?? ZERO,
+    adapters: [],
+    adaptersLength: Number(adaptersLength ?? 0n),
+    gates: {
+      receiveShares: receiveSharesGate ?? ZERO,
+      sendShares: sendSharesGate ?? ZERO,
+      receiveAssets: receiveAssetsGate ?? ZERO,
+      sendAssets: sendAssetsGate ?? ZERO,
+    },
+  } satisfies VaultInfoV2;
 }
 
 /**

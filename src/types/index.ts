@@ -95,12 +95,15 @@ export interface VaultInfoV1 extends VaultInfoBase {
   guardian: Address;
 }
 
-/** V2 vault — uses adapters, sentinel, gates, management fee */
+/** V2 vault — uses adapters, per-address sentinels, gates, dual fee model */
 export interface VaultInfoV2 extends VaultInfoBase {
   version: 'v2';
+  /** V2 has isSentinel(address) not a single sentinel — this is ZERO */
   sentinel: Address;
   managementFee: bigint;
+  managementFeeRecipient: Address;
   adapters: AdapterInfo[];
+  adaptersLength: number;
   gates: GateConfig;
 }
 
