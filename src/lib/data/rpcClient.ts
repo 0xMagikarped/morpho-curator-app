@@ -231,87 +231,82 @@ const morphoLowercaseAbi = [
   },
 ] as const;
 
+/** Safe readContract that returns null on failure instead of throwing */
+async function safeRead<T>(
+  client: PublicClient,
+  params: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] },
+): Promise<T | null> {
+  try {
+    return await client.readContract(params as any) as T;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address) {
   const client = getPublicClient(chainId);
 
   // Detect version first — this determines which ABI calls to make
   const version = await detectVaultVersion(client, chainId, vaultAddress);
 
-  // Use multicall with allowFailure to handle V1/V2 ABI differences.
-  // ERC-4626 fields (name, symbol, asset, totalAssets, totalSupply) are common.
-  // MetaMorpho fields (owner, curator, timelock, fee, feeRecipient, lastTotalAssets) are common.
-  // MORPHO() is V1-only; morpho() is V2. guardian() is V1-only; sentinel() is V2.
-  const results = await client.multicall({
-    contracts: [
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' },             // 0
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' },            // 1
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' },             // 2
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'MORPHO' },            // 3 (V1)
-      { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'morpho' },         // 4 (V2)
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' },             // 5
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' },           // 6
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' },          // 7
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'fee' },               // 8
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalAssets' },       // 9
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalSupply' },       // 10
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'lastTotalAssets' },   // 11
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'feeRecipient' },      // 12
-      { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'guardian' },          // 13 (V1)
-      { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'sentinel' },       // 14 (V2)
-    ],
-    allowFailure: true,
-  });
-
   const ZERO = '0x0000000000000000000000000000000000000000' as Address;
 
-  // Extract results with safe fallbacks
-  const name = results[0].status === 'success' ? results[0].result : '';
-  const symbol = results[1].status === 'success' ? results[1].result : '';
-  const asset = results[2].status === 'success' ? results[2].result : ZERO;
-
-  // V1 uses MORPHO() (uppercase), V2 uses morpho() (lowercase)
-  const morphoV1 = results[3].status === 'success' ? results[3].result : null;
-  const morphoV2 = results[4].status === 'success' ? results[4].result : null;
-  const morphoBlue = (morphoV1 ?? morphoV2 ?? getChainConfig(chainId)?.morphoBlue ?? ZERO) as Address;
+  // Use Promise.allSettled with individual reads — each can fail independently.
+  // This works on all chains (no multicall3 dependency).
+  const [
+    name, symbol, asset,
+    morphoV1, morphoV2,
+    owner, curator, timelock, fee,
+    totalAssets, totalSupply, lastTotalAssets,
+    feeRecipient, guardian, sentinel,
+  ] = await Promise.all([
+    safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' }),
+    safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'MORPHO' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'morpho' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'fee' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalAssets' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalSupply' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'lastTotalAssets' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'feeRecipient' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'guardian' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: morphoLowercaseAbi, functionName: 'sentinel' }),
+  ]);
 
   // Validate that we got at least a name — otherwise this isn't a valid vault
-  if (!name && results[0].status === 'failure') {
-    throw new Error(`Contract at ${vaultAddress} is not a valid MetaMorpho vault`);
+  if (!name) {
+    throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
 
-  const owner = results[5].status === 'success' ? results[5].result : ZERO;
-  const curator = results[6].status === 'success' ? results[6].result : ZERO;
-  const timelock = results[7].status === 'success' ? results[7].result : 0n;
-  const fee = results[8].status === 'success' ? results[8].result : 0n;
-  const totalAssets = results[9].status === 'success' ? results[9].result : 0n;
-  const totalSupply = results[10].status === 'success' ? results[10].result : 0n;
-  const lastTotalAssets = results[11].status === 'success' ? results[11].result : 0n;
-  const feeRecipient = results[12].status === 'success' ? results[12].result : ZERO;
+  const morphoBlue = morphoV1 ?? morphoV2 ?? getChainConfig(chainId)?.morphoBlue ?? ZERO;
 
   const base = {
     address: vaultAddress,
     chainId,
     name,
-    symbol,
-    asset: asset as Address,
+    symbol: symbol ?? '',
+    asset: asset ?? ZERO,
     morphoBlue,
-    owner,
-    curator,
+    owner: owner ?? ZERO,
+    curator: curator ?? ZERO,
     allocators: [] as Address[],
-    timelock,
-    fee,
-    feeRecipient,
-    totalAssets,
-    totalSupply,
-    lastTotalAssets,
+    timelock: timelock ?? 0n,
+    fee: fee ?? 0n,
+    feeRecipient: feeRecipient ?? ZERO,
+    totalAssets: totalAssets ?? 0n,
+    totalSupply: totalSupply ?? 0n,
+    lastTotalAssets: lastTotalAssets ?? 0n,
   };
 
   if (version === 'v2') {
-    const sentinel = results[14].status === 'success' ? results[14].result as Address : ZERO;
     return {
       ...base,
       version: 'v2' as const,
-      sentinel,
+      sentinel: sentinel ?? ZERO,
       managementFee: 0n,
       adapters: [],
       gates: {
@@ -323,11 +318,10 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
     } satisfies VaultInfoV2;
   }
 
-  const guardian = results[13].status === 'success' ? results[13].result as Address : ZERO;
   return {
     ...base,
     version: 'v1' as const,
-    guardian,
+    guardian: guardian ?? ZERO,
   };
 }
 
