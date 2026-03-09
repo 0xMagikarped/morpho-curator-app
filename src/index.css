@@ -92,3 +92,18 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
+/* Badge pulse for at-risk states */
+@keyframes badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer,
+  [class*="animate-"] {
+    animation: none !important;
+    transition: none !important;
+  }
+}

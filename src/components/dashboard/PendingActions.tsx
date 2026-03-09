@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Clock } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { formatCountdown } from '../../lib/utils/format';
@@ -20,40 +21,49 @@ export function PendingActions({ actions }: PendingActionsProps) {
   }, [actions.length]);
 
   if (actions.length === 0) {
-    return null;
+    return (
+      <Card className="!p-3">
+        <CardHeader className="!mb-2">
+          <CardTitle>Pending Actions</CardTitle>
+          <Badge variant="success">None</Badge>
+        </CardHeader>
+        <div className="flex flex-col items-center justify-center py-4 gap-2">
+          <Clock size={16} className="text-text-tertiary" />
+          <p className="text-xs text-text-tertiary">No timelocked actions pending</p>
+        </div>
+      </Card>
+    );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Pending Timelocked Actions</CardTitle>
+    <Card className="!p-3">
+      <CardHeader className="!mb-2">
+        <CardTitle>Pending Actions</CardTitle>
         <Badge variant="warning">{actions.length}</Badge>
       </CardHeader>
-      <div className="space-y-2">
+      <div className="space-y-0">
         {actions.map((action, i) => {
           const isReady = action.validAt > 0n && action.validAt <= nowSeconds;
 
           return (
             <div
               key={i}
-              className="flex items-center justify-between py-2 px-3 bg-bg-hover/30 rounded text-xs"
+              className="flex items-center justify-between py-2 border-b border-border-subtle/30 last:border-0 text-xs"
             >
-              <div>
-                <div className="flex items-center gap-2">
-                  {action.vaultName && (
-                    <span className="text-text-tertiary">{action.vaultName}</span>
-                  )}
-                  <Badge variant={isReady ? 'success' : 'warning'}>
-                    {action.type}
-                  </Badge>
-                  <span className="text-text-primary">{action.description}</span>
-                </div>
+              <div className="flex items-center gap-2 min-w-0">
+                {action.vaultName && (
+                  <span className="text-text-tertiary truncate max-w-[100px]">{action.vaultName}</span>
+                )}
+                <Badge variant={isReady ? 'success' : 'warning'} className="text-[10px]">
+                  {action.type}
+                </Badge>
+                <span className="text-text-primary truncate">{action.description}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0 ml-2">
                 {isReady ? (
-                  <Badge variant="success">Ready</Badge>
+                  <Badge variant="success" className="text-[10px]">Ready</Badge>
                 ) : action.validAt > 0n ? (
-                  <span className="text-text-tertiary">
+                  <span className="text-text-tertiary font-mono text-[11px]">
                     {formatCountdown(action.validAt)}
                   </span>
                 ) : null}
