@@ -99,6 +99,16 @@ body {
   50% { transform: scale(1.05); }
 }
 
+/* Drawer animations */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer,

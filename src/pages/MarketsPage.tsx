@@ -1,41 +1,67 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Address } from 'viem';
-import { Card, CardHeader, CardTitle } from '../components/ui/Card';
+import {
+  Search,
+  ChevronUp,
+  ChevronDown,
+  Eye,
+  RefreshCw,
+  Filter,
+  AlertCircle,
+  X,
+} from 'lucide-react';
+import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { ProgressBar } from '../components/ui/ProgressBar';
-import { MarketDetail } from '../components/market/MarketDetail';
+import { Drawer } from '../components/ui/Drawer';
 import { OracleHealthIndicator } from '../components/oracle/OracleHealthIndicator';
+import { MarketDrawerContent } from '../components/market/MarketDrawerContent';
+import { MarketSearchOverlay } from '../components/market/MarketSearchOverlay';
 import { getChainConfig, getSupportedChainIds } from '../config/chains';
 import { truncateAddress, formatWadPercent } from '../lib/utils/format';
 import { useMarketScanner, useScannerState } from '../lib/hooks/useMarketScanner';
 import { useOracleHealthBatch } from '../lib/hooks/useOracle';
+import { cn } from '../lib/utils/cn';
 import type { MarketRecord } from '../lib/indexer/indexedDB';
 
-type SortKey = 'loanToken' | 'collateral' | 'lltv';
+type SortKey = 'market' | 'collateral' | 'lltv' | 'oracle';
+type SortDir = 'asc' | 'desc';
 
 export function MarketsPage() {
-  // Default to SEI (1329) — the primary target chain
   const [selectedChainId, setSelectedChainId] = useState<number>(1329);
-  const [loanTokenFilter, setLoanTokenFilter] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('loanToken');
-  const [expandedMarketId, setExpandedMarketId] = useState<`0x${string}` | null>(null);
+  const [selectedTokens, setSelectedTokens] = useState<string[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>('market');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [drawerMarket, setDrawerMarket] = useState<MarketRecord | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
 
-  const chainConfig = getChainConfig(selectedChainId);
   const supportedChains = getSupportedChainIds();
 
   const {
     data: markets,
     isLoading,
     isFetching,
+    error,
     scanProgress,
     rescan,
     isApiChain,
   } = useMarketScanner(selectedChainId);
 
-  const { data: scannerState } = useScannerState(selectedChainId);
+  useScannerState(selectedChainId);
 
-  // Get unique oracle addresses for batch health check
+  // Cmd+K shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Oracle health
   const oracleAddresses = useMemo(() => {
     if (!markets) return undefined;
     const addrs = new Set<Address>();
@@ -49,7 +75,7 @@ export function MarketsPage() {
 
   const { data: oracleHealthMap } = useOracleHealthBatch(selectedChainId, oracleAddresses);
 
-  // Compute unique loan tokens for filter dropdown
+  // Unique loan tokens for filter chips
   const loanTokenOptions = useMemo(() => {
     if (!markets) return [];
     const tokens = new Map<string, string>();
@@ -59,10 +85,7 @@ export function MarketsPage() {
         tokens.set(addr, m.loanTokenSymbol ?? truncateAddress(m.loanToken));
       }
     }
-    return Array.from(tokens.entries()).map(([addr, label]) => ({
-      address: addr,
-      label,
-    }));
+    return Array.from(tokens.entries()).map(([addr, label]) => ({ address: addr, label }));
   }, [markets]);
 
   // Filter and sort
@@ -70,33 +93,57 @@ export function MarketsPage() {
     if (!markets) return [];
     let result = [...markets];
 
-    if (loanTokenFilter) {
-      result = result.filter(
-        (m) => m.loanToken.toLowerCase() === loanTokenFilter.toLowerCase(),
+    if (selectedTokens.length > 0) {
+      result = result.filter((m) =>
+        selectedTokens.includes(m.loanToken.toLowerCase()),
       );
     }
 
     result.sort((a, b) => {
+      let cmp = 0;
       switch (sortKey) {
-        case 'loanToken':
-          return (a.loanTokenSymbol ?? a.loanToken).localeCompare(
-            b.loanTokenSymbol ?? b.loanToken,
-          );
+        case 'market':
+          cmp = (a.loanTokenSymbol ?? a.loanToken).localeCompare(b.loanTokenSymbol ?? b.loanToken);
+          break;
         case 'collateral':
-          return (a.collateralTokenSymbol ?? a.collateralToken).localeCompare(
-            b.collateralTokenSymbol ?? b.collateralToken,
-          );
+          cmp = (a.collateralTokenSymbol ?? a.collateralToken).localeCompare(b.collateralTokenSymbol ?? b.collateralToken);
+          break;
         case 'lltv':
-          return Number(BigInt(b.lltv) - BigInt(a.lltv));
+          cmp = Number(BigInt(b.lltv) - BigInt(a.lltv));
+          break;
         default:
-          return 0;
+          cmp = 0;
       }
+      return sortDir === 'desc' ? -cmp : cmp;
     });
 
     return result;
-  }, [markets, loanTokenFilter, sortKey]);
+  }, [markets, selectedTokens, sortKey, sortDir]);
 
-  // Scanner progress percentage (for RPC-only chains)
+  const toggleSort = useCallback((key: SortKey) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        return prev;
+      }
+      setSortDir('asc');
+      return key;
+    });
+  }, []);
+
+  const toggleToken = (addr: string) => {
+    setSelectedTokens((prev) =>
+      prev.includes(addr) ? prev.filter((a) => a !== addr) : [...prev, addr],
+    );
+  };
+
+  const clearFilters = () => {
+    setSelectedTokens([]);
+  };
+
+  const hasFilters = selectedTokens.length > 0;
+
+  // Scan progress
   const scanPercent = useMemo(() => {
     if (!scanProgress || scanProgress.isComplete) return 100;
     const total = scanProgress.toBlock - scanProgress.fromBlock;
@@ -105,224 +152,336 @@ export function MarketsPage() {
     return Math.round((done / total) * 100);
   }, [scanProgress]);
 
+  const isScanning = isFetching && !scanProgress?.isComplete;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
-      {/* Header */}
+    <div className="max-w-6xl mx-auto space-y-4">
+      {/* ── PAGE HEADER ── */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-text-primary">Market Scanner</h1>
-          <p className="text-sm text-text-tertiary mt-0.5">
-            Discover Morpho Blue markets on-chain
-          </p>
-        </div>
         <div className="flex items-center gap-3">
-          <Badge variant={isApiChain ? 'success' : 'info'}>
-            {isApiChain ? 'API' : 'RPC'}
-          </Badge>
-          <select
-            value={selectedChainId}
-            onChange={(e) => {
-              setSelectedChainId(Number(e.target.value));
-              setExpandedMarketId(null);
-              setLoanTokenFilter('');
-            }}
-            className="bg-bg-hover border border-border-default rounded px-3 py-1.5 text-sm text-text-primary"
-          >
-            {supportedChains.map((id) => {
-              const cfg = getChainConfig(id);
-              return (
-                <option key={id} value={id}>
-                  {cfg?.name ?? `Chain ${id}`}
-                </option>
-              );
-            })}
-          </select>
+          <h1 className="text-xl font-bold text-text-primary">Markets</h1>
+          {markets && (
+            <Badge>{markets.length} market{markets.length !== 1 ? 's' : ''}</Badge>
+          )}
         </div>
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-bg-hover border border-border-subtle rounded text-xs text-text-tertiary hover:text-text-secondary hover:border-border-default transition-colors min-h-[36px]"
+          aria-label="Search markets"
+        >
+          <Search size={14} />
+          <span>Search...</span>
+          <kbd className="text-[10px] bg-bg-surface px-1.5 py-0.5 rounded font-mono ml-2">⌘K</kbd>
+        </button>
       </div>
 
-      {/* Scanner Status */}
-      {!isApiChain && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Scanner Status</CardTitle>
-            {isFetching && !scanProgress?.isComplete && (
-              <Badge variant="warning">Scanning...</Badge>
-            )}
-            {scanProgress?.isComplete && (
-              <Badge variant="success">Complete</Badge>
-            )}
-          </CardHeader>
-          <div className="space-y-2">
-            <ProgressBar value={scanPercent} variant="default" />
-            <div className="flex justify-between text-xs text-text-tertiary">
-              <span>
-                {scanProgress
-                  ? `Block ${scanProgress.currentBlock.toLocaleString()} / ${scanProgress.toBlock.toLocaleString()}`
-                  : scannerState
-                    ? `Last scanned: block ${scannerState.lastScannedBlock.toLocaleString()}`
-                    : 'Not scanned yet'}
-              </span>
-              <span>
-                Markets found: {markets?.length ?? scannerState?.totalMarketsFound ?? 0}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={rescan}
-                loading={isFetching}
-              >
-                Full Rescan
-              </Button>
-            </div>
+      {/* ── FILTER BAR ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Chain selector */}
+        <select
+          value={selectedChainId}
+          onChange={(e) => {
+            setSelectedChainId(Number(e.target.value));
+            setDrawerMarket(null);
+            clearFilters();
+          }}
+          className="bg-bg-hover border border-border-subtle rounded px-2 py-1.5 text-xs text-text-primary font-mono"
+          disabled={isLoading}
+        >
+          {supportedChains.map((id) => {
+            const cfg = getChainConfig(id);
+            return (
+              <option key={id} value={id}>
+                {cfg?.name ?? `Chain ${id}`}
+              </option>
+            );
+          })}
+        </select>
+
+        {/* Token filter chips */}
+        {loanTokenOptions.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {loanTokenOptions.map((opt) => {
+              const isActive = selectedTokens.includes(opt.address);
+              return (
+                <button
+                  key={opt.address}
+                  onClick={() => toggleToken(opt.address)}
+                  disabled={isLoading}
+                  className={cn(
+                    'inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors border',
+                    isActive
+                      ? 'bg-bg-active border-accent-primary/30 text-accent-primary'
+                      : 'bg-transparent border-border-subtle text-text-secondary hover:border-border-default',
+                  )}
+                >
+                  {opt.label}
+                  {isActive && <X size={10} />}
+                </button>
+              );
+            })}
           </div>
-        </Card>
-      )}
+        )}
 
-      {/* Filters */}
-      <div className="flex gap-3 items-center">
-        <select
-          value={loanTokenFilter}
-          onChange={(e) => setLoanTokenFilter(e.target.value)}
-          className="bg-bg-hover border border-border-default rounded px-3 py-1.5 text-sm text-text-primary"
+        {/* Source badge */}
+        <Badge variant={isApiChain ? 'success' : 'info'} className="text-[10px]">
+          {isApiChain ? 'API' : 'RPC'}
+        </Badge>
+
+        {/* Rescan */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={rescan}
+          loading={isFetching}
+          className="text-[11px]"
         >
-          <option value="">All loan tokens</option>
-          {loanTokenOptions.map((opt) => (
-            <option key={opt.address} value={opt.address}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          <RefreshCw size={12} className={cn('mr-1', isScanning && 'animate-spin')} />
+          Rescan
+        </Button>
 
-        <select
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as SortKey)}
-          className="bg-bg-hover border border-border-default rounded px-3 py-1.5 text-sm text-text-primary"
-        >
-          <option value="loanToken">Sort: Loan Token</option>
-          <option value="collateral">Sort: Collateral</option>
-          <option value="lltv">Sort: LLTV</option>
-        </select>
+        {/* Clear filters */}
+        {hasFilters && (
+          <button
+            onClick={clearFilters}
+            className="text-xs font-mono text-text-tertiary hover:text-text-secondary transition-colors"
+          >
+            Clear filters
+          </button>
+        )}
 
-        <span className="text-xs text-text-tertiary ml-auto">
-          {filteredMarkets.length} market{filteredMarkets.length !== 1 ? 's' : ''}
+        {/* Count */}
+        <span className="text-[11px] text-text-tertiary ml-auto font-mono">
+          Showing {filteredMarkets.length} of {markets?.length ?? 0}
         </span>
       </div>
 
-      {/* Markets Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Markets</CardTitle>
-          {chainConfig && (
-            <span className="text-xs text-text-tertiary">
-              {chainConfig.name} &middot; Morpho Blue {truncateAddress(chainConfig.morphoBlue)}
-            </span>
-          )}
-        </CardHeader>
+      {/* ── SCAN PROGRESS ── */}
+      {isScanning && (
+        <div className="h-0.5 w-full bg-bg-hover rounded-full overflow-hidden">
+          <div
+            className="h-full bg-accent-primary transition-all duration-300 rounded-full"
+            style={{ width: `${scanPercent}%` }}
+          />
+        </div>
+      )}
 
-        {isLoading ? (
-          <div className="text-text-tertiary text-sm animate-shimmer py-8 text-center">
-            Loading markets...
-          </div>
-        ) : filteredMarkets.length === 0 ? (
-          <div className="text-text-tertiary text-sm py-8 text-center">
-            {markets?.length === 0
-              ? 'No markets found. Try running a full scan.'
-              : 'No markets match the current filter.'}
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {/* Header row */}
-            <div className="grid grid-cols-12 gap-2 text-[10px] uppercase text-text-tertiary px-3 py-1">
-              <div className="col-span-3">Loan Token</div>
-              <div className="col-span-3">Collateral</div>
-              <div className="col-span-2">LLTV</div>
-              <div className="col-span-2">Oracle</div>
-              <div className="col-span-2">Block</div>
-            </div>
-
-            {filteredMarkets.map((market) => (
-              <MarketRow
-                key={market.marketId}
-                market={market}
-                chainId={selectedChainId}
-                isExpanded={expandedMarketId === market.marketId}
-                oracleHealth={oracleHealthMap?.get(market.oracle as Address) ?? null}
-                onToggle={() =>
-                  setExpandedMarketId(
-                    expandedMarketId === market.marketId ? null : market.marketId,
-                  )
-                }
-              />
-            ))}
+      {/* ── TABLE ── */}
+      <Card className="!p-0 overflow-hidden">
+        {/* Error state */}
+        {error && (
+          <div className="flex items-center gap-2 px-3 py-3 bg-danger/10 border-b border-danger/20 text-xs text-danger">
+            <AlertCircle size={14} />
+            <span className="flex-1">{error instanceof Error ? error.message : 'Failed to load markets'}</span>
+            <Button variant="ghost" size="sm" onClick={rescan} className="text-danger text-[11px]">
+              Retry
+            </Button>
           </div>
         )}
+
+        {/* Loading state */}
+        {isLoading ? (
+          <div className="divide-y divide-border-subtle/30">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-3">
+                <div className="h-4 w-24 bg-bg-hover rounded animate-shimmer" />
+                <div className="h-4 w-20 bg-bg-hover rounded animate-shimmer" />
+                <div className="flex-1" />
+                <div className="h-4 w-12 bg-bg-hover rounded animate-shimmer" />
+                <div className="h-4 w-16 bg-bg-hover rounded animate-shimmer" />
+              </div>
+            ))}
+          </div>
+        ) : filteredMarkets.length === 0 ? (
+          /* Empty state */
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <Filter size={24} className="text-text-tertiary" />
+            <p className="text-sm text-text-tertiary">
+              {markets?.length === 0
+                ? 'No markets found on this chain.'
+                : 'No markets match your filters.'}
+            </p>
+            {markets?.length === 0 ? (
+              <Button variant="secondary" size="sm" onClick={rescan}>
+                <RefreshCw size={12} className="mr-1" />
+                Rescan
+              </Button>
+            ) : (
+              <button
+                onClick={clearFilters}
+                className="text-xs font-mono text-accent-primary hover:text-accent-primary-hover transition-colors"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-bg-elevated border-b border-border-subtle">
+                    <SortHeader label="Market" sortKey="market" current={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <SortHeader label="Collateral" sortKey="collateral" current={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <th className="text-left py-2 px-3 text-[10px] uppercase text-text-tertiary tracking-wider">Oracle</th>
+                    <SortHeader label="LLTV" sortKey="lltv" current={sortKey} dir={sortDir} onSort={toggleSort} />
+                    <th className="text-right py-2 px-3 text-[10px] uppercase text-text-tertiary tracking-wider w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMarkets.map((market) => (
+                    <tr
+                      key={market.marketId}
+                      onClick={() => setDrawerMarket(market)}
+                      className={cn(
+                        'border-b border-border-subtle/30 cursor-pointer transition-colors group',
+                        drawerMarket?.marketId === market.marketId
+                          ? 'bg-bg-active border-l-2 border-l-accent-primary'
+                          : 'hover:bg-bg-hover border-l-2 border-l-transparent hover:border-l-accent-primary',
+                      )}
+                    >
+                      <td className="py-2.5 px-3">
+                        <div>
+                          <span className="text-[13px] text-text-primary font-medium">
+                            {market.loanTokenSymbol ?? truncateAddress(market.loanToken)}
+                          </span>
+                          <p className="text-[10px] font-mono text-text-tertiary mt-0.5">
+                            {truncateAddress(market.marketId, 4)}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-text-primary text-[13px]">
+                        {market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5 text-xs font-mono text-text-secondary">
+                          {market.oracle === '0x0000000000000000000000000000000000000000' ? (
+                            <Badge variant="warning" className="text-[10px]">None</Badge>
+                          ) : (
+                            <>
+                              <OracleHealthIndicator health={oracleHealthMap?.get(market.oracle as Address) ?? null} />
+                              {truncateAddress(market.oracle)}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-text-primary text-right">
+                        {formatWadPercent(BigInt(market.lltv))}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDrawerMarket(market);
+                          }}
+                          className="p-1.5 text-text-tertiary hover:text-text-primary transition-colors opacity-0 group-hover:opacity-100 min-w-[44px] min-h-[44px] flex items-center justify-center -my-2"
+                          aria-label={`View ${market.loanTokenSymbol ?? 'market'} details`}
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile card list */}
+            <div className="md:hidden divide-y divide-border-subtle/30">
+              {filteredMarkets.map((market) => (
+                <button
+                  key={market.marketId}
+                  onClick={() => setDrawerMarket(market)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-bg-hover transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[13px] text-text-primary font-medium">
+                      {market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}
+                      {' / '}
+                      {market.loanTokenSymbol ?? truncateAddress(market.loanToken)}
+                    </span>
+                    <p className="text-[10px] font-mono text-text-tertiary mt-0.5">
+                      LLTV {formatWadPercent(BigInt(market.lltv))}
+                    </p>
+                  </div>
+                  <Eye size={14} className="text-text-tertiary shrink-0" />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </Card>
+
+      {/* ── DETAIL DRAWER ── */}
+      <Drawer
+        open={!!drawerMarket}
+        onClose={() => setDrawerMarket(null)}
+        title={
+          drawerMarket
+            ? `${drawerMarket.collateralTokenSymbol ?? truncateAddress(drawerMarket.collateralToken)} / ${drawerMarket.loanTokenSymbol ?? truncateAddress(drawerMarket.loanToken)}`
+            : ''
+        }
+        subtitle={drawerMarket ? truncateAddress(drawerMarket.marketId, 8) : undefined}
+        footer={
+          drawerMarket ? (
+            <div className="flex gap-2">
+              <Button size="sm" className="flex-1">Allocate to Vault</Button>
+              <Button size="sm" variant="ghost">Add to Watchlist</Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {drawerMarket && (
+          <MarketDrawerContent chainId={selectedChainId} market={drawerMarket} />
+        )}
+      </Drawer>
+
+      {/* ── SEARCH OVERLAY ── */}
+      <MarketSearchOverlay
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        markets={markets ?? []}
+        onSelect={(m) => setDrawerMarket(m)}
+      />
     </div>
   );
 }
 
-// ============================================================
-// Market Row Component
-// ============================================================
+// ────────────────────────────────────────────────────────────
+// Sortable table header
+// ────────────────────────────────────────────────────────────
 
-function MarketRow({
-  market,
-  chainId,
-  isExpanded,
-  oracleHealth,
-  onToggle,
+function SortHeader({
+  label,
+  sortKey,
+  current,
+  dir,
+  onSort,
 }: {
-  market: MarketRecord;
-  chainId: number;
-  isExpanded: boolean;
-  oracleHealth: import('../lib/oracle/oracleTypes').OracleHealth | null;
-  onToggle: () => void;
+  label: string;
+  sortKey: SortKey;
+  current: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
 }) {
-  const lltv = BigInt(market.lltv);
-  const oracleIsZero =
-    market.oracle === '0x0000000000000000000000000000000000000000';
-
+  const isActive = current === sortKey;
   return (
-    <div>
-      <button
-        onClick={onToggle}
-        className="w-full grid grid-cols-12 gap-2 px-3 py-2 text-sm hover:bg-bg-hover/40 rounded transition-colors text-left"
-      >
-        <div className="col-span-3 text-text-primary font-medium">
-          {market.loanTokenSymbol ?? truncateAddress(market.loanToken)}
-        </div>
-        <div className="col-span-3 text-text-primary">
-          {market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}
-        </div>
-        <div className="col-span-2">
-          <Badge>{formatWadPercent(lltv)}</Badge>
-        </div>
-        <div className="col-span-2 text-text-secondary font-mono text-xs flex items-center gap-1.5">
-          {oracleIsZero ? (
-            <Badge variant="warning">None</Badge>
+    <th
+      className="text-left py-2 px-3 cursor-pointer select-none group"
+      onClick={() => onSort(sortKey)}
+      aria-sort={isActive ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-text-tertiary group-hover:text-text-secondary transition-colors">
+        {label}
+        <span className={cn('transition-colors', isActive ? 'text-accent-primary' : 'text-text-tertiary/30')}>
+          {isActive && dir === 'desc' ? (
+            <ChevronDown size={12} />
           ) : (
-            <>
-              <OracleHealthIndicator health={oracleHealth} />
-              {truncateAddress(market.oracle)}
-            </>
+            <ChevronUp size={12} />
           )}
-        </div>
-        <div className="col-span-2 text-text-tertiary text-xs">
-          {market.discoveredAtBlock || '—'}
-        </div>
-      </button>
-
-      {isExpanded && (
-        <div className="px-3 pb-2">
-          <MarketDetail
-            chainId={chainId}
-            market={market}
-            onClose={onToggle}
-          />
-        </div>
-      )}
-    </div>
+        </span>
+      </span>
+    </th>
   );
 }
