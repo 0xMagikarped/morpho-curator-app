@@ -166,7 +166,7 @@ export function MarketsPage() {
         </div>
         <button
           onClick={() => setSearchOpen(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-bg-hover border border-border-subtle rounded text-xs text-text-tertiary hover:text-text-secondary hover:border-border-default transition-colors min-h-[36px]"
+          className="flex items-center gap-2 px-3 py-1.5 bg-bg-hover border border-border-subtle rounded text-xs text-text-tertiary hover:text-text-secondary hover:border-border-default transition-colors min-h-[36px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
           aria-label="Search markets"
         >
           <Search size={14} />
@@ -209,7 +209,7 @@ export function MarketsPage() {
                   onClick={() => toggleToken(opt.address)}
                   disabled={isLoading}
                   className={cn(
-                    'inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors border',
+                    'inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary',
                     isActive
                       ? 'bg-bg-active border-accent-primary/30 text-accent-primary'
                       : 'bg-transparent border-border-subtle text-text-secondary hover:border-border-default',
@@ -244,7 +244,7 @@ export function MarketsPage() {
         {hasFilters && (
           <button
             onClick={clearFilters}
-            className="text-xs font-mono text-text-tertiary hover:text-text-secondary transition-colors"
+            className="text-xs font-mono text-text-tertiary hover:text-text-secondary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
           >
             Clear filters
           </button>

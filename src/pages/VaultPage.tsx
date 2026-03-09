@@ -99,7 +99,8 @@ export function VaultPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/')}
-            className="text-text-tertiary hover:text-text-primary"
+            aria-label="Back to dashboard"
+            className="text-text-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
           >
             &larr;
           </button>
@@ -143,7 +144,7 @@ export function VaultPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px',
+                'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary',
                 activeTab === tab.id
                   ? 'text-text-primary border-accent-primary'
                   : hasAccess

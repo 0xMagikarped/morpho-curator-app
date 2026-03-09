@@ -171,7 +171,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                   </div>
                   <div className="w-20">
                     <ProgressBar value={capUsed} className="h-1.5" />
-                    <p className="text-[10px] text-text-tertiary text-right mt-0.5">{capUsed.toFixed(0)}%</p>
+                    <p className="text-[10px] text-text-tertiary text-right mt-0.5 font-mono">{capUsed.toFixed(0)}%</p>
                   </div>
                 </div>
               );

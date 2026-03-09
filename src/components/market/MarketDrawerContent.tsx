@@ -37,7 +37,7 @@ export function MarketDrawerContent({ chainId, market }: MarketDrawerContentProp
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              'px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px',
+              'px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary',
               activeTab === tab.id
                 ? 'text-text-primary border-accent-primary'
                 : 'text-text-tertiary border-transparent hover:text-text-secondary',

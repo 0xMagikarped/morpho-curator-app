@@ -26,7 +26,7 @@ export function SharePriceChart({ history, height = 40, width = 160 }: SharePric
   const first = prices[0];
   const last = prices[prices.length - 1];
   const isUp = last >= first;
-  const color = isUp ? '#34d399' : '#f87171'; // success / danger
+  const color = isUp ? 'var(--color-success)' : 'var(--color-danger)';
 
   // Build SVG path
   const padding = 2;

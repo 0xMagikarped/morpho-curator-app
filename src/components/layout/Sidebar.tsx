@@ -20,20 +20,26 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'flex flex-col h-screen bg-bg-surface border-r border-border-subtle transition-all duration-200',
+        'noise relative flex flex-col h-screen border-r border-border-default transition-all duration-200',
+        'bg-bg-surface',
         sidebarCollapsed ? 'w-16' : 'w-60',
       )}
+      style={{ backgroundImage: 'linear-gradient(180deg, #0D1017 0%, #0A0D14 100%)' }}
     >
       {/* Logo */}
-      <div className="flex items-center justify-between px-4 h-14 border-b border-border-subtle">
+      <div className="flex items-center justify-between px-4 h-12 border-b border-border-default">
         {!sidebarCollapsed && (
           <span className="text-sm font-bold text-text-primary tracking-tight font-mono">
-            <span className="text-accent-primary">RX</span> Curator
+            <span className="text-accent-primary">{'>'}</span>
+            <span className="ml-1 text-text-secondary">morpho</span>
+            <span className="text-accent-primary">_</span>
+            <span className="text-text-tertiary text-xs ml-0.5">curator</span>
           </span>
         )}
         <button
           onClick={toggleSidebar}
-          className="p-1.5 rounded-md hover:bg-bg-hover text-text-tertiary hover:text-text-secondary transition-colors"
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="p-1.5 rounded-md hover:bg-bg-hover text-text-tertiary hover:text-text-secondary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
         >
           {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
         </button>

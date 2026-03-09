@@ -76,17 +76,17 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
         <div className="grid grid-cols-3 gap-4">
           <div>
             <p className="text-[10px] text-text-tertiary uppercase">Total Allocated</p>
-            <p className="text-sm font-medium">
+            <p className="text-sm font-medium font-mono">
               {formatTokenAmount(allocation.totalAllocated, vault?.assetInfo.decimals ?? 18)}
             </p>
           </div>
           <div>
             <p className="text-[10px] text-text-tertiary uppercase">Supply Queue</p>
-            <p className="text-sm font-medium">{allocation.supplyQueue.length} markets</p>
+            <p className="text-sm font-medium"><span className="font-mono">{allocation.supplyQueue.length}</span> markets</p>
           </div>
           <div>
             <p className="text-[10px] text-text-tertiary uppercase">Withdraw Queue</p>
-            <p className="text-sm font-medium">{allocation.withdrawQueue.length} markets</p>
+            <p className="text-sm font-medium"><span className="font-mono">{allocation.withdrawQueue.length}</span> markets</p>
           </div>
         </div>
       </Card>
@@ -131,18 +131,18 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
                         </span>
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-2 text-text-primary">
+                    <td className="text-right py-2.5 px-2 text-text-primary font-mono">
                       {formatPercent(Number(market.params.lltv) / 1e18)}
                     </td>
-                    <td className="text-right py-2.5 px-2 text-text-primary">
+                    <td className="text-right py-2.5 px-2 text-text-primary font-mono">
                       {alloc ? formatTokenAmount(alloc.supplyAssets, vault?.assetInfo.decimals ?? 18) : '0'}
                     </td>
-                    <td className="text-right py-2.5 px-2 text-text-secondary">
+                    <td className="text-right py-2.5 px-2 text-text-secondary font-mono">
                       {alloc ? formatTokenAmount(alloc.supplyCap, vault?.assetInfo.decimals ?? 18) : '0'}
                     </td>
                     <td className="text-right py-2.5 px-2 w-24">
                       <div className="flex items-center justify-end gap-2">
-                        <span className="text-text-primary text-xs">{capUsed.toFixed(0)}%</span>
+                        <span className="text-text-primary text-xs font-mono">{capUsed.toFixed(0)}%</span>
                         <ProgressBar value={capUsed} className="w-12 h-1.5" />
                       </div>
                     </td>

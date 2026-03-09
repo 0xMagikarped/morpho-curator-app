@@ -74,7 +74,7 @@ export function UsdcMigrationBanner({ chainId, vaultAddress, vaultAsset }: UsdcM
 
         <button
           onClick={() => setDismissed(true)}
-          className="text-text-tertiary hover:text-text-secondary text-xs ml-4"
+          className="text-text-tertiary hover:text-text-secondary text-xs ml-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
         >
           Dismiss
         </button>
