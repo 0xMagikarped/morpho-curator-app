@@ -1,51 +1,44 @@
+import { get } from '@vercel/edge-config';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kv } from '@vercel/kv';
-
-interface TrackedVault {
-  address: string;
-  chainId: number;
-  name: string;
-  version: 'v1' | 'v2';
-}
-
-function kvKey(wallet: string): string {
-  return `tracked-vaults:${wallet.toLowerCase()}`;
-}
+import { walletToKey, type TrackedVault } from './_lib/types';
+import { upsertEdgeConfigItem } from './_lib/edge-config-write';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { wallet, vault } = req.body as { wallet?: string; vault?: TrackedVault };
-
-  if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+  const { wallet, vault } = req.body;
+  if (!wallet || !wallet.startsWith('0x')) {
     return res.status(400).json({ error: 'Invalid wallet address' });
   }
   if (!vault?.address || !vault?.chainId) {
-    return res.status(400).json({ error: 'Missing vault data' });
+    return res.status(400).json({ error: 'Missing vault address or chainId' });
   }
 
   try {
-    const key = kvKey(wallet);
-    const existing = (await kv.get<TrackedVault[]>(key)) ?? [];
+    const key = walletToKey(wallet);
+    const existing = (await get<TrackedVault[]>(key)) || [];
 
-    const alreadyTracked = existing.some(
+    const alreadyExists = existing.some(
       (v) =>
         v.address.toLowerCase() === vault.address.toLowerCase() &&
         v.chainId === vault.chainId,
     );
 
-    if (alreadyTracked) {
-      return res.status(200).json({ vaults: existing, added: false });
+    if (alreadyExists) {
+      return res.status(200).json({ message: 'Already tracked', vaults: existing });
     }
 
-    const updated = [...existing, vault];
-    await kv.set(key, updated);
+    const updated = [
+      ...existing,
+      { ...vault, address: vault.address, addedAt: Date.now() },
+    ];
 
-    return res.status(200).json({ vaults: updated, added: true });
-  } catch (err) {
-    console.error('[track-vault] KV write error:', err);
+    await upsertEdgeConfigItem(key, updated);
+    return res.status(200).json({ message: 'Tracked', vaults: updated });
+  } catch (error) {
+    console.error('Track vault error:', error);
     return res.status(500).json({ error: 'Failed to track vault' });
   }
 }

@@ -289,7 +289,7 @@ export function DashboardPage() {
                   <VaultCard
                     key={`${v.chainId}-${v.address}`}
                     chainId={v.chainId}
-                    vaultAddress={v.address}
+                    vaultAddress={v.address as `0x${string}`}
                   />
                 ))}
               </div>
