@@ -1,15 +1,24 @@
 import { useState, useMemo } from 'react';
 import { formatUnits } from 'viem';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import type { MarketId } from '@morpho-org/blue-sdk';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole } from '../../lib/hooks/useVault';
-import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { formatTokenAmount, parseTokenAmount } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
-import type { MarketAllocation } from '../../types';
+import { isMorphoSdkSupported } from '../../lib/morpho/sdk-config';
+import {
+  useReallocationSimulation,
+  type AllocationChange,
+  type SimulationResult,
+} from '../../hooks/morpho-sdk/useReallocationSimulation';
+import {
+  useReallocate,
+  orderAllocations,
+  type MarketAllocationArg,
+} from '../../hooks/morpho-sdk/useReallocate';
 
 interface ReallocateTabProps {
   chainId: number;
@@ -30,10 +39,13 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const role = useVaultRole(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
-  const { writeContract, data: txHash, isPending } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { reallocate, isPending, isConfirming, isSuccess, error: txError, reset: resetTx } = useReallocate(vaultAddress, chainId);
+  const { simulation, isSimulating, simulate } = useReallocationSimulation(vaultAddress, chainId);
 
   const [edits, setEdits] = useState<Map<string, bigint>>(new Map());
+  const [catcherMarketId, setCatcherMarketId] = useState<string | null>(null);
+
+  const sdkSupported = isMorphoSdkSupported(chainId);
 
   const allocationEdits = useMemo<AllocationEdit[]>(() => {
     if (!allocation?.allocations || !markets) return [];
@@ -50,6 +62,11 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     });
   }, [allocation, markets, edits]);
 
+  // Auto-select catcher: largest target allocation
+  const effectiveCatcher = catcherMarketId ?? (allocationEdits.length > 0
+    ? allocationEdits.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEdits[0]!).marketId
+    : null);
+
   const totalWithdrawn = allocationEdits.reduce(
     (s, e) => s + (e.targetAssets < e.currentAssets ? e.currentAssets - e.targetAssets : 0n),
     0n,
@@ -61,7 +78,6 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const isBalanced = totalWithdrawn === totalSupplied;
   const hasChanges = allocationEdits.some((e) => e.targetAssets !== e.currentAssets);
 
-  // Validation
   const validations = allocationEdits
     .filter((e) => e.targetAssets > e.cap && e.cap > 0n)
     .map((e) => `${e.label}: target exceeds cap`);
@@ -74,34 +90,60 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     setEdits(newEdits);
   };
 
+  const handleSimulate = () => {
+    if (!hasChanges || !sdkSupported) return;
+    const changes: AllocationChange[] = allocationEdits
+      .filter((e) => e.targetAssets !== e.currentAssets)
+      .map((e) => ({
+        marketId: e.marketId as MarketId,
+        targetAssets: e.targetAssets,
+      }));
+    simulate(changes);
+  };
+
   const handleExecute = () => {
     if (!isBalanced || !hasChanges || !markets) return;
 
-    // Build MarketAllocation[] for V1 reallocate
-    const allocations: MarketAllocation[] = allocationEdits
+    // Build allocations with all markets that changed
+    const allocations: MarketAllocationArg[] = allocationEdits
       .filter((e) => e.targetAssets !== e.currentAssets)
       .map((e) => {
         const market = markets.find((m) => m.id === e.marketId);
         if (!market) throw new Error(`Market not found: ${e.marketId}`);
-
-        let assets = e.targetAssets;
-        // Special values: 0 = full withdrawal, max uint = supply all idle
-        if (e.targetAssets === 0n && e.currentAssets > 0n) {
-          assets = 0n; // Full withdrawal by shares
-        }
-
         return {
           marketParams: market.params,
-          assets,
+          assets: e.targetAssets,
         };
       });
 
-    writeContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'reallocate',
-      args: [allocations.map((a) => ({ marketParams: a.marketParams, assets: a.assets }))],
+    // Find the catcher index and reorder: withdrawals first, catcher last with MAX_UINT256
+    const catcherIdx = allocations.findIndex((a) => {
+      const matchEdit = allocationEdits.find(
+        (e) => e.marketId === effectiveCatcher,
+      );
+      if (!matchEdit) return false;
+      const market = markets.find((m) => m.id === matchEdit.marketId);
+      return market && a.marketParams.loanToken === market.params.loanToken
+        && a.marketParams.collateralToken === market.params.collateralToken
+        && a.marketParams.oracle === market.params.oracle;
     });
+
+    const currentAssetsMap = new Map<string, bigint>();
+    for (const e of allocationEdits) {
+      const market = markets.find((m) => m.id === e.marketId);
+      if (market) {
+        const key = `${market.params.loanToken}-${market.params.collateralToken}-${market.params.oracle}-${market.params.irm}-${market.params.lltv}`;
+        currentAssetsMap.set(key, e.currentAssets);
+      }
+    }
+
+    const ordered = orderAllocations(
+      allocations,
+      currentAssetsMap,
+      catcherIdx >= 0 ? catcherIdx : allocations.length - 1,
+    );
+
+    reallocate(ordered);
   };
 
   const assetDecimals = vault?.assetInfo.decimals ?? 18;
@@ -141,7 +183,10 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       <Card>
         <CardHeader>
           <CardTitle>Reallocate</CardTitle>
-          <Badge>V1 Atomic</Badge>
+          <div className="flex gap-1.5">
+            <Badge>V1 Atomic</Badge>
+            {sdkSupported && <Badge variant="info">SDK Simulation</Badge>}
+          </div>
         </CardHeader>
 
         {allocationEdits.length === 0 ? (
@@ -159,12 +204,14 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     <th className="text-right py-2">Target</th>
                     <th className="text-right py-2">Delta</th>
                     <th className="text-right py-2">Cap</th>
+                    <th className="text-center py-2 w-8">Catcher</th>
                   </tr>
                 </thead>
                 <tbody>
                   {allocationEdits.map((edit) => {
                     const delta = edit.targetAssets - edit.currentAssets;
                     const overCap = edit.cap > 0n && edit.targetAssets > edit.cap;
+                    const isCatcher = edit.marketId === effectiveCatcher;
 
                     return (
                       <tr key={edit.marketId} className="border-b border-border-subtle/50">
@@ -193,6 +240,16 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                         <td className="text-right py-2 text-text-tertiary font-mono text-xs">
                           {formatTokenAmount(edit.cap, assetDecimals)}
                         </td>
+                        <td className="text-center py-2">
+                          <input
+                            type="radio"
+                            name="catcher"
+                            checked={isCatcher}
+                            onChange={() => setCatcherMarketId(edit.marketId)}
+                            className="accent-accent-primary"
+                            title="Use as max-catcher (absorbs rounding dust)"
+                          />
+                        </td>
                       </tr>
                     );
                   })}
@@ -217,8 +274,28 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
               ))}
             </div>
 
-            {/* Execute */}
+            {/* Simulation Results */}
+            {simulation && simulation.isValid && (
+              <SimulationPanel simulation={simulation} />
+            )}
+            {simulation && !simulation.isValid && simulation.error && (
+              <div className="text-xs text-danger bg-danger/10 border border-danger/20 px-3 py-2">
+                Simulation failed: {simulation.error.slice(0, 200)}
+              </div>
+            )}
+
+            {/* Actions */}
             <div className="flex gap-3 pt-2">
+              {sdkSupported && (
+                <Button
+                  variant="secondary"
+                  onClick={handleSimulate}
+                  disabled={!hasChanges || isSimulating}
+                  loading={isSimulating}
+                >
+                  {isSimulating ? 'Simulating...' : 'Simulate'}
+                </Button>
+              )}
               <Button
                 onClick={handleExecute}
                 disabled={!isBalanced || !hasChanges || validations.length > 0 || isMismatch}
@@ -229,9 +306,12 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
               {isSuccess && (
                 <Badge variant="success">Transaction confirmed</Badge>
               )}
+              {txError && (
+                <span className="text-xs text-danger">{(txError as Error).message?.slice(0, 100)}</span>
+              )}
               <Button
                 variant="ghost"
-                onClick={() => setEdits(new Map())}
+                onClick={() => { setEdits(new Map()); resetTx(); }}
                 disabled={!hasChanges}
               >
                 Reset
@@ -244,6 +324,68 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   );
 }
 
+function SimulationPanel({ simulation }: { simulation: SimulationResult }) {
+  return (
+    <Card className="!p-3 bg-bg-hover border-info/20">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-text-tertiary uppercase font-medium">Simulation Preview</span>
+          <Badge variant="info">SDK</Badge>
+        </div>
+
+        {/* Vault APY */}
+        <div className="flex gap-6 text-xs">
+          <div>
+            <span className="text-text-tertiary">Vault APY: </span>
+            <span className="font-mono text-text-primary">{formatApy(simulation.beforeApy)}</span>
+            <span className="text-text-tertiary"> -&gt; </span>
+            <span className={`font-mono ${simulation.afterApy > simulation.beforeApy ? 'text-success' : simulation.afterApy < simulation.beforeApy ? 'text-danger' : 'text-text-primary'}`}>
+              {formatApy(simulation.afterApy)}
+            </span>
+          </div>
+          <div>
+            <span className="text-text-tertiary">Net APY: </span>
+            <span className="font-mono text-text-primary">{formatApy(simulation.beforeNetApy)}</span>
+            <span className="text-text-tertiary"> -&gt; </span>
+            <span className={`font-mono ${simulation.afterNetApy > simulation.beforeNetApy ? 'text-success' : simulation.afterNetApy < simulation.beforeNetApy ? 'text-danger' : 'text-text-primary'}`}>
+              {formatApy(simulation.afterNetApy)}
+            </span>
+          </div>
+        </div>
+
+        {/* Per-market impacts */}
+        {simulation.marketImpacts.length > 0 && (
+          <div className="space-y-1">
+            {simulation.marketImpacts.map((m) => (
+              <div key={m.marketId} className="flex items-center gap-3 text-xs">
+                <span className="text-text-tertiary font-mono w-20 truncate">{m.label}</span>
+                <span className="text-text-tertiary">Supply APY:</span>
+                <span className="font-mono text-text-primary">{formatApy(m.beforeSupplyApy)}</span>
+                <span className="text-text-tertiary">-&gt;</span>
+                <span className={`font-mono ${m.afterSupplyApy > m.beforeSupplyApy ? 'text-success' : m.afterSupplyApy < m.beforeSupplyApy ? 'text-danger' : 'text-text-primary'}`}>
+                  {formatApy(m.afterSupplyApy)}
+                </span>
+                <span className="text-text-tertiary">Util:</span>
+                <span className="font-mono text-text-primary">{formatWadPercent(m.beforeUtilization)}</span>
+                <span className="text-text-tertiary">-&gt;</span>
+                <span className="font-mono text-text-primary">{formatWadPercent(m.afterUtilization)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function formatPercent(lltv: bigint): string {
   return `${(Number(lltv) / 1e18 * 100).toFixed(1)}%`;
+}
+
+function formatApy(apy: number): string {
+  return `${(apy * 100).toFixed(2)}%`;
+}
+
+function formatWadPercent(wad: bigint): string {
+  return `${(Number(wad) / 1e18 * 100).toFixed(1)}%`;
 }

@@ -10,6 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@morpho-org/blue-sdk": "^5.17.0",
+    "@morpho-org/blue-sdk-viem": "^4.5.0",
+    "@morpho-org/liquidity-sdk-viem": "^1.4.0",
+    "@morpho-org/morpho-ts": "^2.5.0",
+    "@morpho-org/simulation-sdk": "^3.4.0",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-query": "^5.90.21",
