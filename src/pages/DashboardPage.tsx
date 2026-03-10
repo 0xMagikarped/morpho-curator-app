@@ -14,6 +14,7 @@ import { PendingActions } from '../components/dashboard/PendingActions';
 import { RiskAlertBanner } from '../components/risk/RiskAlertBanner';
 import { ManagedVaultsBanner } from '../components/dashboard/ManagedVaultsBanner';
 import { useAppStore } from '../store/appStore';
+import { useTrackedVaults } from '../lib/hooks/useTrackedVaults';
 import { useDashboardVaults, useDashboardPendingActions } from '../lib/hooks/useDashboard';
 import { getSupportedChainIds, getChainConfig, SEI_KNOWN_VAULTS } from '../config/chains';
 import { formatUsd } from '../lib/utils/format';
@@ -21,7 +22,8 @@ import type { RiskAlert } from '../lib/risk/riskTypes';
 
 export function DashboardPage() {
   const { address } = useAccount();
-  const { trackedVaults, addTrackedVault } = useAppStore();
+  const { trackedVaults, trackVault } = useTrackedVaults();
+  const { addTrackedVault } = useAppStore();
   const { data: vaultSummaries, isLoading: vaultsLoading } = useDashboardVaults();
   const { data: pendingActionsList } = useDashboardPendingActions();
   const [showAddVault, setShowAddVault] = useState(false);
@@ -101,12 +103,14 @@ export function DashboardPage() {
 
   const handleAddVault = () => {
     if (!isAddress(newVaultAddress)) return;
-    addTrackedVault({
+    const vault = {
       address: newVaultAddress,
       chainId: newVaultChainId,
       name: `Vault ${newVaultAddress.slice(0, 8)}...`,
-      version: 'v1',
-    });
+      version: 'v1' as const,
+    };
+    trackVault(vault);
+    addTrackedVault(vault);
     setNewVaultAddress('');
     setShowAddVault(false);
   };
@@ -114,12 +118,14 @@ export function DashboardPage() {
   const handleAddKnownVault = (key: string) => {
     const vault = SEI_KNOWN_VAULTS[key];
     if (!vault) return;
-    addTrackedVault({
+    const tracked = {
       address: vault.address,
       chainId: 1329,
       name: vault.name,
-      version: 'v1',
-    });
+      version: 'v1' as const,
+    };
+    trackVault(tracked);
+    addTrackedVault(tracked);
   };
 
   const isLoadingStats = vaultsLoading && trackedVaults.length > 0;

@@ -19,6 +19,7 @@ import {
   type V2PostDeployConfig,
 } from '../../../lib/vault/createVault';
 import { useAppStore } from '../../../store/appStore';
+import { useTrackedVaults } from '../../../lib/hooks/useTrackedVaults';
 import type { WizardState } from '../CreateVaultWizard';
 
 interface DeployStepProps {
@@ -33,6 +34,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const { addTrackedVault } = useAppStore();
+  const { trackVault } = useTrackedVaults();
 
   const [status, setStatus] = useState<DeployStatus>('idle');
   const [steps, setSteps] = useState<TransactionStep[]>([]);
@@ -197,12 +199,14 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           if (addr) {
             deployedVaultAddr = addr;
             setVaultAddress(addr);
-            addTrackedVault({
+            const vault = {
               address: addr,
               chainId: state.chainId!,
               name: state.vaultName,
               version: state.version,
-            });
+            };
+            addTrackedVault(vault);
+            trackVault(vault);
           }
         }
 

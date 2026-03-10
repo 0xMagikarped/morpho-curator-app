@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { useManagedVaults } from '../../lib/hooks/useManagedVaults';
 import { useAppStore } from '../../store/appStore';
+import { useTrackedVaults } from '../../lib/hooks/useTrackedVaults';
 import { truncateAddress } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
@@ -15,6 +16,7 @@ export function ManagedVaultsBanner() {
   const { address } = useAccount();
   const { data: managed, isLoading } = useManagedVaults(address);
   const { trackedVaults, addTrackedVault } = useAppStore();
+  const { trackVault } = useTrackedVaults();
   const [dismissed, setDismissed] = useState(() => {
     try {
       return sessionStorage.getItem(DISMISSED_KEY) === 'true';
@@ -38,12 +40,14 @@ export function ManagedVaultsBanner() {
 
   const handleTrackAll = () => {
     for (const v of untracked) {
-      addTrackedVault({
+      const vault = {
         address: v.address,
         chainId: v.chainId,
         name: v.name,
         version: v.version,
-      });
+      };
+      addTrackedVault(vault);
+      trackVault(vault);
     }
     handleDismiss();
   };
