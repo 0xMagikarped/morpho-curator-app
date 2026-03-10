@@ -7,7 +7,7 @@ import {
   type TransactionReceipt,
   type Address,
 } from 'viem';
-import { metaMorphoFactoryAbi, metaMorphoV1Abi } from '../contracts/abis';
+import { metaMorphoFactoryAbi, metaMorphoV1Abi, metaMorphoV2FactoryAbi, metaMorphoV2Abi } from '../contracts/abis';
 import { getChainConfig } from '../../config/chains';
 
 // ============================================================
@@ -312,6 +312,200 @@ export function formatTimelockDuration(seconds: number): string {
   return `${seconds.toLocaleString()}s`;
 }
 
-export function getFactoryAddress(chainId: number): Address | undefined {
-  return getChainConfig(chainId)?.vaultFactories.v1;
+export function getFactoryAddress(chainId: number, version: 'v1' | 'v2' = 'v1'): Address | undefined {
+  const config = getChainConfig(chainId);
+  return version === 'v2' ? config?.vaultFactories.v2 : config?.vaultFactories.v1;
+}
+
+// ============================================================
+// V2 Vault Creation
+// ============================================================
+
+export interface V2VaultCreationParams {
+  chainId: number;
+  initialOwner: `0x${string}`;
+  asset: `0x${string}`;
+  name: string;
+  symbol: string;
+  salt: `0x${string}`;
+}
+
+export interface V2PostDeployConfig {
+  curator?: `0x${string}`;
+  allocators?: `0x${string}`[];
+  sentinels?: `0x${string}`[];
+  performanceFee?: bigint;
+  performanceFeeRecipient?: `0x${string}`;
+  managementFee?: bigint;
+  managementFeeRecipient?: `0x${string}`;
+  timelocks?: Array<{ selector: `0x${string}`; seconds: number }>;
+}
+
+export function parseV2VaultAddressFromReceipt(receipt: TransactionReceipt): `0x${string}` | null {
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: metaMorphoV2FactoryAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'CreateMetaMorphoV2') {
+        return (decoded.args as { vault: `0x${string}` }).vault;
+      }
+    } catch {
+      // Not our event
+    }
+  }
+  return null;
+}
+
+export function buildV2DeploymentTxSequence(
+  params: V2VaultCreationParams,
+  config: V2PostDeployConfig,
+): TransactionStep[] {
+  const chainConfig = getChainConfig(params.chainId);
+  if (!chainConfig) throw new Error(`Unsupported chain: ${params.chainId}`);
+
+  const factoryAddress = chainConfig.vaultFactories.v2;
+  if (!factoryAddress) throw new Error(`No V2 factory on chain ${params.chainId}`);
+
+  const steps: TransactionStep[] = [];
+  let stepIndex = 0;
+
+  // Step 1: Deploy vault via V2 factory
+  steps.push({
+    id: `step-${stepIndex++}`,
+    label: 'Deploy V2 vault via factory',
+    to: factoryAddress,
+    data: encodeFunctionData({
+      abi: metaMorphoV2FactoryAbi,
+      functionName: 'createMetaMorphoV2',
+      args: [params.initialOwner, params.asset, params.name, params.symbol, params.salt],
+    }),
+    status: 'pending',
+  });
+
+  // Step 2: Set curator
+  if (config.curator) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: 'Set curator',
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setCurator',
+        args: [config.curator],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 3: Set allocators
+  for (const allocator of config.allocators ?? []) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: 'Set allocator',
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setIsAllocator',
+        args: [allocator, true],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 4: Set sentinels
+  for (const sentinel of config.sentinels ?? []) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: 'Set sentinel',
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setIsSentinel',
+        args: [sentinel, true],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 5: Set performance fee recipient (must come before fee)
+  if (config.performanceFeeRecipient) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: 'Set performance fee recipient',
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setPerformanceFeeRecipient',
+        args: [config.performanceFeeRecipient],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 6: Set performance fee
+  if (config.performanceFee && config.performanceFee > 0n) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: `Set performance fee: ${Number(config.performanceFee * 100n / BigInt(1e18))}%`,
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setPerformanceFee',
+        args: [config.performanceFee],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 7: Set management fee recipient
+  if (config.managementFeeRecipient) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: 'Set management fee recipient',
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setManagementFeeRecipient',
+        args: [config.managementFeeRecipient],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 8: Set management fee
+  if (config.managementFee && config.managementFee > 0n) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: `Set management fee: ${Number(config.managementFee * 100n / BigInt(1e18))}%`,
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setManagementFee',
+        args: [config.managementFee],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 9: Set per-function timelocks
+  for (const tl of config.timelocks ?? []) {
+    if (tl.seconds > 0) {
+      steps.push({
+        id: `step-${stepIndex++}`,
+        label: `Set timelock: ${tl.selector} = ${formatTimelockDuration(tl.seconds)}`,
+        to: null,
+        data: encodeFunctionData({
+          abi: metaMorphoV2Abi,
+          functionName: 'setTimelock',
+          args: [tl.selector, BigInt(tl.seconds)],
+        }),
+        status: 'pending',
+      });
+    }
+  }
+
+  return steps;
 }

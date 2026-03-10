@@ -14,7 +14,8 @@ interface ReviewStepProps {
 
 export function ReviewStep({ state, onNext, onBack }: ReviewStepProps) {
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
-  const factoryAddr = chainConfig?.vaultFactories.v1;
+  const isV2 = state.version === 'v2';
+  const factoryAddr = isV2 ? chainConfig?.vaultFactories.v2 : chainConfig?.vaultFactories.v1;
 
   const curator =
     state.curatorMode === 'owner'
@@ -34,22 +35,32 @@ export function ReviewStep({ state, onNext, onBack }: ReviewStepProps) {
   txCount += state.allocators.length;
   if (state.feePercent > 0) txCount++;
   if (feeRecipient) txCount++;
-  if (guardian) txCount++;
-  txCount += state.selectedMarkets.length; // submitCap per market
-  if (state.selectedMarkets.length > 0) txCount += 2; // supply + withdraw queue
-  if (isZeroThenIncrease && state.finalTimelockSeconds > 0) txCount++;
+
+  if (isV2) {
+    txCount += state.sentinels.length;
+    if (state.managementFeePercent > 0) txCount += 2; // fee + recipient
+    txCount += state.v2Timelocks.filter((t) => t.seconds > 0).length;
+  } else {
+    if (guardian) txCount++;
+    txCount += state.selectedMarkets.length;
+    if (state.selectedMarkets.length > 0) txCount += 2;
+    if (isZeroThenIncrease && state.finalTimelockSeconds > 0) txCount++;
+  }
 
   return (
     <div className="space-y-6">
       <CardHeader>
         <CardTitle>Review Configuration</CardTitle>
+        <Badge variant={isV2 ? 'info' : 'success'}>{isV2 ? 'V2' : 'V1'}</Badge>
       </CardHeader>
 
       <div className="space-y-3 text-sm">
         <Row label="Chain" value={`${chainConfig?.name} (${state.chainId})`} />
+        <Row label="Version" value={isV2 ? 'MetaMorpho V2' : 'MetaMorpho V1'} />
         <Row
           label="Factory"
-          value={factoryAddr ? `${truncateAddress(factoryAddr)} (V1.1)` : 'N/A'}
+          value={factoryAddr ? `${truncateAddress(factoryAddr)}` : 'N/A'}
+          mono
         />
         <Row
           label="Asset"
@@ -58,10 +69,12 @@ export function ReviewStep({ state, onNext, onBack }: ReviewStepProps) {
         <Row label="Name" value={state.vaultName} />
         <Row label="Symbol" value={state.vaultSymbol} />
         <Row label="Owner" value={state.owner ? truncateAddress(state.owner) : 'N/A'} mono />
-        <Row
-          label="Initial Timelock"
-          value={formatTimelockDuration(state.initialTimelockSeconds)}
-        />
+        {!isV2 && (
+          <Row
+            label="Initial Timelock"
+            value={formatTimelockDuration(state.initialTimelockSeconds)}
+          />
+        )}
       </div>
 
       {/* Post-deploy config */}
@@ -78,37 +91,71 @@ export function ReviewStep({ state, onNext, onBack }: ReviewStepProps) {
               Set allocator: <span className="font-mono text-text-secondary">{truncateAddress(a)}</span>
             </div>
           ))}
+
+          {/* V2-specific */}
+          {isV2 && state.sentinels.map((s) => (
+            <div key={s} className="text-text-primary">
+              Set sentinel: <span className="font-mono text-text-secondary">{truncateAddress(s)}</span>
+            </div>
+          ))}
+
           {state.feePercent > 0 && (
-            <div className="text-text-primary">Set fee: {state.feePercent}%</div>
+            <div className="text-text-primary">
+              Set {isV2 ? 'performance ' : ''}fee: {state.feePercent}%
+            </div>
           )}
           {feeRecipient && (
             <div className="text-text-primary">
-              Set fee recipient: <span className="font-mono text-text-secondary">{truncateAddress(feeRecipient)}</span>
+              Set {isV2 ? 'performance ' : ''}fee recipient: <span className="font-mono text-text-secondary">{truncateAddress(feeRecipient)}</span>
             </div>
           )}
-          {guardian && (
+
+          {isV2 && state.managementFeePercent > 0 && (
+            <>
+              <div className="text-text-primary">
+                Set management fee: {state.managementFeePercent}%
+              </div>
+              <div className="text-text-primary">
+                Set management fee recipient: <span className="font-mono text-text-secondary">
+                  {state.managementFeeRecipientMode === 'owner'
+                    ? truncateAddress(state.owner ?? '0x')
+                    : truncateAddress(state.managementFeeRecipientAddress ?? '0x')}
+                </span>
+              </div>
+            </>
+          )}
+
+          {/* V1-specific */}
+          {!isV2 && guardian && (
             <div className="text-text-primary">
               Set guardian: <span className="font-mono text-text-secondary">{truncateAddress(guardian)}</span>
             </div>
           )}
-          {state.selectedMarkets.map((m, i) => (
+          {!isV2 && state.selectedMarkets.map((m, i) => (
             <div key={i} className="text-text-primary">
               Submit cap: {m.collateralSymbol}/{state.assetSymbol}{' '}
               <Badge>{formatWadPercent(BigInt(m.lltv))}</Badge>{' '}
               {m.supplyCap ? `${m.supplyCap} ${state.assetSymbol}` : 'unlimited'}
             </div>
           ))}
-          {state.selectedMarkets.length > 0 && (
+          {!isV2 && state.selectedMarkets.length > 0 && (
             <>
               <div className="text-text-primary">Set supply queue</div>
               <div className="text-text-primary">Set withdraw queue</div>
             </>
           )}
-          {isZeroThenIncrease && state.finalTimelockSeconds > 0 && (
+          {!isV2 && isZeroThenIncrease && state.finalTimelockSeconds > 0 && (
             <div className="text-text-primary">
               Increase timelock: 0 → {formatTimelockDuration(state.finalTimelockSeconds)}
             </div>
           )}
+
+          {/* V2 timelocks */}
+          {isV2 && state.v2Timelocks.filter((t) => t.seconds > 0).map((t) => (
+            <div key={t.selector} className="text-text-primary">
+              Set timelock: <span className="font-mono text-text-secondary">{t.label}</span> = {formatTimelockDuration(t.seconds)}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -116,9 +163,11 @@ export function ReviewStep({ state, onNext, onBack }: ReviewStepProps) {
         <span>Transactions: 1 deploy + {txCount} config</span>
       </div>
 
-      <div className="bg-warning/10 p-3 text-xs text-warning/80">
-        The oracle address for each market is IMMUTABLE. Verify oracle risk before deploying.
-      </div>
+      {!isV2 && (
+        <div className="bg-warning/10 p-3 text-xs text-warning/80">
+          The oracle address for each market is IMMUTABLE. Verify oracle risk before deploying.
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex justify-between pt-2">

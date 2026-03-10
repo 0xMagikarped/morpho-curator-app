@@ -597,6 +597,130 @@ export const metaMorphoFactoryAbi = [
 ] as const;
 
 // ============================================================
+// MetaMorpho V2 Factory
+// ============================================================
+
+export const metaMorphoV2FactoryAbi = [
+  {
+    inputs: [{ name: 'target', type: 'address' }],
+    name: 'isVaultV2',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'initialOwner', type: 'address' },
+      { name: 'asset', type: 'address' },
+      { name: 'name', type: 'string' },
+      { name: 'symbol', type: 'string' },
+      { name: 'salt', type: 'bytes32' },
+    ],
+    name: 'createMetaMorphoV2',
+    outputs: [{ name: 'vault', type: 'address' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'vault', type: 'address' },
+      { indexed: true, name: 'caller', type: 'address' },
+      { indexed: false, name: 'initialOwner', type: 'address' },
+      { indexed: true, name: 'asset', type: 'address' },
+      { indexed: false, name: 'name', type: 'string' },
+      { indexed: false, name: 'symbol', type: 'string' },
+      { indexed: false, name: 'salt', type: 'bytes32' },
+    ],
+    name: 'CreateMetaMorphoV2',
+    type: 'event',
+  },
+] as const;
+
+// ============================================================
+// MetaMorpho V2 Vault (config functions)
+// ============================================================
+
+export const metaMorphoV2Abi = [
+  // ---- Read Functions ----
+  { inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'symbol', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'decimals', outputs: [{ type: 'uint8' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'asset', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'totalAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'totalSupply', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'owner', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'curator', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'allocator', type: 'address' }], name: 'isAllocator', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'sentinel', type: 'address' }], name: 'isSentinel', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'performanceFee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'managementFee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'performanceFeeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'managementFeeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'adaptersLength', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  {
+    inputs: [{ name: 'selector', type: 'bytes4' }],
+    name: 'timelock',
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  // ---- Write Functions (Owner) ----
+  {
+    inputs: [{ name: 'newCurator', type: 'address' }],
+    name: 'setCurator', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'allocator', type: 'address' }, { name: 'isAllocator', type: 'bool' }],
+    name: 'setIsAllocator', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'sentinel', type: 'address' }, { name: 'isSentinel', type: 'bool' }],
+    name: 'setIsSentinel', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFee', type: 'uint256' }],
+    name: 'setPerformanceFee', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFee', type: 'uint256' }],
+    name: 'setManagementFee', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'newRecipient', type: 'address' }],
+    name: 'setPerformanceFeeRecipient', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'newRecipient', type: 'address' }],
+    name: 'setManagementFeeRecipient', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'selector', type: 'bytes4' }, { name: 'newTimelock', type: 'uint256' }],
+    name: 'setTimelock', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'adapter', type: 'address' }],
+    name: 'submitAdapter', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'adapter', type: 'address' }],
+    name: 'acceptAdapter', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'newOwner', type: 'address' }],
+    name: 'transferOwnership', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  // Multicall
+  {
+    inputs: [{ name: 'data', type: 'bytes[]' }],
+    name: 'multicall',
+    outputs: [{ name: 'results', type: 'bytes[]' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+// ============================================================
 // IOracle
 // ============================================================
 

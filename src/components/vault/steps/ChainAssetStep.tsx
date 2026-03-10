@@ -13,9 +13,11 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
   const [loadingToken, setLoadingToken] = useState(false);
   const [tokenError, setTokenError] = useState('');
 
+  const isV2 = state.version === 'v2';
+
   const chains = getSupportedChainIds()
     .map((id) => ({ id, config: getChainConfig(id)! }))
-    .filter((c) => c.config.vaultFactories.v1);
+    .filter((c) => isV2 ? !!c.config.vaultFactories.v2 : !!c.config.vaultFactories.v1);
 
   const selectedConfig = state.chainId ? getChainConfig(state.chainId) : null;
 
@@ -68,6 +70,45 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
         <CardTitle>Select Chain & Loan Asset</CardTitle>
       </CardHeader>
 
+      {/* Version Selector */}
+      <div>
+        <label className="text-xs text-text-tertiary mb-2 block">Vault Version</label>
+        <div className="flex gap-3">
+          <button
+            onClick={() => onUpdate({ version: 'v1', chainId: null, asset: null, assetSymbol: '', assetDecimals: 18 })}
+            className={`flex-1 border px-4 py-3 text-left transition-colors ${
+              !isV2
+                ? 'border-accent-primary bg-accent-primary-muted'
+                : 'border-border-default bg-bg-hover/30 hover:border-border-default'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-text-primary">MetaMorpho V1</span>
+              <Badge variant="success">Stable</Badge>
+            </div>
+            <p className="text-xs text-text-tertiary mt-1">
+              Supply/withdraw queues, single guardian, single timelock
+            </p>
+          </button>
+          <button
+            onClick={() => onUpdate({ version: 'v2', chainId: null, asset: null, assetSymbol: '', assetDecimals: 18 })}
+            className={`flex-1 border px-4 py-3 text-left transition-colors ${
+              isV2
+                ? 'border-accent-primary bg-accent-primary-muted'
+                : 'border-border-default bg-bg-hover/30 hover:border-border-default'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-text-primary">MetaMorpho V2</span>
+              <Badge variant="info">New</Badge>
+            </div>
+            <p className="text-xs text-text-tertiary mt-1">
+              Adapters, multi-sentinel, dual fees, per-function timelocks
+            </p>
+          </button>
+        </div>
+      </div>
+
       {/* Chain Selection */}
       <div>
         <label className="text-xs text-text-tertiary mb-2 block">Chain</label>
@@ -87,12 +128,8 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
               <div className="text-sm font-medium text-text-primary">{config.name}</div>
               <div className="text-xs text-text-tertiary mt-1">Chain {id}</div>
               <div className="flex gap-1 mt-2">
-                <Badge variant="success">V1</Badge>
-                {config.vaultFactories.v2 ? (
-                  <Badge variant="info">V2</Badge>
-                ) : (
-                  <Badge variant="default">V1 only</Badge>
-                )}
+                {config.vaultFactories.v1 && <Badge variant="success">V1</Badge>}
+                {config.vaultFactories.v2 && <Badge variant="info">V2</Badge>}
               </div>
             </button>
           ))}

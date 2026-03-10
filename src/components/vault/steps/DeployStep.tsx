@@ -8,11 +8,15 @@ import { getChainConfig } from '../../../config/chains';
 import { truncateAddress } from '../../../lib/utils/format';
 import {
   buildDeploymentTxSequence,
+  buildV2DeploymentTxSequence,
   parseVaultAddressFromReceipt,
+  parseV2VaultAddressFromReceipt,
   feePercentToWad,
   type TransactionStep,
   type PostDeployConfig,
   type VaultCreationParams,
+  type V2VaultCreationParams,
+  type V2PostDeployConfig,
 } from '../../../lib/vault/createVault';
 import { useAppStore } from '../../../store/appStore';
 import type { WizardState } from '../CreateVaultWizard';
@@ -39,6 +43,8 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
 
+  const isV2 = state.version === 'v2';
+
   // Build steps on mount
   useEffect(() => {
     if (!state.chainId || !state.owner || !state.asset || !state.salt) return;
@@ -51,43 +57,75 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           : undefined;
     const feeRecipient =
       state.feeRecipientMode === 'owner' ? state.owner : state.feeRecipientAddress ?? undefined;
-    const guardian =
-      state.guardianMode === 'custom' ? state.guardianAddress ?? undefined : undefined;
 
-    const isZeroThenIncrease = state.timelockStrategy === 'zero-then-increase';
+    if (isV2) {
+      // V2 deployment
+      const v2Params: V2VaultCreationParams = {
+        chainId: state.chainId,
+        initialOwner: state.owner,
+        asset: state.asset,
+        name: state.vaultName,
+        symbol: state.vaultSymbol,
+        salt: state.salt,
+      };
 
-    const creationParams: VaultCreationParams = {
-      chainId: state.chainId,
-      initialOwner: state.owner,
-      initialTimelock: BigInt(state.initialTimelockSeconds),
-      asset: state.asset,
-      name: state.vaultName,
-      symbol: state.vaultSymbol,
-      salt: state.salt,
-    };
+      const mgmtFeeRecipient =
+        state.managementFeeRecipientMode === 'owner'
+          ? state.owner
+          : state.managementFeeRecipientAddress ?? undefined;
 
-    const postDeploy: PostDeployConfig = {
-      curator,
-      allocators: state.allocators.length > 0 ? state.allocators : undefined,
-      guardian,
-      fee: state.feePercent > 0 ? feePercentToWad(state.feePercent) : undefined,
-      feeRecipient,
-      initialMarkets: state.selectedMarkets
-        .filter((m) => m.supplyCap)
-        .map((m) => ({
-          marketParams: m.marketParams,
-          supplyCap: BigInt(
-            Math.round(Number(m.supplyCap) * 10 ** state.assetDecimals),
-          ),
-        })),
-      finalTimelock:
-        isZeroThenIncrease && state.finalTimelockSeconds > 0
-          ? BigInt(state.finalTimelockSeconds)
-          : undefined,
-    };
+      const v2PostDeploy: V2PostDeployConfig = {
+        curator,
+        allocators: state.allocators.length > 0 ? state.allocators : undefined,
+        sentinels: state.sentinels.length > 0 ? state.sentinels : undefined,
+        performanceFee: state.feePercent > 0 ? feePercentToWad(state.feePercent) : undefined,
+        performanceFeeRecipient: feeRecipient,
+        managementFee: state.managementFeePercent > 0 ? feePercentToWad(state.managementFeePercent) : undefined,
+        managementFeeRecipient: state.managementFeePercent > 0 ? mgmtFeeRecipient : undefined,
+        timelocks: state.v2Timelocks.length > 0 ? state.v2Timelocks : undefined,
+      };
 
-    setSteps(buildDeploymentTxSequence(creationParams, postDeploy));
-  }, [state]);
+      setSteps(buildV2DeploymentTxSequence(v2Params, v2PostDeploy));
+    } else {
+      // V1 deployment
+      const guardian =
+        state.guardianMode === 'custom' ? state.guardianAddress ?? undefined : undefined;
+
+      const isZeroThenIncrease = state.timelockStrategy === 'zero-then-increase';
+
+      const creationParams: VaultCreationParams = {
+        chainId: state.chainId,
+        initialOwner: state.owner,
+        initialTimelock: BigInt(state.initialTimelockSeconds),
+        asset: state.asset,
+        name: state.vaultName,
+        symbol: state.vaultSymbol,
+        salt: state.salt,
+      };
+
+      const postDeploy: PostDeployConfig = {
+        curator,
+        allocators: state.allocators.length > 0 ? state.allocators : undefined,
+        guardian,
+        fee: state.feePercent > 0 ? feePercentToWad(state.feePercent) : undefined,
+        feeRecipient,
+        initialMarkets: state.selectedMarkets
+          .filter((m) => m.supplyCap)
+          .map((m) => ({
+            marketParams: m.marketParams,
+            supplyCap: BigInt(
+              Math.round(Number(m.supplyCap) * 10 ** state.assetDecimals),
+            ),
+          })),
+        finalTimelock:
+          isZeroThenIncrease && state.finalTimelockSeconds > 0
+            ? BigInt(state.finalTimelockSeconds)
+            : undefined,
+      };
+
+      setSteps(buildDeploymentTxSequence(creationParams, postDeploy));
+    }
+  }, [state, isV2]);
 
   const executeSteps = useCallback(async () => {
     if (!walletClient || !publicClient || !address || steps.length === 0) return;
@@ -153,16 +191,17 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
         // Parse vault address from deploy step
         if (i === 0) {
-          const addr = parseVaultAddressFromReceipt(receipt);
+          const addr = isV2
+            ? parseV2VaultAddressFromReceipt(receipt)
+            : parseVaultAddressFromReceipt(receipt);
           if (addr) {
             deployedVaultAddr = addr;
             setVaultAddress(addr);
-            // Track the vault
             addTrackedVault({
               address: addr,
               chainId: state.chainId!,
               name: state.vaultName,
-              version: 'v1',
+              version: state.version,
             });
           }
         }
