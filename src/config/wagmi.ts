@@ -12,7 +12,7 @@ export const sei: Chain = {
   nativeCurrency: { name: 'SEI', symbol: 'SEI', decimals: 18 },
   rpcUrls: {
     default: {
-      http: [import.meta.env.VITE_SEI_RPC_URL || 'https://sei-evm-rpc.publicnode.com'],
+      http: ['https://sei-evm-rpc.publicnode.com'],
     },
   },
   blockExplorers: {
@@ -25,15 +25,9 @@ export const config = getDefaultConfig({
   projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
   chains: [sei, mainnet, base],
   transports: {
-    [sei.id]: http(
-      import.meta.env.VITE_SEI_RPC_URL || 'https://sei-evm-rpc.publicnode.com',
-    ),
-    [mainnet.id]: http(
-      import.meta.env.VITE_ETH_RPC_URL || 'https://eth.llamarpc.com',
-    ),
-    [base.id]: http(
-      import.meta.env.VITE_BASE_RPC_URL || 'https://mainnet.base.org',
-    ),
+    [sei.id]: http('https://sei-evm-rpc.publicnode.com'),
+    [mainnet.id]: http('https://eth.llamarpc.com'),
+    [base.id]: http('https://mainnet.base.org'),
   },
 });
 

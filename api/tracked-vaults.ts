@@ -1,8 +1,11 @@
 import { get } from '@vercel/edge-config';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { walletToKey, type TrackedVault } from './_lib/types';
+import { checkCors } from './_lib/cors';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!checkCors(req, res)) return res.status(403).json({ error: 'Forbidden' });
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

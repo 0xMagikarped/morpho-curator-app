@@ -14,8 +14,10 @@ dist-ssr
 
 # Environment variables
 .env
+.env.*
 .env.local
 .env.*.local
+SECURITY-AUDIT-RESULTS.md
 
 # Editor directories and files
 .vscode/*
@@ -27,3 +29,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*.local

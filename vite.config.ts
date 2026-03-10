@@ -8,4 +8,7 @@ export default defineConfig({
     // Required for some wagmi dependencies
     'process.env': {},
   },
+  build: {
+    sourcemap: false,
+  },
 });
