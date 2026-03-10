@@ -53,7 +53,7 @@ export function VaultPage() {
 
   const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
-  const { addTrackedVault } = useAppStore();
+  const { trackedVaults, addTrackedVault, removeTrackedVault } = useAppStore();
 
   if (!chainId || !vaultAddress) {
     return (
@@ -81,8 +81,15 @@ export function VaultPage() {
 
   const isV2 = vault?.version === 'v2';
 
-  const handleTrack = () => {
-    if (vault) {
+  const isTracked = trackedVaults.some(
+    (v) => v.address.toLowerCase() === vaultAddress.toLowerCase() && v.chainId === chainId,
+  );
+
+  const handleToggleTrack = () => {
+    if (!vault) return;
+    if (isTracked) {
+      removeTrackedVault(vaultAddress, chainId);
+    } else {
       addTrackedVault({
         address: vaultAddress,
         chainId,
@@ -122,8 +129,12 @@ export function VaultPage() {
             </div>
           )}
         </div>
-        <Button variant="secondary" size="sm" onClick={handleTrack}>
-          Track Vault
+        <Button
+          variant={isTracked ? 'ghost' : 'secondary'}
+          size="sm"
+          onClick={handleToggleTrack}
+        >
+          {isTracked ? 'Untrack' : 'Track Vault'}
         </Button>
       </div>
 

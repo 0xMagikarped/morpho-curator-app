@@ -12,6 +12,7 @@ import { AllocationBar } from '../components/dashboard/AllocationBar';
 import { ActivityFeed, type ActivityEvent } from '../components/dashboard/ActivityFeed';
 import { PendingActions } from '../components/dashboard/PendingActions';
 import { RiskAlertBanner } from '../components/risk/RiskAlertBanner';
+import { ManagedVaultsBanner } from '../components/dashboard/ManagedVaultsBanner';
 import { useAppStore } from '../store/appStore';
 import { useDashboardVaults, useDashboardPendingActions } from '../lib/hooks/useDashboard';
 import { getSupportedChainIds, getChainConfig, SEI_KNOWN_VAULTS } from '../config/chains';
@@ -178,6 +179,9 @@ export function DashboardPage() {
 
       {/* Hatch divider */}
       <div className="hatch h-6 w-full border-y border-border-default my-4" />
+
+      {/* ── AUTO-DETECT MANAGED VAULTS ── */}
+      <ManagedVaultsBanner />
 
       {/* ── RISK ALERTS ── */}
       <RiskAlertBanner alerts={riskAlerts} />
