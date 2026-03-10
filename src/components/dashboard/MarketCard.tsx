@@ -37,14 +37,14 @@ export function MarketCard({
     return (
       <Card className="!p-3">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-4 h-4 rounded bg-bg-hover animate-shimmer" />
-          <div className="h-4 w-28 bg-bg-hover rounded animate-shimmer" />
+          <div className="w-4 h-4 bg-bg-hover animate-shimmer" />
+          <div className="h-4 w-28 bg-bg-hover animate-shimmer" />
         </div>
         <div className="grid grid-cols-2 gap-2">
           {[1, 2, 3, 4].map((i) => (
             <div key={i}>
-              <div className="h-2.5 w-12 bg-bg-hover rounded animate-shimmer mb-1" />
-              <div className="h-4 w-16 bg-bg-hover rounded animate-shimmer" />
+              <div className="h-2.5 w-12 bg-bg-hover animate-shimmer mb-1" />
+              <div className="h-4 w-16 bg-bg-hover animate-shimmer" />
             </div>
           ))}
         </div>
@@ -62,7 +62,7 @@ export function MarketCard({
       className={cn(
         '!p-3 transition-all duration-100 ease-out group',
         isFrozen && 'opacity-45',
-        !isFrozen && 'hover:shadow-[0_4px_16px_rgba(0,0,0,0.4)]',
+        !isFrozen && 'hover:border-blue-primary',
       )}
     >
       {/* Header */}

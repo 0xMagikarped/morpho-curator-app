@@ -37,7 +37,7 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-16 bg-bg-hover rounded animate-shimmer" />
+          <div key={i} className="h-16 bg-bg-hover animate-shimmer" />
         ))}
       </div>
     );

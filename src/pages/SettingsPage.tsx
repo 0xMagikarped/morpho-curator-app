@@ -40,7 +40,7 @@ export function SettingsPage() {
             {trackedVaults.map((v) => (
               <div
                 key={`${v.chainId}-${v.address}`}
-                className="flex items-center justify-between py-2 px-3 bg-bg-hover/30 rounded"
+                className="flex items-center justify-between py-2 px-3 bg-bg-hover/30"
               >
                 <div>
                   <p className="text-sm text-text-primary">{v.name}</p>
@@ -88,7 +88,7 @@ export function SettingsPage() {
                     onChange={(e) =>
                       setRpcInputs({ ...rpcInputs, [chainId]: e.target.value })
                     }
-                    className="flex-1 bg-bg-hover border border-border-default rounded px-3 py-1.5 text-xs text-text-primary font-mono"
+                    className="flex-1 bg-bg-hover border border-border-default px-3 py-1.5 text-xs text-text-primary font-mono"
                   />
                   <Button
                     variant="secondary"
@@ -113,7 +113,7 @@ export function SettingsPage() {
           {Object.entries(CHAIN_CONFIGS).map(([idStr, config]) => (
             <div
               key={idStr}
-              className="flex items-center justify-between py-2 px-3 bg-bg-hover/20 rounded text-sm"
+              className="flex items-center justify-between py-2 px-3 bg-bg-hover/20 text-sm"
             >
               <span className="text-text-primary">{config.name}</span>
               <div className="flex gap-2">

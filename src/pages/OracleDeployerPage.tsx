@@ -52,7 +52,7 @@ const oracleFactoryAbi = [
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
 
 const INPUT_CLASS =
-  'w-full bg-bg-elevated border border-border-subtle rounded-md px-3 py-2 text-sm text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:border-border-focus';
+  'w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:border-border-focus';
 
 // ============================================================
 // Types
@@ -396,7 +396,7 @@ function ValidateStep({
         {scaleFactor !== null && (
           <div className="space-y-1">
             <SectionLabel>Computed Scale Factor</SectionLabel>
-            <div className="bg-bg-elevated rounded-md px-3 py-2 font-mono text-xs text-accent-primary break-all">
+            <div className="bg-bg-elevated px-3 py-2 font-mono text-xs text-accent-primary break-all">
               {scaleFactor.toString()}
             </div>
           </div>
@@ -536,7 +536,7 @@ function DeployStep({
         {/* Summary */}
         <div className="space-y-1">
           <SectionLabel>Deployment Summary</SectionLabel>
-          <div className="bg-bg-elevated rounded-md px-3 py-2 space-y-1 text-xs">
+          <div className="bg-bg-elevated px-3 py-2 space-y-1 text-xs">
             <div className="flex justify-between">
               <span className="text-text-tertiary">Chain</span>
               <span className="text-text-primary">{chainConfig?.name ?? config.chainId}</span>
@@ -566,11 +566,11 @@ function DeployStep({
         <div className="space-y-1">
           <SectionLabel>Wallet</SectionLabel>
           {!isConnected ? (
-            <div className="bg-bg-elevated rounded-md px-3 py-2 text-sm text-warning">
+            <div className="bg-bg-elevated px-3 py-2 text-sm text-warning">
               Connect your wallet to deploy.
             </div>
           ) : (
-            <div className="bg-bg-elevated rounded-md px-3 py-2 space-y-2">
+            <div className="bg-bg-elevated px-3 py-2 space-y-2">
               <div className="flex justify-between text-xs">
                 <span className="text-text-tertiary">Connected</span>
                 <span className="text-text-primary font-mono text-[11px]">{walletAddress}</span>
@@ -597,7 +597,7 @@ function DeployStep({
         {simError && !chainMismatch && isConnected && (
           <div className="space-y-1">
             <SectionLabel>Simulation Error</SectionLabel>
-            <div className="bg-danger/10 border border-danger/30 rounded-md px-3 py-2 text-xs text-danger font-mono break-all">
+            <div className="bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger font-mono break-all">
               {simError.message.slice(0, 300)}
             </div>
           </div>
@@ -607,7 +607,7 @@ function DeployStep({
         {txHash && (
           <div className="space-y-1">
             <SectionLabel>Transaction</SectionLabel>
-            <div className="bg-bg-elevated rounded-md px-3 py-2 space-y-1.5 text-xs">
+            <div className="bg-bg-elevated px-3 py-2 space-y-1.5 text-xs">
               <div className="flex justify-between">
                 <span className="text-text-tertiary">TX Hash</span>
                 <a
@@ -641,7 +641,7 @@ function DeployStep({
         {isSuccess && deployedOracle && (
           <div className="space-y-1">
             <SectionLabel>Deployed Oracle</SectionLabel>
-            <div className="bg-success/10 border border-success/30 rounded-md px-3 py-2.5">
+            <div className="bg-success/10 border border-success/30 px-3 py-2.5">
               <div className="text-xs text-text-tertiary mb-1">Oracle Address</div>
               <div className="text-sm text-success font-mono break-all">{deployedOracle}</div>
             </div>

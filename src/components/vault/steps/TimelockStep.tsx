@@ -42,7 +42,7 @@ export function TimelockStep({ state, onUpdate, onNext, onBack }: StepProps) {
             <button
               key={preset.seconds}
               onClick={() => handlePreset(preset.seconds)}
-              className={`w-full flex items-center justify-between rounded border px-4 py-3 transition-colors text-left ${
+              className={`w-full flex items-center justify-between border px-4 py-3 transition-colors text-left ${
                 (preset.seconds === 0 && isZeroThenIncrease) ||
                 (preset.seconds > 0 && !isZeroThenIncrease && state.initialTimelockSeconds === preset.seconds)
                   ? 'border-accent-primary bg-accent-primary-muted'
@@ -72,7 +72,7 @@ export function TimelockStep({ state, onUpdate, onNext, onBack }: StepProps) {
           ))}
 
           {/* Custom */}
-          <div className="flex items-center gap-3 px-4 py-3 border border-border-default bg-bg-hover/30 rounded">
+          <div className="flex items-center gap-3 px-4 py-3 border border-border-default bg-bg-hover/30">
             <span className="text-sm text-text-secondary">Custom:</span>
             <input
               type="number"
@@ -91,7 +91,7 @@ export function TimelockStep({ state, onUpdate, onNext, onBack }: StepProps) {
                 });
               }}
               placeholder="seconds"
-              className="w-32 bg-bg-hover border border-border-default rounded px-2 py-1 text-sm text-text-primary"
+              className="w-32 bg-bg-hover border border-border-default px-2 py-1 text-sm text-text-primary"
             />
             <span className="text-xs text-text-tertiary">seconds</span>
           </div>
@@ -110,7 +110,7 @@ export function TimelockStep({ state, onUpdate, onNext, onBack }: StepProps) {
               min={1}
               value={state.finalTimelockSeconds}
               onChange={(e) => onUpdate({ finalTimelockSeconds: Number(e.target.value) })}
-              className="w-40 bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary"
+              className="w-40 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary"
             />
             <span className="text-xs text-text-secondary">
               = {formatTimelockDuration(state.finalTimelockSeconds)}
@@ -123,7 +123,7 @@ export function TimelockStep({ state, onUpdate, onNext, onBack }: StepProps) {
         </div>
       )}
 
-      <div className="bg-warning/10 rounded p-3 text-xs text-warning/80 space-y-1">
+      <div className="bg-warning/10 p-3 text-xs text-warning/80 space-y-1">
         <p>
           Timelock 0 means ALL actions take effect immediately with no guardian veto window.
         </p>

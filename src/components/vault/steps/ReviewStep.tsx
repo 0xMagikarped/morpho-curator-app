@@ -116,7 +116,7 @@ export function ReviewStep({ state, onNext, onBack }: ReviewStepProps) {
         <span>Transactions: 1 deploy + {txCount} config</span>
       </div>
 
-      <div className="bg-warning/10 rounded p-3 text-xs text-warning/80">
+      <div className="bg-warning/10 p-3 text-xs text-warning/80">
         The oracle address for each market is IMMUTABLE. Verify oracle risk before deploying.
       </div>
 

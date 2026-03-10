@@ -129,12 +129,12 @@ export function MarketPreview({ data, onBack, onDeploy }: MarketPreviewProps) {
           </div>
         </div>
 
-        <div className="bg-bg-hover rounded-md p-3">
+        <div className="bg-bg-hover p-3">
           <span className="text-[10px] text-text-tertiary uppercase">Computed Market ID</span>
           <p className="font-mono text-xs text-accent-primary break-all mt-0.5">{marketId}</p>
         </div>
 
-        <div className="bg-bg-hover rounded-md p-3">
+        <div className="bg-bg-hover p-3">
           <span className="text-[10px] text-text-tertiary uppercase">Market Existence Check</span>
           {checking ? (
             <p className="text-xs text-text-tertiary mt-0.5">Checking...</p>

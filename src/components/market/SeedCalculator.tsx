@@ -79,25 +79,25 @@ export function SeedCalculator({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-bg-hover rounded-md p-3">
+          <div className="bg-bg-hover p-3">
             <span className="text-[10px] text-text-tertiary uppercase block">Vault Supply</span>
             <p className="text-sm font-mono text-text-primary">
               {result.vaultSupply.toLocaleString('en-US', { maximumFractionDigits: 2 })} {loanSymbol}
             </p>
           </div>
-          <div className="bg-bg-hover rounded-md p-3">
+          <div className="bg-bg-hover p-3">
             <span className="text-[10px] text-text-tertiary uppercase block">Collateral to Supply</span>
             <p className="text-sm font-mono text-text-primary">
               {result.collatToSupply.toLocaleString('en-US', { maximumFractionDigits: 6 })} {collateralSymbol}
             </p>
           </div>
-          <div className="bg-bg-hover rounded-md p-3">
+          <div className="bg-bg-hover p-3">
             <span className="text-[10px] text-text-tertiary uppercase block">Amount to Borrow</span>
             <p className="text-sm font-mono text-text-primary">
               {result.amountToBorrow.toLocaleString('en-US', { maximumFractionDigits: 2 })} {loanSymbol}
             </p>
           </div>
-          <div className="bg-bg-hover rounded-md p-3">
+          <div className="bg-bg-hover p-3">
             <span className="text-[10px] text-text-tertiary uppercase block">Effective LTV</span>
             <p className={`text-sm font-mono ${result.ltv < Number(lltvWad) / 1e18 ? 'text-success' : 'text-danger'}`}>
               {(result.ltv * 100).toFixed(2)}%

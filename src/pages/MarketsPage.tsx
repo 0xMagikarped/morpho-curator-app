@@ -166,12 +166,12 @@ export function MarketsPage() {
         </div>
         <button
           onClick={() => setSearchOpen(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-bg-hover border border-border-subtle rounded text-xs text-text-tertiary hover:text-text-secondary hover:border-border-default transition-colors min-h-[36px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
+          className="flex items-center gap-2 px-3 py-1.5 bg-bg-hover border border-border-subtle text-xs text-text-tertiary hover:text-text-secondary hover:border-border-default transition-colors min-h-[36px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
           aria-label="Search markets"
         >
           <Search size={14} />
           <span>Search...</span>
-          <kbd className="text-[10px] bg-bg-surface px-1.5 py-0.5 rounded font-mono ml-2">⌘K</kbd>
+          <kbd className="text-[10px] bg-bg-surface px-1.5 py-0.5 font-mono ml-2">⌘K</kbd>
         </button>
       </div>
 
@@ -185,7 +185,7 @@ export function MarketsPage() {
             setDrawerMarket(null);
             clearFilters();
           }}
-          className="bg-bg-hover border border-border-subtle rounded px-2 py-1.5 text-xs text-text-primary font-mono"
+          className="bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono"
           disabled={isLoading}
         >
           {supportedChains.map((id) => {
@@ -209,7 +209,7 @@ export function MarketsPage() {
                   onClick={() => toggleToken(opt.address)}
                   disabled={isLoading}
                   className={cn(
-                    'inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary',
+                    'inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium transition-colors border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary',
                     isActive
                       ? 'bg-bg-active border-accent-primary/30 text-accent-primary'
                       : 'bg-transparent border-border-subtle text-text-secondary hover:border-border-default',
@@ -244,7 +244,7 @@ export function MarketsPage() {
         {hasFilters && (
           <button
             onClick={clearFilters}
-            className="text-xs font-mono text-text-tertiary hover:text-text-secondary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
+            className="text-xs font-mono text-text-tertiary hover:text-text-secondary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
           >
             Clear filters
           </button>
@@ -258,9 +258,9 @@ export function MarketsPage() {
 
       {/* ── SCAN PROGRESS ── */}
       {isScanning && (
-        <div className="h-0.5 w-full bg-bg-hover rounded-full overflow-hidden">
+        <div className="h-0.5 w-full bg-bg-hover overflow-hidden">
           <div
-            className="h-full bg-accent-primary transition-all duration-300 rounded-full"
+            className="h-full bg-accent-primary transition-all duration-300"
             style={{ width: `${scanPercent}%` }}
           />
         </div>
@@ -284,11 +284,11 @@ export function MarketsPage() {
           <div className="divide-y divide-border-subtle/30">
             {Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="flex items-center gap-3 px-3 py-3">
-                <div className="h-4 w-24 bg-bg-hover rounded animate-shimmer" />
-                <div className="h-4 w-20 bg-bg-hover rounded animate-shimmer" />
+                <div className="h-4 w-24 bg-bg-hover animate-shimmer" />
+                <div className="h-4 w-20 bg-bg-hover animate-shimmer" />
                 <div className="flex-1" />
-                <div className="h-4 w-12 bg-bg-hover rounded animate-shimmer" />
-                <div className="h-4 w-16 bg-bg-hover rounded animate-shimmer" />
+                <div className="h-4 w-12 bg-bg-hover animate-shimmer" />
+                <div className="h-4 w-16 bg-bg-hover animate-shimmer" />
               </div>
             ))}
           </div>

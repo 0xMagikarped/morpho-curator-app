@@ -58,7 +58,7 @@ function OracleRow({
   const { data: risk } = useOracleRiskScore(chainId, oracleAddress);
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2 bg-bg-hover/30 rounded text-xs">
+    <div className="flex items-center gap-3 px-3 py-2 bg-bg-hover/30 text-xs">
       <OracleHealthIndicator health={health} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">

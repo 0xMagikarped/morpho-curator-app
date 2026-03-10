@@ -21,7 +21,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
   const totalAssets = vault?.totalAssets ?? 0n;
 
   if (isLoading) {
-    return <div className="animate-shimmer h-32 bg-bg-hover rounded" />;
+    return <div className="animate-shimmer h-32 bg-bg-hover" />;
   }
 
   if (error) {
@@ -168,7 +168,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
         <CardHeader>
           <CardTitle>Adapter Management</CardTitle>
         </CardHeader>
-        <p className="text-xs text-warning bg-warning/10 rounded p-2">
+        <p className="text-xs text-warning bg-warning/10 p-2">
           Adapter configuration requires timelocked submit/execute transactions. This interface is read-only for now.
         </p>
       </Card>

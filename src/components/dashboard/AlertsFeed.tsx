@@ -45,7 +45,7 @@ export function AlertsFeed({ alerts, onDismiss, onClearAll }: AlertsFeedProps) {
         {active.slice(0, 10).map((alert) => (
           <div
             key={alert.id}
-            className="flex items-center gap-2 text-xs py-1.5 px-2 bg-bg-hover/30 rounded"
+            className="flex items-center gap-2 text-xs py-1.5 px-2 bg-bg-hover/30"
           >
             <span className={`font-mono ${SEVERITY_COLORS[alert.severity]}`}>
               {alert.severity === 'critical' ? '!!' : alert.severity === 'warning' ? '!' : 'i'}

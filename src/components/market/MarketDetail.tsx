@@ -22,7 +22,7 @@ export function MarketDetail({ chainId, market, onClose }: MarketDetailProps) {
   const lltv = BigInt(market.lltv);
 
   return (
-    <div className="bg-bg-hover/50 border border-border-default rounded-lg p-4 space-y-4">
+    <div className="bg-bg-hover/50 border border-border-default p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-text-primary">

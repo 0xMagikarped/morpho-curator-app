@@ -52,10 +52,10 @@ export function ActivityFeed({ events, loading, blockExplorerUrl }: ActivityFeed
         <div className="space-y-0">
           {Array.from({ length: 5 }, (_, i) => (
             <div key={i} className="flex items-center gap-2 py-2 border-b border-border-subtle/30">
-              <div className="h-4 w-14 bg-bg-hover rounded animate-shimmer" />
-              <div className="h-4 w-20 bg-bg-hover rounded animate-shimmer" />
+              <div className="h-4 w-14 bg-bg-hover animate-shimmer" />
+              <div className="h-4 w-20 bg-bg-hover animate-shimmer" />
               <div className="flex-1" />
-              <div className="h-3 w-12 bg-bg-hover rounded animate-shimmer" />
+              <div className="h-3 w-12 bg-bg-hover animate-shimmer" />
             </div>
           ))}
         </div>

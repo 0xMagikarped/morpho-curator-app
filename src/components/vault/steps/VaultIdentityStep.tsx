@@ -44,7 +44,7 @@ export function VaultIdentityStep({ state, onUpdate, onNext, onBack }: StepProps
           value={state.vaultName}
           onChange={(e) => onUpdate({ vaultName: e.target.value })}
           placeholder="e.g., RockawayX USDC Vault"
-          className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
+          className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
         />
       </div>
 
@@ -55,7 +55,7 @@ export function VaultIdentityStep({ state, onUpdate, onNext, onBack }: StepProps
           value={state.vaultSymbol}
           onChange={(e) => onUpdate({ vaultSymbol: e.target.value })}
           placeholder="e.g., rxUSDC"
-          className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
+          className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
         />
       </div>
 
@@ -75,7 +75,7 @@ export function VaultIdentityStep({ state, onUpdate, onNext, onBack }: StepProps
               onUpdate({ salt: v as `0x${string}` });
             }
           }}
-          className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-xs text-text-secondary font-mono placeholder-text-tertiary"
+          className="w-full bg-bg-hover border border-border-default px-3 py-2 text-xs text-text-secondary font-mono placeholder-text-tertiary"
         />
         <p className="text-xs text-text-tertiary mt-1">
           Salt determines the vault's CREATE2 address. Change it to get a different deployment address.

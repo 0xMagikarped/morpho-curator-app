@@ -48,7 +48,7 @@ export function DeadDepositHelper({ marketParams, hasDeadDeposit }: DeadDepositH
 
   if (hasDeadDeposit) {
     return (
-      <div className="bg-success/10 border border-success/20 rounded-md p-3 text-xs text-success">
+      <div className="bg-success/10 border border-success/20 p-3 text-xs text-success">
         Dead deposit already exists (1e9 shares to 0x...dEaD)
       </div>
     );

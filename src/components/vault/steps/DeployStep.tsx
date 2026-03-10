@@ -208,7 +208,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
       {/* Vault address */}
       {vaultAddress && (
-        <div className="bg-success/15 rounded p-3 text-xs">
+        <div className="bg-success/15 p-3 text-xs">
           <span className="text-success">Vault deployed: </span>
           <a
             href={`${chainConfig?.blockExplorer}/address/${vaultAddress}`}
@@ -229,7 +229,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         {steps.map((step, i) => (
           <div
             key={step.id}
-            className={`flex items-center gap-3 px-3 py-2 rounded text-xs ${
+            className={`flex items-center gap-3 px-3 py-2 text-xs ${
               i === currentStepIdx && status === 'deploying'
                 ? 'bg-bg-hover/60'
                 : 'bg-bg-hover/20'
@@ -259,7 +259,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
       {/* Error */}
       {error && (
-        <div className="bg-danger/15 rounded p-3 text-xs text-danger">{error}</div>
+        <div className="bg-danger/15 p-3 text-xs text-danger">{error}</div>
       )}
 
       {/* Actions */}

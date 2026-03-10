@@ -15,15 +15,15 @@ export function ChainBadge({ chainId, className }: ChainBadgeProps) {
   const config = chainColors[chainId];
   if (!config) {
     return (
-      <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[11px] text-text-secondary bg-bg-hover', className)}>
+      <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-text-secondary bg-bg-hover', className)}>
         {chainId}
       </span>
     );
   }
 
   return (
-    <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[11px]', config.bg, config.text, className)}>
-      <span className={cn('w-1.5 h-1.5 rounded-full', config.dot)} />
+    <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px]', config.bg, config.text, className)}>
+      <span className={cn('w-1.5 h-1.5', config.dot)} />
       {config.label}
     </span>
   );

@@ -37,7 +37,7 @@ export function V2SecurityTab({ chainId, vaultAddress }: V2SecurityTabProps) {
   }, []);
 
   if (!vault) {
-    return <div className="h-32 animate-shimmer rounded-lg" />;
+    return <div className="h-32 animate-shimmer" />;
   }
 
   const emergencyRoleAddr = getEmergencyRole(vault);
@@ -74,7 +74,7 @@ export function V2SecurityTab({ chainId, vaultAddress }: V2SecurityTabProps) {
       </Card>
 
       {isMismatch && (
-        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 rounded-lg px-3 py-2">
+        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
           <span className="text-xs text-warning">Wallet is on the wrong network. Switch to continue.</span>
           <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch Network</Button>
         </div>
@@ -96,14 +96,14 @@ export function V2SecurityTab({ chainId, vaultAddress }: V2SecurityTabProps) {
               placeholder="Market ID (0x...)"
               value={deallocateMarketId}
               onChange={(e) => setDeallocateMarketId(e.target.value)}
-              className="flex-1 bg-bg-elevated border border-border-default rounded-md px-3 py-2 text-sm text-text-primary placeholder-text-tertiary font-mono focus:border-border-focus focus:outline-none"
+              className="flex-1 bg-bg-elevated border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary font-mono focus:border-border-focus focus:outline-none"
             />
             <input
               type="number"
               placeholder="Amount"
               value={deallocateAmount}
               onChange={(e) => setDeallocateAmount(e.target.value)}
-              className="w-32 bg-bg-elevated border border-border-default rounded-md px-3 py-2 text-sm text-text-primary placeholder-text-tertiary font-mono focus:border-border-focus focus:outline-none"
+              className="w-32 bg-bg-elevated border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary font-mono focus:border-border-focus focus:outline-none"
             />
             <Button
               variant="danger"
@@ -131,7 +131,7 @@ export function V2SecurityTab({ chainId, vaultAddress }: V2SecurityTabProps) {
               const isReady = action.validAt > 0n && action.validAt <= nowSeconds;
 
               return (
-                <div key={i} className="flex items-center justify-between py-2 px-3 bg-bg-hover/50 rounded-md text-xs">
+                <div key={i} className="flex items-center justify-between py-2 px-3 bg-bg-hover/50 text-xs">
                   <div>
                     <Badge variant={isReady ? 'success' : 'warning'}>{action.type}</Badge>
                     <span className="text-text-primary ml-2">{action.description}</span>

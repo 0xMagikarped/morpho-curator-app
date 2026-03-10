@@ -176,6 +176,9 @@ export function DashboardPage() {
         />
       </div>
 
+      {/* Hatch divider */}
+      <div className="hatch h-6 w-full border-y border-border-default my-4" />
+
       {/* ── RISK ALERTS ── */}
       <RiskAlertBanner alerts={riskAlerts} />
 
@@ -190,7 +193,7 @@ export function DashboardPage() {
               <select
                 value={newVaultChainId}
                 onChange={(e) => setNewVaultChainId(Number(e.target.value))}
-                className="bg-bg-hover border border-border-subtle rounded px-2 py-1.5 text-xs text-text-primary font-mono"
+                className="bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono"
               >
                 {getSupportedChainIds().map((id) => {
                   const cfg = getChainConfig(id);
@@ -206,7 +209,7 @@ export function DashboardPage() {
                 placeholder="0x..."
                 value={newVaultAddress}
                 onChange={(e) => setNewVaultAddress(e.target.value)}
-                className="flex-1 bg-bg-hover border border-border-subtle rounded px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary min-w-0"
+                className="flex-1 bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary min-w-0"
               />
               <Button size="sm" onClick={handleAddVault}>
                 Add

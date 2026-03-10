@@ -48,7 +48,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
           value={state.owner ?? ''}
           onChange={(e) => onUpdate({ owner: e.target.value as `0x${string}` })}
           placeholder="0x..."
-          className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
+          className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
         />
         <p className="text-xs text-warning/80 mt-1">
           Consider using a multisig (Safe) as owner for production vaults.
@@ -66,7 +66,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
             const mode = e.target.value as 'owner' | 'custom' | 'none';
             onUpdate({ curatorMode: mode, curatorAddress: mode === 'owner' ? state.owner : null });
           }}
-          className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary mb-2"
+          className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary mb-2"
         >
           <option value="owner">Same as owner</option>
           <option value="custom">Custom address</option>
@@ -78,7 +78,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
             value={state.curatorAddress ?? ''}
             onChange={(e) => onUpdate({ curatorAddress: e.target.value as `0x${string}` })}
             placeholder="Curator address (0x...)"
-            className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
+            className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
           />
         )}
       </div>
@@ -91,7 +91,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
         {state.allocators.length > 0 && (
           <div className="space-y-1 mb-2">
             {state.allocators.map((addr) => (
-              <div key={addr} className="flex items-center justify-between bg-bg-hover/50 rounded px-3 py-1.5">
+              <div key={addr} className="flex items-center justify-between bg-bg-hover/50 px-3 py-1.5">
                 <span className="text-xs text-text-primary font-mono">{truncateAddress(addr)}</span>
                 <button
                   onClick={() => handleRemoveAllocator(addr)}
@@ -109,7 +109,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
             value={newAllocator}
             onChange={(e) => setNewAllocator(e.target.value)}
             placeholder="Allocator address (0x...)"
-            className="flex-1 bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
+            className="flex-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
           />
           <Button variant="secondary" size="sm" onClick={handleAddAllocator}>
             Add
@@ -131,7 +131,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
             const mode = e.target.value as 'none' | 'custom';
             onUpdate({ guardianMode: mode, guardianAddress: null });
           }}
-          className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary mb-2"
+          className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary mb-2"
         >
           <option value="none">None (can add later — instant)</option>
           <option value="custom">Custom address</option>
@@ -142,7 +142,7 @@ export function RolesStep({ state, onUpdate, onNext, onBack }: StepProps) {
             value={state.guardianAddress ?? ''}
             onChange={(e) => onUpdate({ guardianAddress: e.target.value as `0x${string}` })}
             placeholder="Guardian address (0x...)"
-            className="w-full bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
+            className="w-full bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary font-mono placeholder-text-tertiary"
           />
         )}
         {state.guardianMode === 'none' && (

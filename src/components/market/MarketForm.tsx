@@ -120,7 +120,7 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
   };
 
   const inputClass =
-    'w-full bg-bg-elevated border border-border-default rounded-md px-3 py-2 text-sm font-mono text-text-primary placeholder-text-tertiary focus:border-border-focus focus:outline-none';
+    'w-full bg-bg-elevated border border-border-default px-3 py-2 text-sm font-mono text-text-primary placeholder-text-tertiary focus:border-border-focus focus:outline-none';
 
   return (
     <Card>
@@ -216,7 +216,7 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
                   <button
                     key={p.label}
                     onClick={() => setLltvPreset(p.value.toString())}
-                    className={`px-3 py-2 rounded-md text-sm border transition-colors ${
+                    className={`px-3 py-2 text-sm border transition-colors ${
                       lltvPreset === p.value.toString()
                         ? 'border-accent-primary bg-accent-primary-muted text-text-primary'
                         : 'border-border-default bg-bg-hover text-text-secondary hover:text-text-primary'

@@ -78,7 +78,7 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
               onClick={() =>
                 onUpdate({ chainId: id, asset: null, assetSymbol: '', assetDecimals: 18 })
               }
-              className={`flex-1 rounded border px-4 py-3 text-left transition-colors ${
+              className={`flex-1 border px-4 py-3 text-left transition-colors ${
                 state.chainId === id
                   ? 'border-accent-primary bg-accent-primary-muted'
                   : 'border-border-default bg-bg-hover/30 hover:border-border-default'
@@ -114,7 +114,7 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
                     assetDecimals: token.decimals,
                   })
                 }
-                className={`w-full flex items-center justify-between rounded border px-4 py-3 transition-colors ${
+                className={`w-full flex items-center justify-between border px-4 py-3 transition-colors ${
                   state.asset?.toLowerCase() === token.address.toLowerCase()
                     ? 'border-accent-primary bg-accent-primary-muted'
                     : 'border-border-default bg-bg-hover/30 hover:border-border-default'
@@ -137,7 +137,7 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
                 placeholder="Custom token address (0x...)"
                 value={customToken}
                 onChange={(e) => setCustomToken(e.target.value)}
-                className="flex-1 bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
+                className="flex-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
               />
               <Button
                 size="sm"

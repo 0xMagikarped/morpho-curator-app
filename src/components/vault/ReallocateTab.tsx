@@ -107,7 +107,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const assetDecimals = vault?.assetInfo.decimals ?? 18;
 
   if (allocLoading || marketsLoading) {
-    return <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 bg-bg-hover rounded animate-shimmer" />)}</div>;
+    return <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 bg-bg-hover animate-shimmer" />)}</div>;
   }
 
   if (allocError || marketsError) {
@@ -133,7 +133,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   return (
     <div className="space-y-4">
       {isMismatch && (
-        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 rounded px-3 py-2">
+        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
           <span className="text-xs text-warning">Wallet is on the wrong network. Switch to continue.</span>
           <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch Network</Button>
         </div>
@@ -179,7 +179,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                             step="0.01"
                             value={formatUnits(edit.targetAssets, assetDecimals)}
                             onChange={(e) => handleTargetChange(edit.marketId, e.target.value)}
-                            className={`w-28 bg-bg-hover border rounded px-2 py-1 text-right text-sm font-mono ${
+                            className={`w-28 bg-bg-hover border px-2 py-1 text-right text-sm font-mono ${
                               overCap ? 'border-danger/20 text-danger' : 'border-border-default text-text-primary'
                             }`}
                           />

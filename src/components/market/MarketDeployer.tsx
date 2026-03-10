@@ -52,7 +52,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
 
       <div className="space-y-3">
         {isMismatch && (
-          <div className="flex items-center justify-between bg-warning/10 border border-warning/20 rounded px-3 py-2">
+          <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
             <span className="text-xs text-warning">Wrong network</span>
             <Button size="sm" variant="secondary" onClick={requestSwitch}>
               Switch
@@ -61,7 +61,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
         )}
 
         {simError && (
-          <div className="bg-danger/10 border border-danger/20 rounded px-3 py-2">
+          <div className="bg-danger/10 border border-danger/20 px-3 py-2">
             <p className="text-xs text-danger">
               Simulation failed: {simError.message.slice(0, 200)}
             </p>
@@ -69,7 +69,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
         )}
 
         {writeError && (
-          <div className="bg-danger/10 border border-danger/20 rounded px-3 py-2">
+          <div className="bg-danger/10 border border-danger/20 px-3 py-2">
             <p className="text-xs text-danger">
               Transaction failed: {writeError.message.slice(0, 200)}
             </p>
@@ -77,7 +77,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
         )}
 
         {isSuccess && txHash && (
-          <div className="bg-success/10 border border-success/20 rounded px-3 py-2 space-y-1">
+          <div className="bg-success/10 border border-success/20 px-3 py-2 space-y-1">
             <p className="text-xs text-success">Market deployed successfully!</p>
             <p className="text-xs text-text-secondary font-mono">Tx: {txHash}</p>
             <p className="text-xs text-text-secondary font-mono">Market ID: {marketId}</p>

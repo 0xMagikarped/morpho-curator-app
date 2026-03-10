@@ -76,7 +76,7 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
   }, [markets, chainId]);
 
   if (isLoading || !vault) {
-    return <div className="animate-shimmer space-y-4"><div className="h-24 bg-bg-hover rounded" /><div className="h-24 bg-bg-hover rounded" /></div>;
+    return <div className="animate-shimmer space-y-4"><div className="h-24 bg-bg-hover" /><div className="h-24 bg-bg-hover" /></div>;
   }
 
   if (error && !vault) {

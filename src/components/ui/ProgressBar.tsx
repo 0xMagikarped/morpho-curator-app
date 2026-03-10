@@ -26,12 +26,12 @@ export function ProgressBar({ value, className, variant, height = 'md' }: Progre
 
   return (
     <div className={cn(
-      'w-full bg-bg-hover rounded-full overflow-hidden',
+      'w-full bg-bg-hover overflow-hidden',
       height === 'sm' ? 'h-1.5' : 'h-2',
       className,
     )}>
       <div
-        className={cn('h-full rounded-full transition-all duration-300', barVariants[resolvedVariant])}
+        className={cn('h-full transition-all duration-300', barVariants[resolvedVariant])}
         style={{ width: `${clamped}%` }}
       />
     </div>

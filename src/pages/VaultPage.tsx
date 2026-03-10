@@ -100,7 +100,7 @@ export function VaultPage() {
           <button
             onClick={() => navigate('/')}
             aria-label="Back to dashboard"
-            className="text-text-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
+            className="text-text-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
           >
             &larr;
           </button>

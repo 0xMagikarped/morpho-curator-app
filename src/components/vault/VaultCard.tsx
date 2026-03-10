@@ -64,7 +64,7 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
   if (isLoading) {
     return (
       <Card>
-        <div className="h-32 animate-shimmer rounded" />
+        <div className="h-32 animate-shimmer" />
       </Card>
     );
   }
@@ -157,7 +157,7 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
         <div className="space-y-1">
           {activePending.map((action, i) => (
             <div key={i} className="flex items-center gap-2 text-xs text-warning">
-              <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+              <span className="w-1.5 h-1.5 bg-warning" />
               <span>{action.description}</span>
               <span className="text-text-tertiary ml-auto font-mono">
                 {formatCountdown(action.validAt)}

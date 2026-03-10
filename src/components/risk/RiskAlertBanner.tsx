@@ -25,7 +25,7 @@ export function RiskAlertBanner({ alerts, maxShow = 3 }: RiskAlertBannerProps) {
   const remaining = alerts.length - shown.length;
 
   return (
-    <div className={`rounded border p-3 text-xs space-y-1.5 ${SEVERITY_STYLES[topSeverity]}`}>
+    <div className={`border p-3 text-xs space-y-1.5 ${SEVERITY_STYLES[topSeverity]}`}>
       <div className="flex items-center justify-between">
         <span className="font-medium">
           {alerts.length} alert{alerts.length !== 1 ? 's' : ''}

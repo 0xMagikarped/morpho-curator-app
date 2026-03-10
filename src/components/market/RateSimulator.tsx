@@ -82,12 +82,12 @@ export function RateSimulator({ marketId }: RateSimulatorProps) {
 
         {result && (
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-bg-hover rounded-md p-3">
+            <div className="bg-bg-hover p-3">
               <span className="text-[10px] text-text-tertiary uppercase block">Current</span>
               <p className="text-sm text-text-secondary">Utilization: {result.currentUtilization.toFixed(1)}%</p>
               <p className="text-lg font-mono text-text-primary">{result.currentBorrowRate.toFixed(2)}% APR</p>
             </div>
-            <div className="bg-bg-hover rounded-md p-3">
+            <div className="bg-bg-hover p-3">
               <span className="text-[10px] text-text-tertiary uppercase block">Simulated</span>
               <p className="text-sm text-text-secondary">Utilization: {targetUtil}%</p>
               <p className="text-lg font-mono text-text-primary">{result.simulatedBorrowRate.toFixed(2)}% APR</p>

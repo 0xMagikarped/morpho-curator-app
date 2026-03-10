@@ -20,26 +20,24 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'noise relative flex flex-col h-screen border-r border-border-default transition-all duration-200',
+        'relative flex flex-col h-screen border-r border-border-default transition-all duration-200',
         'bg-bg-surface',
         sidebarCollapsed ? 'w-16' : 'w-60',
       )}
-      style={{ backgroundImage: 'linear-gradient(180deg, #0D1017 0%, #0A0D14 100%)' }}
     >
       {/* Logo */}
       <div className="flex items-center justify-between px-4 h-12 border-b border-border-default">
         {!sidebarCollapsed && (
-          <span className="text-sm font-bold text-text-primary tracking-tight font-mono">
-            <span className="text-accent-primary">{'>'}</span>
-            <span className="ml-1 text-text-secondary">morpho</span>
-            <span className="text-accent-primary">_</span>
-            <span className="text-text-tertiary text-xs ml-0.5">curator</span>
+          <span className="font-display text-sm font-bold tracking-tight text-text-secondary">
+            <span className="text-accent-primary mr-0.5">{'>'}</span>
+            morpho<span className="text-accent-primary">_</span>
+            <span className="text-text-tertiary text-xs">curator</span>
           </span>
         )}
         <button
           onClick={toggleSidebar}
           aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="p-1.5 rounded-md hover:bg-bg-hover text-text-tertiary hover:text-text-secondary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
+          className="p-1.5 hover:bg-bg-hover text-text-tertiary hover:text-text-secondary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
         >
           {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
         </button>
@@ -54,11 +52,10 @@ export function Sidebar() {
             end={item.path === '/'}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors relative',
+                'flex items-center gap-3 px-3 py-2 text-sm transition-colors relative',
                 isActive
-                  ? 'bg-bg-active text-text-primary'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
-                isActive && 'before:absolute before:left-0 before:top-1 before:bottom-1 before:w-[3px] before:bg-accent-primary before:rounded-r',
+                  ? 'bg-bg-active text-text-secondary font-medium row-accent-left'
+                  : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover',
               )
             }
           >
@@ -71,7 +68,7 @@ export function Sidebar() {
       {/* Tracked Vaults */}
       {!sidebarCollapsed && trackedVaults.length > 0 && (
         <div className="px-3 py-3 border-t border-border-subtle">
-          <p className="text-[10px] font-medium text-text-tertiary uppercase tracking-wider mb-2 px-1 font-mono">
+          <p className="text-text-tertiary text-[10px] uppercase tracking-widest font-mono mb-2 px-1">
             {'// Vaults'}
           </p>
           <div className="space-y-0.5">
@@ -81,10 +78,10 @@ export function Sidebar() {
                 to={`/vault/${v.chainId}/${v.address}`}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-2 px-2 py-1.5 rounded-md text-xs truncate transition-colors',
+                    'flex items-center gap-2 px-2 py-1.5 text-xs truncate transition-colors',
                     isActive
-                      ? 'bg-bg-active text-text-primary'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
+                      ? 'bg-bg-active text-text-secondary font-medium'
+                      : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover',
                   )
                 }
               >

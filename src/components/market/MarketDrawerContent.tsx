@@ -81,7 +81,7 @@ function OverviewTab({
     return (
       <div className="space-y-3">
         {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="h-10 bg-bg-hover rounded animate-shimmer" />
+          <div key={i} className="h-10 bg-bg-hover animate-shimmer" />
         ))}
       </div>
     );
@@ -165,10 +165,10 @@ function RiskTab({
       {/* LTV waterfall */}
       <div>
         <span className="text-[10px] text-text-tertiary uppercase tracking-wider">LTV Waterfall</span>
-        <div className="relative h-3 mt-2 bg-bg-hover rounded-full overflow-hidden">
+        <div className="relative h-3 mt-2 bg-bg-hover overflow-hidden">
           {/* Utilization fill */}
           <div
-            className="absolute top-0 left-0 h-full rounded-full"
+            className="absolute top-0 left-0 h-full"
             style={{
               width: `${Math.min(currentUtil * 100, 100)}%`,
               backgroundColor: 'var(--color-success)',
@@ -270,7 +270,7 @@ function NotesTab({ marketId }: { marketId: string }) {
         onChange={(e) => setNotes(e.target.value)}
         onBlur={handleBlur}
         placeholder="Add notes about this market..."
-        className="w-full h-40 bg-bg-hover border border-border-subtle rounded p-2 text-sm text-text-primary placeholder-text-tertiary resize-none outline-none focus:border-border-focus font-mono"
+        className="w-full h-40 bg-bg-hover border border-border-subtle p-2 text-sm text-text-primary placeholder-text-tertiary resize-none outline-none focus:border-border-focus font-mono"
       />
       <p className="text-[10px] text-text-tertiary text-right">{notes.length} characters</p>
     </div>

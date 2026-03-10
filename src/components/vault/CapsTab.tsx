@@ -78,7 +78,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   };
 
   if (allocLoading || marketsLoading) {
-    return <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 bg-bg-hover rounded animate-shimmer" />)}</div>;
+    return <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 bg-bg-hover animate-shimmer" />)}</div>;
   }
 
   if (allocError || marketsError) {
@@ -95,7 +95,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     <div className="space-y-4">
       {/* Chain Mismatch Warning */}
       {isMismatch && (
-        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 rounded px-3 py-2">
+        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
           <span className="text-xs text-warning">Wallet is on the wrong network. Switch to continue.</span>
           <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch Network</Button>
         </div>
@@ -115,7 +115,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
               return (
                 <div
                   key={i}
-                  className="flex items-center justify-between py-2 px-3 bg-bg-hover/50 rounded"
+                  className="flex items-center justify-between py-2 px-3 bg-bg-hover/50"
                 >
                   <div>
                     <p className="text-sm text-text-primary">{pc.description}</p>
@@ -158,7 +158,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
               return (
                 <div
                   key={alloc.marketId}
-                  className="flex items-center gap-4 py-2 px-3 bg-bg-hover/30 rounded hover:bg-bg-hover/50 cursor-pointer"
+                  className="flex items-center gap-4 py-2 px-3 bg-bg-hover/30 hover:bg-bg-hover/50 cursor-pointer"
                   onClick={() => setSelectedMarket(alloc.marketId)}
                 >
                   <div className="flex-1">
@@ -195,7 +195,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
               <select
                 value={selectedMarket ?? ''}
                 onChange={(e) => setSelectedMarket(e.target.value || null)}
-                className="w-full mt-1 bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary"
+                className="w-full mt-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary"
               >
                 <option value="">Select market...</option>
                 {markets?.map((m) => (
@@ -213,10 +213,10 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                 value={newCapValue}
                 onChange={(e) => setNewCapValue(e.target.value)}
                 placeholder="e.g., 1000000"
-                className="w-full mt-1 bg-bg-hover border border-border-default rounded px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
+                className="w-full mt-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
               />
             </div>
-            <div className="text-xs text-warning bg-warning/10 rounded p-2">
+            <div className="text-xs text-warning bg-warning/10 p-2">
               Cap increases are timelocked. After submitting, wait for the timelock duration before accepting.
             </div>
             <Button

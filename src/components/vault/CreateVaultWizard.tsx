@@ -125,7 +125,7 @@ export function CreateVaultWizard() {
           {STEP_LABELS.map((label, i) => (
             <div
               key={label}
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2 ${
                 i < step
                   ? 'bg-accent-primary'
                   : i === step

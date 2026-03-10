@@ -6,14 +6,14 @@ interface OracleHealthIndicatorProps {
 
 export function OracleHealthIndicator({ health }: OracleHealthIndicatorProps) {
   if (!health) {
-    return <span className="inline-block w-2 h-2 rounded-full bg-text-tertiary animate-pulse" title="Checking..." />;
+    return <span className="inline-block w-2 h-2 bg-text-tertiary animate-pulse" title="Checking..." />;
   }
 
   if (health.isResponding) {
     const color = health.latencyMs < 1000 ? 'bg-success' : 'bg-warning';
     return (
       <span
-        className={`inline-block w-2 h-2 rounded-full ${color}`}
+        className={`inline-block w-2 h-2 ${color}`}
         title={`Responding (${health.latencyMs}ms)`}
       />
     );
@@ -21,7 +21,7 @@ export function OracleHealthIndicator({ health }: OracleHealthIndicatorProps) {
 
   return (
     <span
-      className="inline-block w-2 h-2 rounded-full bg-danger"
+      className="inline-block w-2 h-2 bg-danger"
       title={health.error ?? 'Not responding'}
     />
   );

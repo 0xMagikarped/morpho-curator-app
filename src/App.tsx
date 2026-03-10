@@ -2,7 +2,7 @@ import { Component, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
+import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit';
 import '@rainbow-me/rainbowkit/styles.css';
 
 import { config } from './config/wagmi';
@@ -31,10 +31,10 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   render() {
     if (this.state.error) {
       return (
-        <div style={{ color: 'white', padding: '2rem', fontFamily: 'monospace', background: '#08090C', minHeight: '100vh' }}>
+        <div style={{ color: '#0A0080', padding: '2rem', fontFamily: 'monospace', background: '#EBEBEB', minHeight: '100vh' }}>
           <h1>Something went wrong</h1>
-          <pre style={{ color: '#EF4444', whiteSpace: 'pre-wrap' }}>{this.state.error.message}</pre>
-          <pre style={{ color: '#8B8FA3', fontSize: '0.75rem', marginTop: '1rem' }}>{this.state.error.stack}</pre>
+          <pre style={{ color: '#DC2626', whiteSpace: 'pre-wrap' }}>{this.state.error.message}</pre>
+          <pre style={{ color: '#6B6BC8', fontSize: '0.75rem', marginTop: '1rem' }}>{this.state.error.stack}</pre>
         </div>
       );
     }
@@ -47,7 +47,7 @@ function App() {
     <ErrorBoundary>
       <WagmiProvider config={config}>
         <QueryClientProvider client={queryClient}>
-          <RainbowKitProvider theme={darkTheme({ accentColor: '#00E676', accentColorForeground: '#08090C', borderRadius: 'small' })}>
+          <RainbowKitProvider theme={lightTheme({ accentColor: '#00C060', accentColorForeground: '#FFFFFF', borderRadius: 'none' })}>
             <BrowserRouter>
               <Routes>
                 <Route element={<AppLayout />}>

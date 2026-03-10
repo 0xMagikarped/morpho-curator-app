@@ -54,7 +54,7 @@ export function UsdcMigrationBanner({ chainId, vaultAddress, vaultAsset }: UsdcM
                   </p>
                 )}
               </div>
-              <p className="text-[10px] text-warning bg-warning/10 rounded p-2">
+              <p className="text-[10px] text-warning bg-warning/10 p-2">
                 Migration steps: 1) Reduce caps on bridged USDC markets. 2) Reallocate to idle.
                 3) Wait for borrows to repay. 4) Deploy new vault with native USDC. 5) Migrate depositors.
               </p>
@@ -74,7 +74,7 @@ export function UsdcMigrationBanner({ chainId, vaultAddress, vaultAsset }: UsdcM
 
         <button
           onClick={() => setDismissed(true)}
-          className="text-text-tertiary hover:text-text-secondary text-xs ml-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
+          className="text-text-tertiary hover:text-text-secondary text-xs ml-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
         >
           Dismiss
         </button>

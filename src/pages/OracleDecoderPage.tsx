@@ -20,7 +20,7 @@ function FeedCard({ label, address, feed, chainId }: { label: string; address: A
   const isZero = address === ZERO;
 
   return (
-    <div className="bg-bg-elevated rounded-md p-3 border border-border-subtle/50">
+    <div className="bg-bg-elevated p-3 border border-border-subtle/50">
       <p className="text-[10px] text-text-tertiary uppercase font-mono mb-2">{label}</p>
       {isZero ? (
         <p className="text-xs text-text-tertiary italic">Zero address (returns 1)</p>
@@ -60,7 +60,7 @@ function FeedCard({ label, address, feed, chainId }: { label: string; address: A
 function VaultCard({ label, vault, sample, chainId }: { label: string; vault: DecodedVault; sample: bigint; chainId: number }) {
   const chainConfig = getChainConfig(chainId);
   return (
-    <div className="bg-bg-elevated rounded-md p-3 border border-border-subtle/50">
+    <div className="bg-bg-elevated p-3 border border-border-subtle/50">
       <p className="text-[10px] text-text-tertiary uppercase font-mono mb-2">{label}</p>
       <div className="space-y-1">
         <p className="text-sm font-medium text-text-primary">{vault.name}</p>
@@ -200,7 +200,7 @@ export function OracleDecoderPage() {
             <select
               value={chainId}
               onChange={e => setChainId(Number(e.target.value))}
-              className="w-full bg-bg-elevated border border-border-subtle rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-border-focus"
+              className="w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-border-focus"
             >
               {getSupportedChainIds().map(id => (
                 <option key={id} value={id}>{getChainConfig(id)?.name ?? id}</option>
@@ -216,7 +216,7 @@ export function OracleDecoderPage() {
               value={addressInput}
               onChange={e => setAddressInput(e.target.value)}
               placeholder="0x..."
-              className="w-full bg-bg-elevated border border-border-subtle rounded-md px-3 py-2 text-sm text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:border-border-focus"
+              className="w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:border-border-focus"
             />
           </div>
           {error && <p className="text-xs text-danger">{error}</p>}

@@ -1,66 +1,73 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
 
 @theme {
-  /* Background tokens */
-  --color-bg-root: #08090C;
-  --color-bg-surface: #0F1117;
-  --color-bg-elevated: #171923;
-  --color-bg-hover: #1E2130;
-  --color-bg-active: #252A3A;
+  /* ── Backgrounds ─────────────────────────────────────────────────── */
+  --color-bg-root:     #EBEBEB;   /* page shell — off-white */
+  --color-bg-surface:  #FFFFFF;   /* cards, panels, sidebar */
+  --color-bg-elevated: #F5F5F5;   /* drawers, dropdowns */
+  --color-bg-hover:    #F0F0FF;   /* blue-tinted hover */
+  --color-bg-active:   #E8E8FF;   /* blue-tinted active */
 
-  /* Brand accent */
-  --color-accent-primary: #00E676;
-  --color-accent-primary-muted: #00E67620;
-  --color-accent-primary-hover: #00FF8A;
+  /* ── Brand accent — green stays ──────────────────────────────────── */
+  --color-accent-primary:       #00C060;   /* green, darkened for light bg legibility */
+  --color-accent-primary-muted: #00C06018;
+  --color-accent-primary-hover: #00A050;
 
-  /* Semantic */
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-danger: #EF4444;
-  --color-info: #3B82F6;
-  --color-migration: #A855F7;
+  /* ── Structural blue — borders, text, buttons ────────────────────── */
+  --color-blue-primary: #1400FF;
+  --color-blue-muted:   #1400FF20;
+  --color-blue-hover:   #0900CC;
 
-  /* Chain identity */
-  --color-chain-sei: #C8102E;
-  --color-chain-ethereum: #627EEA;
-  --color-chain-base: #0052FF;
+  /* ── Semantic ─────────────────────────────────────────────────────── */
+  --color-success:   #00C060;   /* = green accent */
+  --color-warning:   #D97706;
+  --color-danger:    #DC2626;
+  --color-info:      #1400FF;   /* = structural blue */
+  --color-migration: #7C3AED;
 
-  /* Oracle grade */
-  --color-grade-a: #22C55E;
-  --color-grade-b: #3B82F6;
-  --color-grade-c: #F59E0B;
-  --color-grade-d: #F97316;
-  --color-grade-f: #EF4444;
+  /* ── Chain identity ───────────────────────────────────────────────── */
+  --color-chain-sei:      #C8102E;
+  --color-chain-ethereum: #1400FF;
+  --color-chain-base:     #0052FF;
 
-  /* Risk */
-  --color-risk-normal: #22C55E;
-  --color-risk-elevated: #F59E0B;
-  --color-risk-critical: #EF4444;
+  /* ── Oracle grade ─────────────────────────────────────────────────── */
+  --color-grade-a: #00C060;
+  --color-grade-b: #1400FF;
+  --color-grade-c: #D97706;
+  --color-grade-d: #EA580C;
+  --color-grade-f: #DC2626;
 
-  /* Version */
-  --color-version-v1: #3B82F6;
-  --color-version-v2: #A855F7;
+  /* ── Risk ─────────────────────────────────────────────────────────── */
+  --color-risk-normal:   #00C060;
+  --color-risk-elevated: #D97706;
+  --color-risk-critical: #DC2626;
 
-  /* Text */
-  --color-text-primary: #F0F0F5;
-  --color-text-secondary: #8B8FA3;
-  --color-text-tertiary: #5A5F73;
-  --color-text-on-accent: #08090C;
+  /* ── Version ──────────────────────────────────────────────────────── */
+  --color-version-v1: #1400FF;
+  --color-version-v2: #7C3AED;
 
-  /* Borders */
-  --color-border-subtle: #1E2130;
-  --color-border-default: #2A2F42;
-  --color-border-focus: #00E676;
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --color-text-primary:   #0A0080;   /* deep blue — headings, key data */
+  --color-text-secondary: #1400FF;   /* electric blue — labels, nav */
+  --color-text-tertiary:  #6B6BC8;   /* muted blue-gray — metadata */
+  --color-text-on-accent: #FFFFFF;   /* white on green buttons */
 
-  /* Typography */
-  --font-sans: 'Inter', 'Geist Sans', system-ui, sans-serif;
-  --font-mono: 'Fira Code', 'JetBrains Mono', monospace;
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --color-border-subtle:  #C5C5F0;         /* light blue-tinted */
+  --color-border-default: rgba(20,0,255,0.25); /* structural blue at 25% */
+  --color-border-focus:   #00C060;         /* green focus ring */
 
-  /* Border radius */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  /* ── Typography ───────────────────────────────────────────────────── */
+  --font-display: 'Pixelify Sans', 'Courier New', monospace;
+  --font-sans:    'Inter', system-ui, sans-serif;
+  --font-mono:    'Fira Code', 'JetBrains Mono', monospace;
+
+  /* ── Border radius — ZERO everywhere ─────────────────────────────── */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
 }
 
 body {
@@ -76,42 +83,73 @@ body {
   scrollbar-color: var(--color-border-default) transparent;
 }
 
-/* Shimmer animation for skeleton loaders */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+/* ── Diagonal hatch texture ──────────────────────────────────────────── */
+.hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    rgba(20, 0, 255, 0.12) 4px,
+    rgba(20, 0, 255, 0.12) 5px
+  );
 }
 
+/* ── Shimmer skeleton (light version) ───────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
 .animate-shimmer {
   background: linear-gradient(
     90deg,
-    var(--color-bg-surface) 25%,
-    var(--color-bg-hover) 50%,
-    var(--color-bg-surface) 75%
+    #F0F0F0 25%,
+    #E0E0FF 50%,
+    #F0F0F0 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
-/* Badge pulse for at-risk states */
+/* ── Badge pulse ─────────────────────────────────────────────────────── */
 @keyframes badge-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.05); }
+  0%, 100% { transform: scale(1);    opacity: 1;    }
+  50%       { transform: scale(1.06); opacity: 0.85; }
+}
+.animate-badge-pulse {
+  animation: badge-pulse 1s ease-in-out infinite;
 }
 
-/* Drawer animations */
+/* ── Drawer animations ───────────────────────────────────────────────── */
 @keyframes slide-in-right {
   from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  to   { transform: translateX(0);    }
 }
 @keyframes fade-in {
   from { opacity: 0; }
-  to { opacity: 1; }
+  to   { opacity: 1; }
 }
 
-/* Respect prefers-reduced-motion */
+/* ── Accent left-border on active rows ──────────────────────────────── */
+.row-accent-left {
+  position: relative;
+}
+.row-accent-left::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--color-accent-primary);
+}
+
+/* ── Display font for all headings ──────────────────────────────────── */
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+}
+
+/* ── Respect prefers-reduced-motion ─────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer,
+  .animate-badge-pulse,
   [class*="animate-"] {
     animation: none !important;
     transition: none !important;

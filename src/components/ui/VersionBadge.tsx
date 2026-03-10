@@ -10,7 +10,7 @@ export function VersionBadge({ version, className }: VersionBadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-semibold uppercase tracking-wide',
+        'inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
         isV1 ? 'bg-version-v1/15 text-version-v1' : 'bg-version-v2/15 text-version-v2',
         className,
       )}

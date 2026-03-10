@@ -62,9 +62,9 @@ export function StatCard({ label, value, delta, deltaPositive, sparklineData, lo
   if (loading) {
     return (
       <Card className="!p-3">
-        <div className="h-3 w-16 bg-bg-hover rounded animate-shimmer mb-2" />
-        <div className="h-6 w-24 bg-bg-hover rounded animate-shimmer mb-1" />
-        <div className="h-3 w-12 bg-bg-hover rounded animate-shimmer" />
+        <div className="h-3 w-16 bg-bg-hover animate-shimmer mb-2" />
+        <div className="h-6 w-24 bg-bg-hover animate-shimmer mb-1" />
+        <div className="h-3 w-12 bg-bg-hover animate-shimmer" />
       </Card>
     );
   }

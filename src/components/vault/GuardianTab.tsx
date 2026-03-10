@@ -88,7 +88,7 @@ export function GuardianTab({ chainId, vaultAddress }: GuardianTabProps) {
   return (
     <div className="space-y-4">
       {isMismatch && (
-        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 rounded px-3 py-2">
+        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
           <span className="text-xs text-warning">Wallet is on the wrong network. Switch to continue.</span>
           <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch Network</Button>
         </div>
@@ -142,7 +142,7 @@ export function GuardianTab({ chainId, vaultAddress }: GuardianTabProps) {
               return (
                 <div
                   key={i}
-                  className="flex items-center justify-between py-2 px-3 bg-bg-hover/30 rounded"
+                  className="flex items-center justify-between py-2 px-3 bg-bg-hover/30"
                 >
                   <div>
                     <div className="flex items-center gap-2">

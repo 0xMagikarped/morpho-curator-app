@@ -19,7 +19,7 @@ export function OracleRiskCard({ chainId, oracleAddress }: OracleRiskCardProps) 
   if (infoLoading) {
     return (
       <Card>
-        <div className="animate-shimmer h-32 bg-bg-hover/50 rounded" />
+        <div className="animate-shimmer h-32 bg-bg-hover/50" />
       </Card>
     );
   }

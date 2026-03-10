@@ -89,7 +89,7 @@ export function MarketSearchOverlay({ open, onClose, markets, onSelect }: Market
         aria-haspopup="listbox"
       >
         <div
-          className="w-full max-w-[560px] bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden"
+          className="w-full max-w-[560px] bg-bg-elevated border border-border-default overflow-hidden"
           onKeyDown={handleKeyDown}
         >
           {/* Search input */}
@@ -106,7 +106,7 @@ export function MarketSearchOverlay({ open, onClose, markets, onSelect }: Market
               aria-controls="search-results"
               aria-activedescendant={filtered[activeIndex] ? `result-${activeIndex}` : undefined}
             />
-            <kbd className="text-[10px] text-text-tertiary bg-bg-hover px-1.5 py-0.5 rounded font-mono">
+            <kbd className="text-[10px] text-text-tertiary bg-bg-hover px-1.5 py-0.5 font-mono">
               ESC
             </kbd>
           </div>

@@ -64,12 +64,12 @@ export function PriceComparison({
 
   if (loading) {
     return (
-      <div className="bg-bg-hover rounded-md p-3 animate-shimmer h-20" />
+      <div className="bg-bg-hover p-3 animate-shimmer h-20" />
     );
   }
 
   return (
-    <div className="bg-bg-hover rounded-md p-3 space-y-1 text-sm">
+    <div className="bg-bg-hover p-3 space-y-1 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-text-tertiary uppercase">Oracle vs Market Price</span>
         {deviation !== null && (

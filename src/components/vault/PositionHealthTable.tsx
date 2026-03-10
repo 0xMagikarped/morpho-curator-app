@@ -42,7 +42,7 @@ export function PositionHealthTable({
     h === Infinity ? 'N/A' : h < 1.0 ? 'Liquidatable' : h < 1.1 ? 'Critical' : h < 1.2 ? 'At Risk' : 'Healthy';
 
   if (loading) {
-    return <div className="animate-shimmer h-32 bg-bg-hover rounded" />;
+    return <div className="animate-shimmer h-32 bg-bg-hover" />;
   }
 
   return (

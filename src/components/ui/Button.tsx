@@ -6,9 +6,9 @@ type ButtonSize = 'sm' | 'md' | 'lg';
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary: 'bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent',
-  secondary: 'bg-bg-hover hover:bg-bg-active text-text-primary border border-border-default',
+  secondary: 'border border-blue-primary text-blue-primary hover:bg-bg-hover bg-transparent',
   danger: 'bg-danger hover:bg-danger/80 text-white',
-  ghost: 'hover:bg-bg-hover text-text-secondary hover:text-text-primary',
+  ghost: 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
@@ -35,7 +35,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center rounded-md font-medium transition-colors',
+        'inline-flex items-center justify-center font-medium transition-colors',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary',
         'disabled:opacity-50 disabled:pointer-events-none',
         variantStyles[variant],

@@ -105,7 +105,7 @@ export function MarketsStep({ state, onUpdate, onNext, onBack }: StepProps) {
             return (
               <div
                 key={market.marketId}
-                className={`grid grid-cols-12 gap-2 items-center px-3 py-2 rounded transition-colors ${
+                className={`grid grid-cols-12 gap-2 items-center px-3 py-2 transition-colors ${
                   selected ? 'bg-accent-primary-muted border border-accent-primary/30' : 'hover:bg-bg-hover/40'
                 }`}
               >
@@ -139,7 +139,7 @@ export function MarketsStep({ state, onUpdate, onNext, onBack }: StepProps) {
                       value={state.selectedMarkets[selectedIdx]?.supplyCap ?? ''}
                       onChange={(e) => updateCap(selectedIdx, e.target.value)}
                       placeholder="e.g., 50000"
-                      className="w-full bg-bg-hover border border-border-default rounded px-2 py-1 text-sm text-text-primary placeholder-text-tertiary"
+                      className="w-full bg-bg-hover border border-border-default px-2 py-1 text-sm text-text-primary placeholder-text-tertiary"
                     />
                   )}
                 </div>

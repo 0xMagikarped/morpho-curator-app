@@ -34,7 +34,7 @@ export function AddressDisplay({ address, chainId, className, truncate = true }:
       </span>
       <button
         onClick={handleCopy}
-        className="opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-text-secondary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary rounded"
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-text-secondary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
         aria-label="Copy address"
         title="Copy address"
       >

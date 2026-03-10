@@ -40,10 +40,10 @@ export function AllocationBar({ segments, loading }: AllocationBarProps) {
   if (loading) {
     return (
       <div>
-        <div className="h-2 w-full bg-bg-hover rounded-full animate-shimmer mb-3" />
+        <div className="h-2 w-full bg-bg-hover animate-shimmer mb-3" />
         <div className="flex gap-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-3 w-20 bg-bg-hover rounded animate-shimmer" />
+            <div key={i} className="h-3 w-20 bg-bg-hover animate-shimmer" />
           ))}
         </div>
       </div>
@@ -52,7 +52,7 @@ export function AllocationBar({ segments, loading }: AllocationBarProps) {
 
   if (segments.length === 0) {
     return (
-      <div className="h-2 w-full bg-bg-hover rounded-full" />
+      <div className="h-2 w-full bg-bg-hover" />
     );
   }
 
@@ -61,7 +61,7 @@ export function AllocationBar({ segments, loading }: AllocationBarProps) {
       {/* Bar */}
       <div
         ref={barRef}
-        className="relative flex h-2 w-full rounded-full overflow-hidden"
+        className="relative flex h-2 w-full overflow-hidden"
       >
         {segments.map((seg, i) => (
           <div
@@ -85,7 +85,7 @@ export function AllocationBar({ segments, loading }: AllocationBarProps) {
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="absolute z-10 px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded text-xs shadow-lg pointer-events-none"
+          className="absolute z-10 px-2 py-1.5 bg-bg-elevated border border-border-default text-xs pointer-events-none"
           style={{
             transform: `translateX(${tooltip.x}px) translateY(-100%)`,
             marginTop: '-8px',
@@ -103,7 +103,7 @@ export function AllocationBar({ segments, loading }: AllocationBarProps) {
         {segments.map((seg, i) => (
           <div key={seg.name} className="flex items-center gap-1.5">
             <span
-              className="inline-block w-1.5 h-1.5 rounded-full"
+              className="inline-block w-1.5 h-1.5"
               style={{ backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] }}
             />
             <span className="text-xs text-text-secondary">{seg.name}</span>
