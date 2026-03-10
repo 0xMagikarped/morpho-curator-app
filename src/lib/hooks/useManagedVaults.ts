@@ -1,14 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import type { VaultVersion } from '../../types';
-import { SEI_KNOWN_VAULTS } from '../../config/chains';
+import { CHAIN_CONFIGS, getChainConfig } from '../../config/chains';
 import { getPublicClient } from '../data/rpcClient';
-import { metaMorphoV1Abi } from '../contracts/abis';
+import { metaMorphoFactoryAbi } from '../contracts/abis';
 
 const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 
 /** Chains indexed by the Morpho GraphQL API */
 const API_CHAINS = [1, 8453];
+
+/** Chains that need on-chain factory scanning (API doesn't index them) */
+const ON_CHAIN_ONLY_CHAINS = Object.values(CHAIN_CONFIGS)
+  .filter((c) => !c.apiSupported && c.vaultFactories.v1)
+  .map((c) => c.chainId);
 
 export interface ManagedVault {
   address: Address;
@@ -41,50 +46,77 @@ const MANAGED_VAULTS_QUERY = `
   }
 `;
 
-/** Check SEI known vaults via RPC for owner/curator match */
-async function fetchSeiManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
-  const results: ManagedVault[] = [];
+const ownerCuratorAbi = [
+  { name: 'owner', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { name: 'curator', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+] as const;
+
+/**
+ * Discover vaults on-chain by scanning factory CreateMetaMorpho events,
+ * then multicall owner() + curator() to find vaults managed by walletAddress.
+ */
+async function fetchOnChainManagedVaults(
+  walletAddress: Address,
+  chainId: number,
+): Promise<ManagedVault[]> {
+  const config = getChainConfig(chainId);
+  if (!config?.vaultFactories.v1) return [];
+
+  const client = getPublicClient(chainId);
   const lower = walletAddress.toLowerCase();
 
   try {
-    const client = getPublicClient(1329);
+    // Step 1: Get ALL vault creation events from factory
+    const logs = await client.getLogs({
+      address: config.vaultFactories.v1,
+      event: metaMorphoFactoryAbi[3], // CreateMetaMorpho event
+      fromBlock: BigInt(config.deploymentBlock),
+      toBlock: 'latest',
+    });
 
-    for (const [, vault] of Object.entries(SEI_KNOWN_VAULTS)) {
-      try {
-        const [owner, curator] = await Promise.all([
-          client.readContract({
-            address: vault.address,
-            abi: metaMorphoV1Abi,
-            functionName: 'owner',
-          }) as Promise<Address>,
-          client.readContract({
-            address: vault.address,
-            abi: metaMorphoV1Abi,
-            functionName: 'curator',
-          }) as Promise<Address>,
-        ]);
+    if (logs.length === 0) return [];
 
-        const isOwner = (owner as string).toLowerCase() === lower;
-        const isCurator = (curator as string).toLowerCase() === lower;
+    // Step 2: Multicall owner() + curator() on each discovered vault
+    const vaultAddresses = logs.map((l) => (l as { args: { metaMorpho: Address } }).args.metaMorpho);
 
-        if (isOwner || isCurator) {
-          results.push({
-            address: vault.address,
-            chainId: 1329,
-            name: vault.name,
-            version: 'v1',
-            role: isOwner ? 'owner' : 'curator',
-          });
-        }
-      } catch {
-        // Skip individual vault on error
+    const calls = vaultAddresses.flatMap((addr) => [
+      { address: addr, abi: ownerCuratorAbi, functionName: 'owner' as const },
+      { address: addr, abi: ownerCuratorAbi, functionName: 'curator' as const },
+    ]);
+
+    const results = await client.multicall({ contracts: calls });
+
+    // Step 3: Match against connected wallet
+    const detected: ManagedVault[] = [];
+
+    for (let i = 0; i < vaultAddresses.length; i++) {
+      const ownerResult = results[i * 2];
+      const curatorResult = results[i * 2 + 1];
+      const log = logs[i] as { args: { metaMorpho: Address; name?: string; symbol?: string } };
+
+      const isOwner =
+        ownerResult?.status === 'success' &&
+        (ownerResult.result as string).toLowerCase() === lower;
+      const isCurator =
+        curatorResult?.status === 'success' &&
+        (curatorResult.result as string).toLowerCase() === lower;
+
+      if (isOwner || isCurator) {
+        detected.push({
+          address: vaultAddresses[i],
+          chainId,
+          name: log.args.name || `Vault ${vaultAddresses[i].slice(0, 10)}...`,
+          version: 'v1',
+          role: isOwner ? 'owner' : 'curator',
+        });
       }
     }
-  } catch {
-    // SEI RPC unavailable
-  }
 
-  return results;
+    return detected;
+  } catch (err) {
+    console.warn(`[useManagedVaults] On-chain scan failed for chain ${chainId}:`, err);
+    return [];
+  }
 }
 
 /** Check API-indexed chains (Ethereum, Base) via GraphQL */
@@ -130,11 +162,17 @@ async function fetchApiManagedVaults(walletAddress: Address): Promise<ManagedVau
 }
 
 async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
-  const [apiResults, seiResults] = await Promise.all([
+  // Run API chains and on-chain-only chains in parallel
+  const onChainPromises = ON_CHAIN_ONLY_CHAINS.map((chainId) =>
+    fetchOnChainManagedVaults(walletAddress, chainId),
+  );
+
+  const [apiResults, ...onChainResults] = await Promise.all([
     fetchApiManagedVaults(walletAddress),
-    fetchSeiManagedVaults(walletAddress),
+    ...onChainPromises,
   ]);
-  return [...apiResults, ...seiResults];
+
+  return [...apiResults, ...onChainResults.flat()];
 }
 
 export function useManagedVaults(walletAddress: Address | undefined) {
