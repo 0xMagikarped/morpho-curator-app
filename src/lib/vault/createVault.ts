@@ -166,22 +166,22 @@ export function buildDeploymentTxSequence(
     });
   }
 
-  // Step 4: Set fee (instant from 0)
-  if (config.fee && config.fee > 0n) {
+  // Step 4: Submit guardian (instant if first guardian — no dependency)
+  if (config.guardian) {
     steps.push({
       id: `step-${stepIndex++}`,
-      label: `Set performance fee: ${Number(config.fee * 100n / BigInt(1e18))}%`,
+      label: `Set guardian`,
       to: null,
       data: encodeFunctionData({
         abi: metaMorphoV1Abi,
-        functionName: 'setFee',
-        args: [config.fee],
+        functionName: 'submitGuardian',
+        args: [config.guardian],
       }),
       status: 'pending',
     });
   }
 
-  // Step 5: Set fee recipient
+  // Step 5: Set fee recipient (MUST come before setFee — no dependency)
   if (config.feeRecipient) {
     steps.push({
       id: `step-${stepIndex++}`,
@@ -196,16 +196,16 @@ export function buildDeploymentTxSequence(
     });
   }
 
-  // Step 6: Submit guardian (instant if first guardian)
-  if (config.guardian) {
+  // Step 6: Set fee (REQUIRES feeRecipient != address(0) when fee > 0)
+  if (config.fee && config.fee > 0n) {
     steps.push({
       id: `step-${stepIndex++}`,
-      label: `Set guardian`,
+      label: `Set performance fee: ${Number(config.fee * 100n / BigInt(1e18))}%`,
       to: null,
       data: encodeFunctionData({
         abi: metaMorphoV1Abi,
-        functionName: 'submitGuardian',
-        args: [config.guardian],
+        functionName: 'setFee',
+        args: [config.fee],
       }),
       status: 'pending',
     });
