@@ -1,13 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import type { VaultVersion } from '../../types';
+import { SEI_KNOWN_VAULTS } from '../../config/chains';
+import { getPublicClient } from '../data/rpcClient';
+import { metaMorphoV1Abi } from '../contracts/abis';
 
 const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 
 /** Chains indexed by the Morpho GraphQL API */
 const API_CHAINS = [1, 8453];
 
-interface ManagedVault {
+export interface ManagedVault {
   address: Address;
   chainId: number;
   name: string;
@@ -38,7 +41,54 @@ const MANAGED_VAULTS_QUERY = `
   }
 `;
 
-async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
+/** Check SEI known vaults via RPC for owner/curator match */
+async function fetchSeiManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
+  const results: ManagedVault[] = [];
+  const lower = walletAddress.toLowerCase();
+
+  try {
+    const client = getPublicClient(1329);
+
+    for (const [, vault] of Object.entries(SEI_KNOWN_VAULTS)) {
+      try {
+        const [owner, curator] = await Promise.all([
+          client.readContract({
+            address: vault.address,
+            abi: metaMorphoV1Abi,
+            functionName: 'owner',
+          }) as Promise<Address>,
+          client.readContract({
+            address: vault.address,
+            abi: metaMorphoV1Abi,
+            functionName: 'curator',
+          }) as Promise<Address>,
+        ]);
+
+        const isOwner = (owner as string).toLowerCase() === lower;
+        const isCurator = (curator as string).toLowerCase() === lower;
+
+        if (isOwner || isCurator) {
+          results.push({
+            address: vault.address,
+            chainId: 1329,
+            name: vault.name,
+            version: 'v1',
+            role: isOwner ? 'owner' : 'curator',
+          });
+        }
+      } catch {
+        // Skip individual vault on error
+      }
+    }
+  } catch {
+    // SEI RPC unavailable
+  }
+
+  return results;
+}
+
+/** Check API-indexed chains (Ethereum, Base) via GraphQL */
+async function fetchApiManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
   const results: ManagedVault[] = [];
   const lower = walletAddress.toLowerCase();
 
@@ -79,12 +129,20 @@ async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[
   return results;
 }
 
+async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
+  const [apiResults, seiResults] = await Promise.all([
+    fetchApiManagedVaults(walletAddress),
+    fetchSeiManagedVaults(walletAddress),
+  ]);
+  return [...apiResults, ...seiResults];
+}
+
 export function useManagedVaults(walletAddress: Address | undefined) {
   return useQuery({
     queryKey: ['managed-vaults', walletAddress],
     queryFn: () => fetchManagedVaults(walletAddress!),
     enabled: !!walletAddress,
-    staleTime: 5 * 60 * 1000, // 5 min
+    staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 }

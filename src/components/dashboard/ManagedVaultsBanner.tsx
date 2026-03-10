@@ -75,7 +75,7 @@ export function ManagedVaultsBanner() {
               ))}
             </div>
             <p className="text-[10px] text-text-tertiary mt-1">
-              Detected via Morpho API (Ethereum &amp; Base). SEI vaults require manual tracking.
+              Auto-detected via Morpho API and on-chain RPC reads.
             </p>
           </div>
         </div>
