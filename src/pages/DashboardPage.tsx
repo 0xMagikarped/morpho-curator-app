@@ -22,8 +22,8 @@ import type { RiskAlert } from '../lib/risk/riskTypes';
 
 export function DashboardPage() {
   const { address } = useAccount();
-  const { trackedVaults, trackVault } = useTrackedVaults();
-  const { addTrackedVault } = useAppStore();
+  const { trackVault } = useTrackedVaults();
+  const { trackedVaults, addTrackedVault } = useAppStore();
   const { data: vaultSummaries, isLoading: vaultsLoading } = useDashboardVaults();
   const { data: pendingActionsList } = useDashboardPendingActions();
   const [showAddVault, setShowAddVault] = useState(false);
@@ -289,7 +289,7 @@ export function DashboardPage() {
                   <VaultCard
                     key={`${v.chainId}-${v.address}`}
                     chainId={v.chainId}
-                    vaultAddress={v.address as `0x${string}`}
+                    vaultAddress={v.address}
                   />
                 ))}
               </div>

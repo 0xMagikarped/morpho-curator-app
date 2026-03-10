@@ -48,9 +48,13 @@ export function StatCard({ label, value, delta, deltaPositive, sparklineData, lo
       const t = Math.min((now - startTime) / duration, 1);
       const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
       const current = start + (target - start) * eased;
-      const formatted = target >= 100
+      // Detect if value is an integer (no decimals in original) vs a decimal
+      const isInteger = Number.isInteger(target) && !numMatch[1].includes('.');
+      const formatted = isInteger
         ? Math.round(current).toLocaleString('en-US')
-        : current.toFixed(target < 1 ? 4 : 2);
+        : target >= 100
+          ? Math.round(current).toLocaleString('en-US')
+          : current.toFixed(target < 1 ? 4 : 2);
       setDisplayValue(`${prefix}${formatted}${suffix}`);
       if (t < 1) requestAnimationFrame(animate);
     };
