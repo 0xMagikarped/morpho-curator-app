@@ -6,6 +6,7 @@ import { VaultOracleDashboard } from '../oracle/VaultOracleDashboard';
 import { RiskAlertBanner } from '../risk/RiskAlertBanner';
 import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
+import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
 import { useVaultInfo, useVaultRole, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
 import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice } from '../../lib/utils/format';
@@ -228,6 +229,15 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
           href={`${chainConfig?.blockExplorer}/address/${vault.morphoBlue}`}
         />
       </Card>
+
+      {/* Owner Management Panels (V1 only, owner only) */}
+      {vault.version === 'v1' && (
+        <OwnerActionsPanel
+          chainId={chainId}
+          vaultAddress={vaultAddress}
+          isOwner={role.isOwner}
+        />
+      )}
     </div>
   );
 }

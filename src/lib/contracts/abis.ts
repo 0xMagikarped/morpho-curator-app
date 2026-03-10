@@ -246,6 +246,16 @@ export const metaMorphoV1Abi = [
   // Pending actions
   {
     inputs: [],
+    name: 'pendingFee',
+    outputs: [
+      { name: 'value', type: 'uint192' },
+      { name: 'validAt', type: 'uint64' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
     name: 'pendingTimelock',
     outputs: [
       { name: 'value', type: 'uint192' },
@@ -457,6 +467,34 @@ export const metaMorphoV1Abi = [
   {
     inputs: [],
     name: 'acceptGuardian',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFee', type: 'uint256' }],
+    name: 'submitFee',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'acceptFee',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newOwner', type: 'address' }],
+    name: 'transferOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'acceptOwnership',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
