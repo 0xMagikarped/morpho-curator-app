@@ -23,25 +23,38 @@ export interface ManagedVault {
   role: 'owner' | 'curator';
 }
 
-const MANAGED_VAULTS_QUERY = `
-  query ManagedVaults($address: String!, $chainId: Int!) {
-    vaults(
-      where: {
-        or: [
-          { stateEquals: { owner: $address } }
-          { stateEquals: { curator: $address } }
-        ]
-        chainId_in: [$chainId]
-      }
-      first: 50
-    ) {
-      items {
-        address
-        name
-        symbol
-        chain { id }
-        state { owner curator }
-      }
+/** V1 vaults by owner */
+const V1_OWNER_QUERY = `
+  query V1Owner($address: String!, $chainId: Int!) {
+    vaults(where: { ownerAddress_in: [$address], chainId_in: [$chainId] }, first: 50) {
+      items { address name symbol chain { id } state { owner curator } }
+    }
+  }
+`;
+
+/** V1 vaults by curator */
+const V1_CURATOR_QUERY = `
+  query V1Curator($address: String!, $chainId: Int!) {
+    vaults(where: { curatorAddress_in: [$address], chainId_in: [$chainId] }, first: 50) {
+      items { address name symbol chain { id } state { owner curator } }
+    }
+  }
+`;
+
+/** V2 vaults by owner */
+const V2_OWNER_QUERY = `
+  query V2Owner($address: String!, $chainId: Int!) {
+    vaultV2s(where: { ownerAddress_in: [$address], chainId_in: [$chainId] }, first: 50) {
+      items { address name symbol chain { id } owner { address } curator { address } }
+    }
+  }
+`;
+
+/** V2 vaults by curator */
+const V2_CURATOR_QUERY = `
+  query V2Curator($address: String!, $chainId: Int!) {
+    vaultV2s(where: { curatorAddress_in: [$address], chainId_in: [$chainId] }, first: 50) {
+      items { address name symbol chain { id } owner { address } curator { address } }
     }
   }
 `;
@@ -222,41 +235,83 @@ async function discoverVaultsViaExplorerReceipts(
 // API-based discovery (for Ethereum, Base)
 // ============================================================
 
+async function gqlFetch(query: string, variables: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(MORPHO_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  if (json.errors) {
+    console.warn('[useManagedVaults] GraphQL errors:', json.errors);
+    return null;
+  }
+  return json.data;
+}
+
 async function fetchApiManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
   const results: ManagedVault[] = [];
+  const seen = new Set<string>();
   const lower = walletAddress.toLowerCase();
 
   for (const chainId of API_CHAINS) {
-    try {
-      const res = await fetch(MORPHO_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: MANAGED_VAULTS_QUERY,
-          variables: { address: walletAddress, chainId },
-        }),
-      });
+    const vars = { address: lower, chainId };
 
-      if (!res.ok) continue;
-      const json = await res.json();
-      const items = json.data?.vaults?.items;
-      if (!Array.isArray(items)) continue;
+    // Fire all 4 queries in parallel: V1 owner, V1 curator, V2 owner, V2 curator
+    const [v1Owner, v1Curator, v2Owner, v2Curator] = await Promise.all([
+      gqlFetch(V1_OWNER_QUERY, vars).catch(() => null),
+      gqlFetch(V1_CURATOR_QUERY, vars).catch(() => null),
+      gqlFetch(V2_OWNER_QUERY, vars).catch(() => null),
+      gqlFetch(V2_CURATOR_QUERY, vars).catch(() => null),
+    ]);
 
-      for (const v of items) {
-        const isOwner = v.state?.owner?.toLowerCase() === lower;
-        const isCurator = v.state?.curator?.toLowerCase() === lower;
-        if (isOwner || isCurator) {
-          results.push({
-            address: v.address as Address,
-            chainId: v.chain?.id ?? chainId,
-            name: v.name ?? `Vault ${(v.address as string).slice(0, 8)}...`,
-            version: 'v1',
-            role: isOwner ? 'owner' : 'curator',
-          });
-        }
+    // Process V1 results
+    const v1Items = [
+      ...((v1Owner as { vaults?: { items?: unknown[] } })?.vaults?.items ?? []),
+      ...((v1Curator as { vaults?: { items?: unknown[] } })?.vaults?.items ?? []),
+    ] as { address: string; name?: string; chain?: { id: number }; state?: { owner?: string; curator?: string } }[];
+
+    for (const v of v1Items) {
+      const key = `${chainId}-${v.address.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const isOwner = v.state?.owner?.toLowerCase() === lower;
+      const isCurator = v.state?.curator?.toLowerCase() === lower;
+      if (isOwner || isCurator) {
+        results.push({
+          address: v.address as Address,
+          chainId: v.chain?.id ?? chainId,
+          name: v.name ?? `Vault ${v.address.slice(0, 8)}...`,
+          version: 'v1',
+          role: isOwner ? 'owner' : 'curator',
+        });
       }
-    } catch {
-      // Skip chain on error
+    }
+
+    // Process V2 results
+    const v2Items = [
+      ...((v2Owner as { vaultV2s?: { items?: unknown[] } })?.vaultV2s?.items ?? []),
+      ...((v2Curator as { vaultV2s?: { items?: unknown[] } })?.vaultV2s?.items ?? []),
+    ] as { address: string; name?: string; chain?: { id: number }; owner?: { address: string }; curator?: { address: string } }[];
+
+    for (const v of v2Items) {
+      const key = `${chainId}-${v.address.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const isOwner = v.owner?.address?.toLowerCase() === lower;
+      const isCurator = v.curator?.address?.toLowerCase() === lower;
+      if (isOwner || isCurator) {
+        results.push({
+          address: v.address as Address,
+          chainId: v.chain?.id ?? chainId,
+          name: v.name ?? `Vault ${v.address.slice(0, 8)}...`,
+          version: 'v2',
+          role: isOwner ? 'owner' : 'curator',
+        });
+      }
     }
   }
 
