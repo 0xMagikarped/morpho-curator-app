@@ -671,6 +671,11 @@ export const metaMorphoV2Abi = [
     stateMutability: 'view',
     type: 'function',
   },
+  // ---- Write Functions (Curator — timelocked gate) ----
+  {
+    inputs: [{ name: 'data', type: 'bytes' }],
+    name: 'submit', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
   // ---- Write Functions (Owner) ----
   {
     inputs: [{ name: 'newName', type: 'string' }],
@@ -709,8 +714,8 @@ export const metaMorphoV2Abi = [
     name: 'setManagementFeeRecipient', outputs: [], stateMutability: 'nonpayable', type: 'function',
   },
   {
-    inputs: [{ name: 'selector', type: 'bytes4' }, { name: 'newTimelock', type: 'uint256' }],
-    name: 'setTimelock', outputs: [], stateMutability: 'nonpayable', type: 'function',
+    inputs: [{ name: 'selector', type: 'bytes4' }, { name: 'newDuration', type: 'uint256' }],
+    name: 'increaseTimelock', outputs: [], stateMutability: 'nonpayable', type: 'function',
   },
   {
     inputs: [{ name: 'adapter', type: 'address' }],

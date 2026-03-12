@@ -372,6 +372,29 @@ export function buildV2DeploymentTxSequence(
   const steps: TransactionStep[] = [];
   let stepIndex = 0;
 
+  // Helper: add a timelocked function call (submit + execute)
+  // V2 gated functions require: 1) curator calls submit(calldata), 2) call the function
+  const addTimelockedStep = (label: string, calldata: `0x${string}`) => {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: `Submit: ${label}`,
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'submit',
+        args: [calldata],
+      }),
+      status: 'pending',
+    });
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label,
+      to: null,
+      data: calldata,
+      status: 'pending',
+    });
+  };
+
   // Step 1: Deploy vault via V2 factory
   steps.push({
     id: `step-${stepIndex++}`,
@@ -385,7 +408,7 @@ export function buildV2DeploymentTxSequence(
     status: 'pending',
   });
 
-  // Step 2: Set name (V2 vaults start with empty name)
+  // Set name (owner-only, no timelock)
   if (params.name) {
     steps.push({
       id: `step-${stepIndex++}`,
@@ -400,7 +423,7 @@ export function buildV2DeploymentTxSequence(
     });
   }
 
-  // Step 3: Set symbol (V2 vaults start with empty symbol)
+  // Set symbol (owner-only, no timelock)
   if (params.symbol) {
     steps.push({
       id: `step-${stepIndex++}`,
@@ -415,7 +438,7 @@ export function buildV2DeploymentTxSequence(
     });
   }
 
-  // Step 4: Set curator
+  // Set curator (owner-only, no timelock) — MUST come before timelocked steps
   if (config.curator) {
     steps.push({
       id: `step-${stepIndex++}`,
@@ -430,22 +453,7 @@ export function buildV2DeploymentTxSequence(
     });
   }
 
-  // Step 3: Set allocators
-  for (const allocator of config.allocators ?? []) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: 'Set allocator',
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setIsAllocator',
-        args: [allocator, true],
-      }),
-      status: 'pending',
-    });
-  }
-
-  // Step 4: Set sentinels
+  // Set sentinels (owner-only, no timelock)
   for (const sentinel of config.sentinels ?? []) {
     steps.push({
       id: `step-${stepIndex++}`,
@@ -460,80 +468,79 @@ export function buildV2DeploymentTxSequence(
     });
   }
 
-  // Step 5: Set performance fee recipient (must come before fee)
+  // --- Timelocked functions below (require submit → execute) ---
+
+  // Set allocators (TIMELOCKED — requires submit)
+  for (const allocator of config.allocators ?? []) {
+    addTimelockedStep(
+      'Set allocator',
+      encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setIsAllocator',
+        args: [allocator, true],
+      }),
+    );
+  }
+
+  // Set performance fee recipient (TIMELOCKED — must come before fee)
   if (config.performanceFeeRecipient) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: 'Set performance fee recipient',
-      to: null,
-      data: encodeFunctionData({
+    addTimelockedStep(
+      'Set performance fee recipient',
+      encodeFunctionData({
         abi: metaMorphoV2Abi,
         functionName: 'setPerformanceFeeRecipient',
         args: [config.performanceFeeRecipient],
       }),
-      status: 'pending',
-    });
+    );
   }
 
-  // Step 6: Set performance fee
+  // Set performance fee (TIMELOCKED)
   if (config.performanceFee && config.performanceFee > 0n) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set performance fee: ${Number(config.performanceFee * 100n / BigInt(1e18))}%`,
-      to: null,
-      data: encodeFunctionData({
+    addTimelockedStep(
+      `Set performance fee: ${Number(config.performanceFee * 100n / BigInt(1e18))}%`,
+      encodeFunctionData({
         abi: metaMorphoV2Abi,
         functionName: 'setPerformanceFee',
         args: [config.performanceFee],
       }),
-      status: 'pending',
-    });
+    );
   }
 
-  // Step 7: Set management fee recipient
+  // Set management fee recipient (TIMELOCKED)
   if (config.managementFeeRecipient) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: 'Set management fee recipient',
-      to: null,
-      data: encodeFunctionData({
+    addTimelockedStep(
+      'Set management fee recipient',
+      encodeFunctionData({
         abi: metaMorphoV2Abi,
         functionName: 'setManagementFeeRecipient',
         args: [config.managementFeeRecipient],
       }),
-      status: 'pending',
-    });
+    );
   }
 
-  // Step 8: Set management fee
+  // Set management fee (TIMELOCKED)
   if (config.managementFee && config.managementFee > 0n) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set management fee: ${Number(config.managementFee * 100n / BigInt(1e18))}%`,
-      to: null,
-      data: encodeFunctionData({
+    addTimelockedStep(
+      `Set management fee: ${Number(config.managementFee * 100n / BigInt(1e18))}%`,
+      encodeFunctionData({
         abi: metaMorphoV2Abi,
         functionName: 'setManagementFee',
         args: [config.managementFee],
       }),
-      status: 'pending',
-    });
+    );
   }
 
-  // Step 9: Set per-function timelocks
+  // Set per-function timelocks (TIMELOCKED — increaseTimelock)
   for (const tl of config.timelocks ?? []) {
     if (tl.seconds > 0) {
-      steps.push({
-        id: `step-${stepIndex++}`,
-        label: `Set timelock: ${tl.selector} = ${formatTimelockDuration(tl.seconds)}`,
-        to: null,
-        data: encodeFunctionData({
+      addTimelockedStep(
+        `Set timelock: ${tl.selector} = ${formatTimelockDuration(tl.seconds)}`,
+        encodeFunctionData({
           abi: metaMorphoV2Abi,
-          functionName: 'setTimelock',
+          functionName: 'increaseTimelock',
           args: [tl.selector, BigInt(tl.seconds)],
         }),
-        status: 'pending',
-      });
+      );
     }
   }
 
