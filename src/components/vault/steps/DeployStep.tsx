@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
+import { createPublicClient, custom, type TransactionReceipt, type Hash } from 'viem';
+import { mainnet, base } from 'viem/chains';
 import { CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -7,6 +9,7 @@ import { ProgressBar } from '../../ui/ProgressBar';
 import { getChainConfig } from '../../../config/chains';
 import { getPublicClient } from '../../../lib/data/rpcClient';
 import { truncateAddress } from '../../../lib/utils/format';
+import { sei } from '../../../config/wagmi';
 import {
   buildDeploymentTxSequence,
   buildV2DeploymentTxSequence,
@@ -31,10 +34,64 @@ interface DeployStepProps {
 
 type DeployStatus = 'idle' | 'deploying' | 'paused' | 'complete' | 'failed';
 
+const VIEM_CHAINS: Record<number, any> = { 1: mainnet, 8453: base, 1329: sei };
+
 function getExplorerTxUrl(chainId: number | null, txHash: string): string | null {
   if (!chainId) return null;
   const config = getChainConfig(chainId);
   return config?.blockExplorer ? `${config.blockExplorer}/tx/${txHash}` : null;
+}
+
+/**
+ * Wait for a transaction receipt using multiple strategies:
+ * 1. Wallet's EIP-1193 provider (window.ethereum) — most reliable since it broadcast the tx
+ * 2. Our configured public RPC client — fallback
+ *
+ * The wallet's own provider (e.g. MetaMask → Infura) is guaranteed to see the tx
+ * because it was the one that submitted it. Public RPCs like llamarpc may be slow
+ * to index new transactions, causing waitForTransactionReceipt to hang.
+ */
+async function waitForReceipt(
+  chainId: number,
+  hash: Hash,
+  timeoutMs = 180_000,
+): Promise<TransactionReceipt> {
+  const startTime = Date.now();
+
+  // Strategy 1: Use wallet's own provider via window.ethereum
+  const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : null;
+  if (ethereum) {
+    console.log('[Deploy] Polling receipt via wallet provider...');
+    try {
+      const walletClient = createPublicClient({
+        chain: VIEM_CHAINS[chainId],
+        transport: custom(ethereum),
+      });
+      const receipt = await walletClient.waitForTransactionReceipt({
+        hash,
+        confirmations: 1,
+        timeout: timeoutMs,
+        pollingInterval: 2_000,
+      });
+      console.log('[Deploy] Got receipt via wallet provider:', receipt.status);
+      return receipt;
+    } catch (walletErr) {
+      console.warn('[Deploy] Wallet provider receipt failed:', walletErr);
+      // Fall through to strategy 2
+    }
+  }
+
+  // Strategy 2: Use our configured public RPC
+  const elapsed = Date.now() - startTime;
+  const remainingTimeout = Math.max(timeoutMs - elapsed, 30_000);
+  console.log('[Deploy] Falling back to public RPC for receipt...');
+  const publicClient = getPublicClient(chainId);
+  return publicClient.waitForTransactionReceipt({
+    hash,
+    confirmations: 1,
+    timeout: remainingTimeout,
+    pollingInterval: 3_000,
+  });
 }
 
 export function DeployStep({ state, onBack }: DeployStepProps) {
@@ -144,8 +201,6 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
   const executeSteps = useCallback(async () => {
     if (!walletClient || !state.chainId || !address || steps.length === 0) return;
 
-    const publicClient = getPublicClient(state.chainId);
-
     setStatus('deploying');
     setError(null);
     setFailedTxHash(null);
@@ -200,14 +255,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           prev.map((s, idx) => (idx === i ? { ...s, txHash: hash, status: 'confirming' } : s)),
         );
 
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash,
-          confirmations: 1,
-          timeout: 180_000, // 3 minutes
-          pollingInterval: 3_000,
-        });
-
-        console.log(`[Deploy] Step ${i} receipt:`, receipt.status, 'logs:', receipt.logs.length);
+        const receipt = await waitForReceipt(state.chainId!, hash);
 
         if (receipt.status === 'reverted') {
           const explorerUrl = getExplorerTxUrl(state.chainId, hash);
