@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
+import { useAccount, useWalletClient } from 'wagmi';
 import { CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
 import { ProgressBar } from '../../ui/ProgressBar';
 import { getChainConfig } from '../../../config/chains';
+import { getPublicClient } from '../../../lib/data/rpcClient';
 import { truncateAddress } from '../../../lib/utils/format';
 import {
   buildDeploymentTxSequence,
@@ -39,7 +40,6 @@ function getExplorerTxUrl(chainId: number | null, txHash: string): string | null
 export function DeployStep({ state, onBack }: DeployStepProps) {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const publicClient = usePublicClient();
   const { addTrackedVault } = useAppStore();
   const { trackVault } = useTrackedVaults();
 
@@ -142,7 +142,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
   }, [state.salt, buildSteps]);
 
   const executeSteps = useCallback(async () => {
-    if (!walletClient || !publicClient || !address || steps.length === 0) return;
+    if (!walletClient || !state.chainId || !address || steps.length === 0) return;
+
+    const publicClient = getPublicClient(state.chainId);
 
     setStatus('deploying');
     setError(null);
@@ -200,9 +202,12 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
         const receipt = await publicClient.waitForTransactionReceipt({
           hash,
-          timeout: 120_000, // 2 minutes — default is too short for slow RPCs
-          pollingInterval: 4_000,
+          confirmations: 1,
+          timeout: 180_000, // 3 minutes
+          pollingInterval: 3_000,
         });
+
+        console.log(`[Deploy] Step ${i} receipt:`, receipt.status, 'logs:', receipt.logs.length);
 
         if (receipt.status === 'reverted') {
           const explorerUrl = getExplorerTxUrl(state.chainId, hash);
@@ -251,7 +256,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     }
 
     setStatus('complete');
-  }, [walletClient, publicClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, trackVault, isV2]);
+  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, trackVault, isV2]);
 
   const handlePause = () => {
     pausedRef.current = true;
