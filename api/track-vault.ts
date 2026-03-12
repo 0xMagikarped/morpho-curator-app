@@ -1,5 +1,8 @@
 import { get } from '@vercel/edge-config';
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export const config = {
+  runtime: 'edge',
+};
 
 function walletToKey(wallet: string): string {
   return `tracked_${wallet.toLowerCase().replace('0x', '')}`;
@@ -18,38 +21,65 @@ async function upsertEdgeConfigItem(key: string, value: unknown) {
     },
   );
   if (!r.ok) {
-    const err = await r.json();
-    throw new Error(`Edge Config write failed: ${JSON.stringify(err)}`);
+    const err = await r.text();
+    throw new Error(`Edge Config write failed: ${r.status} ${err}`);
   }
   return r.json();
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(request: Request) {
   // CORS
-  const origin = req.headers.origin as string | undefined;
+  const origin = request.headers.get('origin');
+  const corsHeaders: Record<string, string> = {};
   if (origin) {
     if (origin.endsWith('.vercel.app') || origin.startsWith('http://localhost')) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      corsHeaders['Access-Control-Allow-Origin'] = origin;
+      corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
+      corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
     } else {
-      return res.status(403).json({ error: 'Forbidden' });
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
   }
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { wallet, vault } = req.body;
-  if (!wallet || !wallet.startsWith('0x')) {
-    return res.status(400).json({ error: 'Invalid wallet address' });
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
-  if (!vault?.address || !vault?.chainId) {
-    return res.status(400).json({ error: 'Missing vault address or chainId' });
+
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
   }
 
   try {
+    const { wallet, vault } = await request.json();
+
+    if (!wallet || !wallet.startsWith('0x')) {
+      return new Response(JSON.stringify({ error: 'Invalid wallet address' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      });
+    }
+    if (!vault?.address || !vault?.chainId) {
+      return new Response(JSON.stringify({ error: 'Missing vault address or chainId' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      });
+    }
+
+    if (!process.env.EDGE_CONFIG_ID || !process.env.VERCEL_API_TOKEN) {
+      return new Response(JSON.stringify({ error: 'Edge Config not configured' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      });
+    }
+
     const key = walletToKey(wallet);
-    const existing = ((await get(key)) || []) as Record<string, unknown>[];
+    const existing = ((await get(key)) ?? []) as Record<string, unknown>[];
 
     const alreadyExists = existing.some(
       (v) =>
@@ -58,14 +88,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     if (alreadyExists) {
-      return res.status(200).json({ message: 'Already tracked', vaults: existing });
+      return new Response(JSON.stringify({ message: 'Already tracked', vaults: existing }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      });
     }
 
     const updated = [...existing, { ...vault, address: vault.address, addedAt: Date.now() }];
     await upsertEdgeConfigItem(key, updated);
-    return res.status(200).json({ message: 'Tracked', vaults: updated });
-  } catch (error) {
+
+    return new Response(JSON.stringify({ message: 'Tracked', vaults: updated }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    return res.status(500).json({ error: 'Failed to track vault', detail: msg });
+    return new Response(JSON.stringify({ error: 'Failed to track vault', detail: msg }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
   }
 }

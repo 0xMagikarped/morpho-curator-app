@@ -1,36 +1,64 @@
 import { get } from '@vercel/edge-config';
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export const config = {
+  runtime: 'edge',
+};
 
 function walletToKey(wallet: string): string {
   return `tracked_${wallet.toLowerCase().replace('0x', '')}`;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(request: Request) {
   // CORS
-  const origin = req.headers.origin as string | undefined;
+  const origin = request.headers.get('origin');
+  const corsHeaders: Record<string, string> = {};
   if (origin) {
     if (origin.endsWith('.vercel.app') || origin.startsWith('http://localhost')) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      corsHeaders['Access-Control-Allow-Origin'] = origin;
+      corsHeaders['Access-Control-Allow-Methods'] = 'GET, OPTIONS';
+      corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
     } else {
-      return res.status(403).json({ error: 'Forbidden' });
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
   }
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const wallet = req.query.wallet as string;
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  if (request.method !== 'GET') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
+  const url = new URL(request.url);
+  const wallet = url.searchParams.get('wallet');
+
   if (!wallet || !wallet.startsWith('0x')) {
-    return res.status(400).json({ error: 'Invalid wallet address' });
+    return new Response(JSON.stringify({ error: 'Invalid wallet address' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
   }
 
   try {
     const key = walletToKey(wallet);
     const vaults = await get(key);
-    return res.status(200).json(vaults || []);
-  } catch (error) {
+
+    return new Response(JSON.stringify(vaults ?? []), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    return res.status(500).json({ error: 'Failed to read tracked vaults', detail: msg });
+    return new Response(JSON.stringify({ error: 'Failed to read tracked vaults', detail: msg }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
   }
 }
