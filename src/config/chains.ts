@@ -73,7 +73,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1: {
     chainId: 1,
     name: 'Ethereum',
-    rpcUrls: ['https://eth.llamarpc.com', 'https://rpc.ankr.com/eth'],
+    rpcUrls: ['https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com'],
     blockExplorer: 'https://etherscan.io',
     morphoBlue: '0xBBBBBbbBBb9cc5e90e3b3Af64bdAF62C37EEFFCb' as Address,
     vaultFactories: {

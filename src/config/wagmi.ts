@@ -26,7 +26,7 @@ export const config = getDefaultConfig({
   chains: [sei, mainnet, base],
   transports: {
     [sei.id]: http('https://sei-evm-rpc.publicnode.com'),
-    [mainnet.id]: http('https://eth.llamarpc.com'),
+    [mainnet.id]: http('https://ethereum-rpc.publicnode.com'),
     [base.id]: http('https://mainnet.base.org'),
   },
 });

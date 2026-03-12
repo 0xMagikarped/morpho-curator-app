@@ -1,4 +1,4 @@
-import { createPublicClient, http, type Address, type PublicClient, type Chain, defineChain } from 'viem';
+import { createPublicClient, http, fallback, type Address, type PublicClient, type Chain, defineChain } from 'viem';
 import { mainnet, base } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
 import { getChainConfig } from '../../config/chains';
@@ -48,13 +48,16 @@ export function getPublicClient(chainId: number): PublicClient {
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
 
-  const rpcUrl = ENV_RPC_URLS[chainId] || chainConfig.rpcUrls[0];
+  // Build transport with fallback across all configured RPCs
+  const envUrl = ENV_RPC_URLS[chainId];
+  const urls = envUrl ? [envUrl, ...chainConfig.rpcUrls] : chainConfig.rpcUrls;
+  const transport = urls.length > 1
+    ? fallback(urls.map(url => http(url, { fetchOptions: { cache: 'no-store' } })))
+    : http(urls[0], { fetchOptions: { cache: 'no-store' } });
 
   const client = createPublicClient({
     chain: VIEM_CHAINS[chainId],
-    transport: http(rpcUrl, {
-      fetchOptions: { cache: 'no-store' },
-    }),
+    transport,
     batch: {
       multicall: { batchSize: 1024, wait: 10 },
     },
@@ -297,7 +300,7 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'guardian' }),
   ]);
 
-  if (!name) {
+  if (name === null || name === undefined) {
     throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
   if (!asset || asset === ZERO) {
@@ -307,7 +310,7 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
   return {
     address: vaultAddress,
     chainId,
-    name,
+    name: name || 'Unnamed Vault',
     symbol: symbol ?? '',
     asset,
     morphoBlue: morpho ?? getChainConfig(chainId)?.morphoBlue ?? ZERO,
@@ -353,7 +356,7 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
     safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'sendAssetsGate' }),
   ]);
 
-  if (!name) {
+  if (name === null || name === undefined) {
     throw new Error(`Contract at ${vaultAddress} is not a Morpho V2 vault (name() failed)`);
   }
   if (!asset || asset === ZERO) {
@@ -363,7 +366,7 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
   return {
     address: vaultAddress,
     chainId,
-    name,
+    name: name || 'Unnamed Vault',
     symbol: symbol ?? '',
     asset,
     morphoBlue: getChainConfig(chainId)?.morphoBlue ?? ZERO,
@@ -569,14 +572,18 @@ export async function fetchPendingTimelock(
   vaultAddress: Address,
 ): Promise<PendingTimelock | null> {
   const client = getPublicClient(chainId);
-  const result = await client.readContract({
-    address: vaultAddress,
-    abi: metaMorphoV1Abi,
-    functionName: 'pendingTimelock',
-  });
-
-  if (result[1] === 0n) return null;
-  return { value: result[0], validAt: result[1] };
+  try {
+    const result = await client.readContract({
+      address: vaultAddress,
+      abi: metaMorphoV1Abi,
+      functionName: 'pendingTimelock',
+    });
+    if (result[1] === 0n) return null;
+    return { value: result[0], validAt: result[1] };
+  } catch {
+    // V2 vaults don't have pendingTimelock
+    return null;
+  }
 }
 
 export async function fetchPendingGuardian(
@@ -584,14 +591,18 @@ export async function fetchPendingGuardian(
   vaultAddress: Address,
 ): Promise<PendingGuardian | null> {
   const client = getPublicClient(chainId);
-  const result = await client.readContract({
-    address: vaultAddress,
-    abi: metaMorphoV1Abi,
-    functionName: 'pendingGuardian',
-  });
-
-  if (result[1] === 0n) return null;
-  return { value: result[0], validAt: result[1] };
+  try {
+    const result = await client.readContract({
+      address: vaultAddress,
+      abi: metaMorphoV1Abi,
+      functionName: 'pendingGuardian',
+    });
+    if (result[1] === 0n) return null;
+    return { value: result[0], validAt: result[1] };
+  } catch {
+    // V2 vaults don't have pendingGuardian
+    return null;
+  }
 }
 
 export async function checkIsAllocator(
