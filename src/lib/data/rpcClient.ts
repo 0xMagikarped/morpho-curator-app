@@ -20,6 +20,11 @@ const sei = defineChain({
   name: 'SEI',
   nativeCurrency: { name: 'SEI', symbol: 'SEI', decimals: 18 },
   rpcUrls: { default: { http: ['https://sei-evm-rpc.publicnode.com'] } },
+  contracts: {
+    multicall3: {
+      address: '0xcA11bde05977b3631167028862bE2a173976CA11',
+    },
+  },
 });
 
 const VIEM_CHAINS: Record<number, Chain> = {
