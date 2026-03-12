@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { createPublicClient, custom, type TransactionReceipt, type Hash } from 'viem';
 import { mainnet, base } from 'viem/chains';
@@ -32,7 +32,7 @@ interface DeployStepProps {
   onBack: () => void;
 }
 
-type DeployStatus = 'idle' | 'deploying' | 'paused' | 'complete' | 'failed';
+type DeployStatus = 'idle' | 'deploying' | 'complete' | 'failed';
 
 const VIEM_CHAINS: Record<number, any> = { 1: mainnet, 8453: base, 1329: sei };
 
@@ -46,10 +46,6 @@ function getExplorerTxUrl(chainId: number | null, txHash: string): string | null
  * Wait for a transaction receipt using multiple strategies:
  * 1. Wallet's EIP-1193 provider (window.ethereum) — most reliable since it broadcast the tx
  * 2. Our configured public RPC client — fallback
- *
- * The wallet's own provider (e.g. MetaMask → Infura) is guaranteed to see the tx
- * because it was the one that submitted it. Public RPCs like llamarpc may be slow
- * to index new transactions, causing waitForTransactionReceipt to hang.
  */
 async function waitForReceipt(
   chainId: number,
@@ -58,7 +54,6 @@ async function waitForReceipt(
 ): Promise<TransactionReceipt> {
   const startTime = Date.now();
 
-  // Strategy 1: Use wallet's own provider via window.ethereum
   const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : null;
   if (ethereum) {
     console.log('[Deploy] Polling receipt via wallet provider...');
@@ -77,11 +72,9 @@ async function waitForReceipt(
       return receipt;
     } catch (walletErr) {
       console.warn('[Deploy] Wallet provider receipt failed:', walletErr);
-      // Fall through to strategy 2
     }
   }
 
-  // Strategy 2: Use our configured public RPC
   const elapsed = Date.now() - startTime;
   const remainingTimeout = Math.max(timeoutMs - elapsed, 30_000);
   console.log('[Deploy] Falling back to public RPC for receipt...');
@@ -106,10 +99,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
   const [vaultAddress, setVaultAddress] = useState<`0x${string}` | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedTxHash, setFailedTxHash] = useState<string | null>(null);
-  const pausedRef = useRef(false);
+  const [expandedStep, setExpandedStep] = useState<number | null>(null);
 
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
-
   const isV2 = state.version === 'v2';
 
   // Build steps from state
@@ -204,16 +196,10 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     setStatus('deploying');
     setError(null);
     setFailedTxHash(null);
-    pausedRef.current = false;
 
     let deployedVaultAddr = vaultAddress;
 
     for (let i = currentStepIdx; i < steps.length; i++) {
-      if (pausedRef.current) {
-        setStatus('paused');
-        return;
-      }
-
       const step = steps[i];
       setCurrentStepIdx(i);
 
@@ -230,7 +216,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         return;
       }
 
-      // Handle steps that require waiting
+      // Handle steps that require waiting (deferred multicall after timelock)
       if (step.requiresWait && step.requiresWait > 0) {
         setSteps((prev) =>
           prev.map((s, idx) =>
@@ -239,7 +225,6 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
               : s,
           ),
         );
-        // Skip this step — user must come back later
         continue;
       }
 
@@ -261,10 +246,10 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           const explorerUrl = getExplorerTxUrl(state.chainId, hash);
           const isSaltCollision = i === 0;
           const detail = isSaltCollision
-            ? 'Transaction reverted — likely a salt collision (same owner+asset+salt already used). Try again with a new salt.'
-            : 'Transaction reverted on-chain';
+            ? 'Transaction reverted — likely a salt collision. Try again with a new salt.'
+            : 'Transaction reverted on-chain. The vault is deployed but configuration failed — you can retry or configure manually.';
           setFailedTxHash(hash);
-          throw new Error(explorerUrl ? `${detail}` : detail);
+          throw new Error(explorerUrl ? detail : detail);
         }
 
         // Parse vault address from deploy step
@@ -315,7 +300,6 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         );
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Transaction failed';
-        // Extract tx hash from step state for the failed step
         setSteps((prev) => {
           const currentStep = prev[i];
           if (currentStep?.txHash) setFailedTxHash(currentStep.txHash);
@@ -328,14 +312,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     }
 
     setStatus('complete');
-  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, trackVault, isV2]);
-
-  const handlePause = () => {
-    pausedRef.current = true;
-  };
+  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, trackVault, isV2, chainConfig]);
 
   const handleRetry = () => {
-    // If the deploy step (step 0) failed, regenerate salt to avoid collision
     if (currentStepIdx === 0) {
       const newSalt = generateRandomSalt();
       const newSteps = buildSteps(newSalt);
@@ -354,6 +333,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     ? getExplorerTxUrl(state.chainId, failedTxHash)
     : null;
 
+  // Count total operations across multicall steps
+  const totalOps = steps.reduce((acc, s) => acc + (s.operations?.filter(l => !l.startsWith('Submit:')).length ?? 0), 0);
+
   return (
     <div className="space-y-6">
       <CardHeader>
@@ -365,6 +347,15 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           {status === 'failed' && <Badge variant="warning">Failed</Badge>}
         </div>
       </CardHeader>
+
+      {/* Summary line */}
+      {status === 'idle' && (
+        <p className="text-xs text-text-tertiary">
+          {steps.length === 1
+            ? '1 transaction — deploy only (no additional config)'
+            : `${steps.length} transactions${totalOps > 0 ? ` — ${totalOps} config operations batched via multicall` : ''}`}
+        </p>
+      )}
 
       {/* Vault address */}
       {vaultAddress && (
@@ -387,35 +378,62 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
       {/* Steps list */}
       <div className="space-y-2">
         {steps.map((step, i) => (
-          <div
-            key={step.id}
-            className={`flex items-center gap-3 px-3 py-2 text-xs ${
-              i === currentStepIdx && status === 'deploying'
-                ? 'bg-bg-hover/60'
-                : 'bg-bg-hover/20'
-            }`}
-          >
-            <StepIcon status={step.status} />
-            <span className="text-text-primary flex-1">{step.label}</span>
-            {step.txHash && (
-              <a
-                href={`${chainConfig?.blockExplorer}/tx/${step.txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                className={`hover:underline font-mono ${
-                  step.status === 'failed' ? 'text-danger' : 'text-info'
-                }`}
-              >
-                {truncateAddress(step.txHash)}
-              </a>
-            )}
-            {step.error && step.status === 'waiting' && (
-              <span className="text-warning">{step.error}</span>
-            )}
-            {step.error && step.status === 'failed' && (
-              <span className="text-danger truncate max-w-[250px]" title={step.error}>
-                {step.error}
-              </span>
+          <div key={step.id}>
+            <div
+              className={`flex items-center gap-3 px-3 py-2 text-xs ${
+                i === currentStepIdx && status === 'deploying'
+                  ? 'bg-bg-hover/60'
+                  : 'bg-bg-hover/20'
+              }`}
+            >
+              <StepIcon status={step.status} />
+              <span className="text-text-primary flex-1">{step.label}</span>
+              {step.txHash && (
+                <a
+                  href={`${chainConfig?.blockExplorer}/tx/${step.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`hover:underline font-mono ${
+                    step.status === 'failed' ? 'text-danger' : 'text-info'
+                  }`}
+                >
+                  {truncateAddress(step.txHash)}
+                </a>
+              )}
+              {step.error && step.status === 'waiting' && (
+                <span className="text-warning">{step.error}</span>
+              )}
+              {step.error && step.status === 'failed' && (
+                <span className="text-danger truncate max-w-[250px]" title={step.error}>
+                  {step.error}
+                </span>
+              )}
+              {/* Expand/collapse toggle for multicall operations */}
+              {step.operations && step.operations.length > 0 && (
+                <button
+                  onClick={() => setExpandedStep(expandedStep === i ? null : i)}
+                  className="text-text-tertiary hover:text-text-primary text-[10px] px-1"
+                  aria-label={expandedStep === i ? 'Collapse operations' : 'Expand operations'}
+                >
+                  {expandedStep === i ? '▼' : '▶'} {step.operations.filter(l => !l.startsWith('Submit:')).length} ops
+                </button>
+              )}
+            </div>
+
+            {/* Expandable multicall operation breakdown */}
+            {step.operations && expandedStep === i && (
+              <div className="ml-7 border-l border-border-subtle pl-3 py-1 space-y-0.5">
+                {step.operations
+                  .filter(label => !label.startsWith('Submit:'))
+                  .map((label, j) => (
+                    <div key={j} className="flex items-center gap-2 text-[11px] text-text-tertiary">
+                      <span className={step.status === 'confirmed' ? 'text-success' : 'text-text-tertiary'}>
+                        {step.status === 'confirmed' ? '✓' : '○'}
+                      </span>
+                      {label}
+                    </div>
+                  ))}
+              </div>
             )}
           </div>
         ))}
@@ -451,12 +469,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           </>
         )}
         {status === 'deploying' && (
-          <Button variant="secondary" onClick={handlePause}>
-            Pause
-          </Button>
-        )}
-        {status === 'paused' && (
-          <Button onClick={executeSteps}>Resume</Button>
+          <p className="text-xs text-text-tertiary animate-shimmer">
+            Waiting for transaction confirmation...
+          </p>
         )}
         {status === 'failed' && (
           <>
@@ -464,7 +479,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
               Back
             </Button>
             <Button onClick={handleRetry}>
-              {currentStepIdx === 0 ? 'Retry with New Salt' : 'Retry from Failed Step'}
+              {currentStepIdx === 0 ? 'Retry with New Salt' : 'Retry Configuration'}
             </Button>
           </>
         )}

@@ -56,6 +56,7 @@ export interface TransactionStep {
   txHash?: Hash;
   error?: string;
   requiresWait?: number; // seconds to wait before executing
+  operations?: string[]; // Human-readable labels for multicall sub-operations
 }
 
 // ============================================================
@@ -100,7 +101,7 @@ export function parseVaultAddressFromReceipt(receipt: TransactionReceipt): `0x${
 }
 
 // ============================================================
-// Build transaction sequence
+// Build V1 deployment with multicall
 // ============================================================
 
 export function buildDeploymentTxSequence(
@@ -116,7 +117,7 @@ export function buildDeploymentTxSequence(
   const steps: TransactionStep[] = [];
   let stepIndex = 0;
 
-  // Step 1: Deploy vault via factory
+  // Step 1: Deploy vault via factory (always separate — vault doesn't exist yet)
   steps.push({
     id: `step-${stepIndex++}`,
     label: 'Deploy vault via factory',
@@ -136,155 +137,160 @@ export function buildDeploymentTxSequence(
     status: 'pending',
   });
 
-  // Step 2: Set curator
+  // Collect all immediate config calls for multicall
+  const immediateCalls: `0x${string}`[] = [];
+  const immediateLabels: string[] = [];
+
+  // Set curator
   if (config.curator) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set curator`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'setCurator',
-        args: [config.curator],
-      }),
-      status: 'pending',
-    });
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'setCurator', args: [config.curator] }),
+    );
+    immediateLabels.push('Set curator');
   }
 
-  // Step 3: Set allocators
+  // Set allocators
   for (const allocator of config.allocators ?? []) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set allocator`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'setIsAllocator',
-        args: [allocator, true],
-      }),
-      status: 'pending',
-    });
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'setIsAllocator', args: [allocator, true] }),
+    );
+    immediateLabels.push('Set allocator');
   }
 
-  // Step 4: Submit guardian (instant if first guardian — no dependency)
+  // Submit guardian
   if (config.guardian) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set guardian`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'submitGuardian',
-        args: [config.guardian],
-      }),
-      status: 'pending',
-    });
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'submitGuardian', args: [config.guardian] }),
+    );
+    immediateLabels.push('Set guardian');
   }
 
-  // Step 5: Set fee recipient (MUST come before setFee — no dependency)
+  // Set fee recipient BEFORE fee (order matters)
   if (config.feeRecipient) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set fee recipient`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'setFeeRecipient',
-        args: [config.feeRecipient],
-      }),
-      status: 'pending',
-    });
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'setFeeRecipient', args: [config.feeRecipient] }),
+    );
+    immediateLabels.push('Set fee recipient');
   }
 
-  // Step 6: Set fee (REQUIRES feeRecipient != address(0) when fee > 0)
+  // Set fee
   if (config.fee && config.fee > 0n) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set performance fee: ${Number(config.fee * 100n / BigInt(1e18))}%`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'setFee',
-        args: [config.fee],
-      }),
-      status: 'pending',
-    });
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'setFee', args: [config.fee] }),
+    );
+    immediateLabels.push(`Set performance fee: ${Number(config.fee * 100n / BigInt(1e18))}%`);
   }
 
-  // Step 7: Submit caps for initial markets
+  // Submit caps for initial markets
   for (const market of config.initialMarkets ?? []) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set supply cap`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'submitCap',
-        args: [market.marketParams, market.supplyCap],
-      }),
-      status: 'pending',
-    });
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'submitCap', args: [market.marketParams, market.supplyCap] }),
+    );
+    immediateLabels.push('Submit supply cap');
+  }
 
-    // If timelock > 0, need acceptCap after waiting
-    if (params.initialTimelock > 0n) {
-      steps.push({
-        id: `step-${stepIndex++}`,
-        label: `Accept cap (after timelock)`,
-        to: null,
-        data: encodeFunctionData({
-          abi: metaMorphoV1Abi,
-          functionName: 'acceptCap',
-          args: [market.marketParams],
-        }),
-        status: 'pending',
-        requiresWait: Number(params.initialTimelock),
-      });
+  // If timelock is 0, acceptCap + queues + timelock increase can go in same multicall
+  const hasMarkets = config.initialMarkets && config.initialMarkets.length > 0;
+  const needsWaitForCaps = hasMarkets && params.initialTimelock > 0n;
+
+  if (hasMarkets && !needsWaitForCaps) {
+    // Timelock is 0 — acceptCap immediately in same multicall
+    for (const market of config.initialMarkets!) {
+      immediateCalls.push(
+        encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'acceptCap', args: [market.marketParams] }),
+      );
+      immediateLabels.push('Accept supply cap');
+    }
+
+    // Set queues
+    const marketIds = config.initialMarkets!.map((m) => computeMarketId(m.marketParams));
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'setSupplyQueue', args: [marketIds] }),
+    );
+    immediateLabels.push('Set supply queue');
+
+    const permutation = marketIds.map((_, i) => BigInt(i));
+    immediateCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'updateWithdrawQueue', args: [permutation] }),
+    );
+    immediateLabels.push('Set withdraw queue');
+
+    // Increase timelock LAST (gates future changes)
+    if (config.finalTimelock && config.finalTimelock > params.initialTimelock) {
+      immediateCalls.push(
+        encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'submitTimelock', args: [config.finalTimelock] }),
+      );
+      immediateLabels.push(`Increase timelock to ${formatTimelockDuration(Number(config.finalTimelock))}`);
+    }
+  } else if (!hasMarkets) {
+    // No markets — just increase timelock if needed
+    if (config.finalTimelock && config.finalTimelock > params.initialTimelock) {
+      immediateCalls.push(
+        encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'submitTimelock', args: [config.finalTimelock] }),
+      );
+      immediateLabels.push(`Increase timelock to ${formatTimelockDuration(Number(config.finalTimelock))}`);
     }
   }
 
-  // Step 8: Set supply queue
-  if (config.initialMarkets && config.initialMarkets.length > 0) {
-    const marketIds = config.initialMarkets.map((m) => computeMarketId(m.marketParams));
-
+  // Step 2: Multicall all immediate config
+  if (immediateCalls.length > 0) {
     steps.push({
       id: `step-${stepIndex++}`,
-      label: 'Set supply queue',
+      label: `Configure vault (${immediateCalls.length} operations)`,
       to: null,
       data: encodeFunctionData({
         abi: metaMorphoV1Abi,
-        functionName: 'setSupplyQueue',
-        args: [marketIds],
+        functionName: 'multicall',
+        args: [immediateCalls],
       }),
       status: 'pending',
-    });
-
-    // Step 9: Update withdraw queue (identity permutation)
-    const permutation = marketIds.map((_, i) => BigInt(i));
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: 'Set withdraw queue',
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV1Abi,
-        functionName: 'updateWithdrawQueue',
-        args: [permutation],
-      }),
-      status: 'pending',
+      operations: immediateLabels,
     });
   }
 
-  // Step 10: Increase timelock (always instant for increase)
-  if (config.finalTimelock && config.finalTimelock > params.initialTimelock) {
+  // Step 3 (optional): Deferred config after timelock wait
+  if (needsWaitForCaps) {
+    const deferredCalls: `0x${string}`[] = [];
+    const deferredLabels: string[] = [];
+
+    for (const market of config.initialMarkets!) {
+      deferredCalls.push(
+        encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'acceptCap', args: [market.marketParams] }),
+      );
+      deferredLabels.push('Accept supply cap');
+    }
+
+    const marketIds = config.initialMarkets!.map((m) => computeMarketId(m.marketParams));
+    deferredCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'setSupplyQueue', args: [marketIds] }),
+    );
+    deferredLabels.push('Set supply queue');
+
+    const permutation = marketIds.map((_, i) => BigInt(i));
+    deferredCalls.push(
+      encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'updateWithdrawQueue', args: [permutation] }),
+    );
+    deferredLabels.push('Set withdraw queue');
+
+    if (config.finalTimelock && config.finalTimelock > params.initialTimelock) {
+      deferredCalls.push(
+        encodeFunctionData({ abi: metaMorphoV1Abi, functionName: 'submitTimelock', args: [config.finalTimelock] }),
+      );
+      deferredLabels.push(`Increase timelock to ${formatTimelockDuration(Number(config.finalTimelock))}`);
+    }
+
     steps.push({
       id: `step-${stepIndex++}`,
-      label: `Increase timelock to ${formatTimelockDuration(Number(config.finalTimelock))}`,
+      label: `Finalize markets (${deferredCalls.length} operations)`,
       to: null,
       data: encodeFunctionData({
         abi: metaMorphoV1Abi,
-        functionName: 'submitTimelock',
-        args: [config.finalTimelock],
+        functionName: 'multicall',
+        args: [deferredCalls],
       }),
       status: 'pending',
+      operations: deferredLabels,
+      requiresWait: Number(params.initialTimelock),
     });
   }
 
@@ -359,6 +365,10 @@ export function parseV2VaultAddressFromReceipt(receipt: TransactionReceipt): `0x
   return null;
 }
 
+// ============================================================
+// Build V2 deployment with multicall
+// ============================================================
+
 export function buildV2DeploymentTxSequence(
   params: V2VaultCreationParams,
   config: V2PostDeployConfig,
@@ -371,29 +381,6 @@ export function buildV2DeploymentTxSequence(
 
   const steps: TransactionStep[] = [];
   let stepIndex = 0;
-
-  // Helper: add a timelocked function call (submit + execute)
-  // V2 gated functions require: 1) curator calls submit(calldata), 2) call the function
-  const addTimelockedStep = (label: string, calldata: `0x${string}`) => {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Submit: ${label}`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'submit',
-        args: [calldata],
-      }),
-      status: 'pending',
-    });
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label,
-      to: null,
-      data: calldata,
-      status: 'pending',
-    });
-  };
 
   // Step 1: Deploy vault via V2 factory
   steps.push({
@@ -408,140 +395,121 @@ export function buildV2DeploymentTxSequence(
     status: 'pending',
   });
 
-  // Set name (owner-only, no timelock)
+  // Collect all config calls for a single multicall
+  // Within multicall, submit+execute pairs work with timelock=0 (same block.timestamp)
+  const calls: `0x${string}`[] = [];
+  const labels: string[] = [];
+
+  // Helper: add a timelocked function call (submit + execute in same multicall)
+  const addTimelocked = (label: string, calldata: `0x${string}`) => {
+    calls.push(
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'submit', args: [calldata] }),
+    );
+    labels.push(`Submit: ${label}`);
+    calls.push(calldata);
+    labels.push(label);
+  };
+
+  // --- Owner-only functions (no timelock) ---
+
+  // Set name
   if (params.name) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set name: "${params.name}"`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setName',
-        args: [params.name],
-      }),
-      status: 'pending',
-    });
+    calls.push(
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setName', args: [params.name] }),
+    );
+    labels.push(`Set name: "${params.name}"`);
   }
 
-  // Set symbol (owner-only, no timelock)
+  // Set symbol
   if (params.symbol) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: `Set symbol: "${params.symbol}"`,
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setSymbol',
-        args: [params.symbol],
-      }),
-      status: 'pending',
-    });
+    calls.push(
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setSymbol', args: [params.symbol] }),
+    );
+    labels.push(`Set symbol: "${params.symbol}"`);
   }
 
-  // Set curator (owner-only, no timelock) — MUST come before timelocked steps
+  // Set curator — MUST come before timelocked steps (submit requires msg.sender == curator)
   if (config.curator) {
-    steps.push({
-      id: `step-${stepIndex++}`,
-      label: 'Set curator',
-      to: null,
-      data: encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setCurator',
-        args: [config.curator],
-      }),
-      status: 'pending',
-    });
+    calls.push(
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setCurator', args: [config.curator] }),
+    );
+    labels.push('Set curator');
   }
 
   // Set sentinels (owner-only, no timelock)
   for (const sentinel of config.sentinels ?? []) {
+    calls.push(
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setIsSentinel', args: [sentinel, true] }),
+    );
+    labels.push('Set sentinel');
+  }
+
+  // --- Timelocked functions (submit + execute pairs) ---
+
+  // Set allocators
+  for (const allocator of config.allocators ?? []) {
+    addTimelocked(
+      'Set allocator',
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setIsAllocator', args: [allocator, true] }),
+    );
+  }
+
+  // Set performance fee recipient (must come before fee)
+  if (config.performanceFeeRecipient) {
+    addTimelocked(
+      'Set performance fee recipient',
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setPerformanceFeeRecipient', args: [config.performanceFeeRecipient] }),
+    );
+  }
+
+  // Set performance fee
+  if (config.performanceFee && config.performanceFee > 0n) {
+    addTimelocked(
+      `Set performance fee: ${Number(config.performanceFee * 100n / BigInt(1e18))}%`,
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setPerformanceFee', args: [config.performanceFee] }),
+    );
+  }
+
+  // Set management fee recipient
+  if (config.managementFeeRecipient) {
+    addTimelocked(
+      'Set management fee recipient',
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setManagementFeeRecipient', args: [config.managementFeeRecipient] }),
+    );
+  }
+
+  // Set management fee
+  if (config.managementFee && config.managementFee > 0n) {
+    addTimelocked(
+      `Set management fee: ${Number(config.managementFee * 100n / BigInt(1e18))}%`,
+      encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setManagementFee', args: [config.managementFee] }),
+    );
+  }
+
+  // Set per-function timelocks (LAST — gates future changes)
+  for (const tl of config.timelocks ?? []) {
+    if (tl.seconds > 0) {
+      addTimelocked(
+        `Set timelock: ${tl.selector} = ${formatTimelockDuration(tl.seconds)}`,
+        encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'increaseTimelock', args: [tl.selector, BigInt(tl.seconds)] }),
+      );
+    }
+  }
+
+  // Step 2: Multicall all config
+  if (calls.length > 0) {
     steps.push({
       id: `step-${stepIndex++}`,
-      label: 'Set sentinel',
+      label: `Configure vault (${labels.filter(l => !l.startsWith('Submit:')).length} operations)`,
       to: null,
       data: encodeFunctionData({
         abi: metaMorphoV2Abi,
-        functionName: 'setIsSentinel',
-        args: [sentinel, true],
+        functionName: 'multicall',
+        args: [calls],
       }),
       status: 'pending',
+      operations: labels,
     });
-  }
-
-  // --- Timelocked functions below (require submit → execute) ---
-
-  // Set allocators (TIMELOCKED — requires submit)
-  for (const allocator of config.allocators ?? []) {
-    addTimelockedStep(
-      'Set allocator',
-      encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setIsAllocator',
-        args: [allocator, true],
-      }),
-    );
-  }
-
-  // Set performance fee recipient (TIMELOCKED — must come before fee)
-  if (config.performanceFeeRecipient) {
-    addTimelockedStep(
-      'Set performance fee recipient',
-      encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setPerformanceFeeRecipient',
-        args: [config.performanceFeeRecipient],
-      }),
-    );
-  }
-
-  // Set performance fee (TIMELOCKED)
-  if (config.performanceFee && config.performanceFee > 0n) {
-    addTimelockedStep(
-      `Set performance fee: ${Number(config.performanceFee * 100n / BigInt(1e18))}%`,
-      encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setPerformanceFee',
-        args: [config.performanceFee],
-      }),
-    );
-  }
-
-  // Set management fee recipient (TIMELOCKED)
-  if (config.managementFeeRecipient) {
-    addTimelockedStep(
-      'Set management fee recipient',
-      encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setManagementFeeRecipient',
-        args: [config.managementFeeRecipient],
-      }),
-    );
-  }
-
-  // Set management fee (TIMELOCKED)
-  if (config.managementFee && config.managementFee > 0n) {
-    addTimelockedStep(
-      `Set management fee: ${Number(config.managementFee * 100n / BigInt(1e18))}%`,
-      encodeFunctionData({
-        abi: metaMorphoV2Abi,
-        functionName: 'setManagementFee',
-        args: [config.managementFee],
-      }),
-    );
-  }
-
-  // Set per-function timelocks (TIMELOCKED — increaseTimelock)
-  for (const tl of config.timelocks ?? []) {
-    if (tl.seconds > 0) {
-      addTimelockedStep(
-        `Set timelock: ${tl.selector} = ${formatTimelockDuration(tl.seconds)}`,
-        encodeFunctionData({
-          abi: metaMorphoV2Abi,
-          functionName: 'increaseTimelock',
-          args: [tl.selector, BigInt(tl.seconds)],
-        }),
-      );
-    }
   }
 
   return steps;
