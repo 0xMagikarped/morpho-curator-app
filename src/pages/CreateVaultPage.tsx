@@ -6,7 +6,7 @@ export function CreateVaultPage() {
       <div>
         <h1 className="text-lg font-bold text-text-primary">Create Vault</h1>
         <p className="text-sm text-text-tertiary mt-0.5">
-          Deploy a new MetaMorpho V1 vault via the factory contract
+          Deploy a new MetaMorpho vault via the factory contract
         </p>
       </div>
 

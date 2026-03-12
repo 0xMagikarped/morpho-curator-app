@@ -18,6 +18,7 @@ import {
   type V2VaultCreationParams,
   type V2PostDeployConfig,
 } from '../../../lib/vault/createVault';
+import { generateRandomSalt } from '../../../lib/vault/vaultSaltGenerator';
 import { useAppStore } from '../../../store/appStore';
 import { useTrackedVaults } from '../../../lib/hooks/useTrackedVaults';
 import type { WizardState } from '../CreateVaultWizard';
@@ -28,6 +29,12 @@ interface DeployStepProps {
 }
 
 type DeployStatus = 'idle' | 'deploying' | 'paused' | 'complete' | 'failed';
+
+function getExplorerTxUrl(chainId: number | null, txHash: string): string | null {
+  if (!chainId) return null;
+  const config = getChainConfig(chainId);
+  return config?.blockExplorer ? `${config.blockExplorer}/tx/${txHash}` : null;
+}
 
 export function DeployStep({ state, onBack }: DeployStepProps) {
   const { address } = useAccount();
@@ -41,15 +48,16 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [vaultAddress, setVaultAddress] = useState<`0x${string}` | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failedTxHash, setFailedTxHash] = useState<string | null>(null);
   const pausedRef = useRef(false);
 
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
 
   const isV2 = state.version === 'v2';
 
-  // Build steps on mount
-  useEffect(() => {
-    if (!state.chainId || !state.owner || !state.asset || !state.salt) return;
+  // Build steps from state
+  const buildSteps = useCallback((salt: `0x${string}`) => {
+    if (!state.chainId || !state.owner || !state.asset) return [];
 
     const curator =
       state.curatorMode === 'owner'
@@ -61,14 +69,13 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
       state.feeRecipientMode === 'owner' ? state.owner : state.feeRecipientAddress ?? undefined;
 
     if (isV2) {
-      // V2 deployment
       const v2Params: V2VaultCreationParams = {
         chainId: state.chainId,
         initialOwner: state.owner,
         asset: state.asset,
         name: state.vaultName,
         symbol: state.vaultSymbol,
-        salt: state.salt,
+        salt,
       };
 
       const mgmtFeeRecipient =
@@ -87,9 +94,8 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         timelocks: state.v2Timelocks.length > 0 ? state.v2Timelocks : undefined,
       };
 
-      setSteps(buildV2DeploymentTxSequence(v2Params, v2PostDeploy));
+      return buildV2DeploymentTxSequence(v2Params, v2PostDeploy);
     } else {
-      // V1 deployment
       const guardian =
         state.guardianMode === 'custom' ? state.guardianAddress ?? undefined : undefined;
 
@@ -102,7 +108,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         asset: state.asset,
         name: state.vaultName,
         symbol: state.vaultSymbol,
-        salt: state.salt,
+        salt,
       };
 
       const postDeploy: PostDeployConfig = {
@@ -125,15 +131,22 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
             : undefined,
       };
 
-      setSteps(buildDeploymentTxSequence(creationParams, postDeploy));
+      return buildDeploymentTxSequence(creationParams, postDeploy);
     }
   }, [state, isV2]);
+
+  // Build steps on mount
+  useEffect(() => {
+    if (!state.salt) return;
+    setSteps(buildSteps(state.salt));
+  }, [state.salt, buildSteps]);
 
   const executeSteps = useCallback(async () => {
     if (!walletClient || !publicClient || !address || steps.length === 0) return;
 
     setStatus('deploying');
     setError(null);
+    setFailedTxHash(null);
     pausedRef.current = false;
 
     let deployedVaultAddr = vaultAddress;
@@ -149,7 +162,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
       // Update step status
       setSteps((prev) =>
-        prev.map((s, idx) => (idx === i ? { ...s, status: 'confirming' } : s)),
+        prev.map((s, idx) => (idx === i ? { ...s, status: 'confirming', error: undefined } : s)),
       );
 
       // Determine target address
@@ -185,10 +198,20 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           prev.map((s, idx) => (idx === i ? { ...s, txHash: hash, status: 'confirming' } : s)),
         );
 
-        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash,
+          timeout: 120_000, // 2 minutes — default is too short for slow RPCs
+          pollingInterval: 4_000,
+        });
 
         if (receipt.status === 'reverted') {
-          throw new Error('Transaction reverted');
+          const explorerUrl = getExplorerTxUrl(state.chainId, hash);
+          const isSaltCollision = i === 0;
+          const detail = isSaltCollision
+            ? 'Transaction reverted — likely a salt collision (same owner+asset+salt already used). Try again with a new salt.'
+            : 'Transaction reverted on-chain';
+          setFailedTxHash(hash);
+          throw new Error(explorerUrl ? `${detail}` : detail);
         }
 
         // Parse vault address from deploy step
@@ -215,9 +238,12 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         );
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Transaction failed';
-        setSteps((prev) =>
-          prev.map((s, idx) => (idx === i ? { ...s, status: 'failed', error: message } : s)),
-        );
+        // Extract tx hash from step state for the failed step
+        setSteps((prev) => {
+          const currentStep = prev[i];
+          if (currentStep?.txHash) setFailedTxHash(currentStep.txHash);
+          return prev.map((s, idx) => (idx === i ? { ...s, status: 'failed', error: message } : s));
+        });
         setError(message);
         setStatus('failed');
         return;
@@ -225,14 +251,21 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     }
 
     setStatus('complete');
-  }, [walletClient, publicClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault]);
+  }, [walletClient, publicClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, trackVault, isV2]);
 
   const handlePause = () => {
     pausedRef.current = true;
   };
 
   const handleRetry = () => {
+    // If the deploy step (step 0) failed, regenerate salt to avoid collision
+    if (currentStepIdx === 0) {
+      const newSalt = generateRandomSalt();
+      const newSteps = buildSteps(newSalt);
+      setSteps(newSteps);
+    }
     setError(null);
+    setFailedTxHash(null);
     executeSteps();
   };
 
@@ -240,13 +273,20 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     ? Math.round((steps.filter((s) => s.status === 'confirmed').length / steps.length) * 100)
     : 0;
 
+  const failedExplorerUrl = failedTxHash
+    ? getExplorerTxUrl(state.chainId, failedTxHash)
+    : null;
+
   return (
     <div className="space-y-6">
       <CardHeader>
         <CardTitle>Deployment</CardTitle>
-        {status === 'complete' && <Badge variant="success">Complete</Badge>}
-        {status === 'deploying' && <Badge variant="warning">In Progress</Badge>}
-        {status === 'failed' && <Badge variant="warning">Failed</Badge>}
+        <div className="flex gap-2">
+          <Badge variant={isV2 ? 'info' : 'success'}>{isV2 ? 'V2' : 'V1'}</Badge>
+          {status === 'complete' && <Badge variant="success">Complete</Badge>}
+          {status === 'deploying' && <Badge variant="warning">In Progress</Badge>}
+          {status === 'failed' && <Badge variant="warning">Failed</Badge>}
+        </div>
       </CardHeader>
 
       {/* Vault address */}
@@ -285,7 +325,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
                 href={`${chainConfig?.blockExplorer}/tx/${step.txHash}`}
                 target="_blank"
                 rel="noreferrer"
-                className="text-info hover:underline font-mono"
+                className={`hover:underline font-mono ${
+                  step.status === 'failed' ? 'text-danger' : 'text-info'
+                }`}
               >
                 {truncateAddress(step.txHash)}
               </a>
@@ -294,7 +336,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
               <span className="text-warning">{step.error}</span>
             )}
             {step.error && step.status === 'failed' && (
-              <span className="text-danger truncate max-w-[200px]">{step.error}</span>
+              <span className="text-danger truncate max-w-[250px]" title={step.error}>
+                {step.error}
+              </span>
             )}
           </div>
         ))}
@@ -302,7 +346,19 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
       {/* Error */}
       {error && (
-        <div className="bg-danger/15 p-3 text-xs text-danger">{error}</div>
+        <div className="bg-danger/15 p-3 text-xs space-y-2">
+          <p className="text-danger">{error}</p>
+          {failedExplorerUrl && (
+            <a
+              href={failedExplorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-danger/80 hover:underline font-mono inline-block"
+            >
+              View failed transaction on explorer
+            </a>
+          )}
+        </div>
       )}
 
       {/* Actions */}
@@ -330,7 +386,9 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
             <Button variant="secondary" onClick={onBack}>
               Back
             </Button>
-            <Button onClick={handleRetry}>Retry from Failed Step</Button>
+            <Button onClick={handleRetry}>
+              {currentStepIdx === 0 ? 'Retry with New Salt' : 'Retry from Failed Step'}
+            </Button>
           </>
         )}
         {status === 'complete' && (

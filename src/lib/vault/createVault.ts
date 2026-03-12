@@ -325,8 +325,8 @@ export interface V2VaultCreationParams {
   chainId: number;
   initialOwner: `0x${string}`;
   asset: `0x${string}`;
-  name: string;
-  symbol: string;
+  name: string;   // Set via setName() post-deploy
+  symbol: string;  // Set via setSymbol() post-deploy
   salt: `0x${string}`;
 }
 
@@ -349,8 +349,8 @@ export function parseV2VaultAddressFromReceipt(receipt: TransactionReceipt): `0x
         data: log.data,
         topics: log.topics,
       });
-      if (decoded.eventName === 'CreateMetaMorphoV2') {
-        return (decoded.args as { vault: `0x${string}` }).vault;
+      if (decoded.eventName === 'CreateVaultV2') {
+        return (decoded.args as { newVaultV2: `0x${string}` }).newVaultV2;
       }
     } catch {
       // Not our event
@@ -379,13 +379,43 @@ export function buildV2DeploymentTxSequence(
     to: factoryAddress,
     data: encodeFunctionData({
       abi: metaMorphoV2FactoryAbi,
-      functionName: 'createMetaMorphoV2',
-      args: [params.initialOwner, params.asset, params.name, params.symbol, params.salt],
+      functionName: 'createVaultV2',
+      args: [params.initialOwner, params.asset, params.salt],
     }),
     status: 'pending',
   });
 
-  // Step 2: Set curator
+  // Step 2: Set name (V2 vaults start with empty name)
+  if (params.name) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: `Set name: "${params.name}"`,
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setName',
+        args: [params.name],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 3: Set symbol (V2 vaults start with empty symbol)
+  if (params.symbol) {
+    steps.push({
+      id: `step-${stepIndex++}`,
+      label: `Set symbol: "${params.symbol}"`,
+      to: null,
+      data: encodeFunctionData({
+        abi: metaMorphoV2Abi,
+        functionName: 'setSymbol',
+        args: [params.symbol],
+      }),
+      status: 'pending',
+    });
+  }
+
+  // Step 4: Set curator
   if (config.curator) {
     steps.push({
       id: `step-${stepIndex++}`,

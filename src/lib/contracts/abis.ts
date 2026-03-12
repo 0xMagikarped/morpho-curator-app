@@ -602,7 +602,7 @@ export const metaMorphoFactoryAbi = [
 
 export const metaMorphoV2FactoryAbi = [
   {
-    inputs: [{ name: 'target', type: 'address' }],
+    inputs: [{ name: 'account', type: 'address' }],
     name: 'isVaultV2',
     outputs: [{ name: '', type: 'bool' }],
     stateMutability: 'view',
@@ -610,29 +610,35 @@ export const metaMorphoV2FactoryAbi = [
   },
   {
     inputs: [
-      { name: 'initialOwner', type: 'address' },
+      { name: 'owner', type: 'address' },
       { name: 'asset', type: 'address' },
-      { name: 'name', type: 'string' },
-      { name: 'symbol', type: 'string' },
       { name: 'salt', type: 'bytes32' },
     ],
-    name: 'createMetaMorphoV2',
-    outputs: [{ name: 'vault', type: 'address' }],
+    name: 'createVaultV2',
+    outputs: [{ name: '', type: 'address' }],
     stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'asset', type: 'address' },
+      { name: 'salt', type: 'bytes32' },
+    ],
+    name: 'vaultV2',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
     type: 'function',
   },
   {
     anonymous: false,
     inputs: [
-      { indexed: true, name: 'vault', type: 'address' },
-      { indexed: true, name: 'caller', type: 'address' },
-      { indexed: false, name: 'initialOwner', type: 'address' },
-      { indexed: true, name: 'asset', type: 'address' },
-      { indexed: false, name: 'name', type: 'string' },
-      { indexed: false, name: 'symbol', type: 'string' },
+      { indexed: false, name: 'owner', type: 'address' },
+      { indexed: false, name: 'asset', type: 'address' },
       { indexed: false, name: 'salt', type: 'bytes32' },
+      { indexed: false, name: 'newVaultV2', type: 'address' },
     ],
-    name: 'CreateMetaMorphoV2',
+    name: 'CreateVaultV2',
     type: 'event',
   },
 ] as const;
@@ -666,6 +672,14 @@ export const metaMorphoV2Abi = [
     type: 'function',
   },
   // ---- Write Functions (Owner) ----
+  {
+    inputs: [{ name: 'newName', type: 'string' }],
+    name: 'setName', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'newSymbol', type: 'string' }],
+    name: 'setSymbol', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
   {
     inputs: [{ name: 'newCurator', type: 'address' }],
     name: 'setCurator', outputs: [], stateMutability: 'nonpayable', type: 'function',

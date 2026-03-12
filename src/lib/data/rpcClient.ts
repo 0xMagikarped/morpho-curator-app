@@ -72,6 +72,11 @@ export async function fetchTokenInfo(
   chainId: number,
   address: Address,
 ): Promise<TokenInfo> {
+  const ZERO = '0x0000000000000000000000000000000000000000' as Address;
+  if (!address || address === ZERO) {
+    throw new Error(`Cannot fetch token info for zero address`);
+  }
+
   const client = getPublicClient(chainId);
 
   const [name, symbol, decimals] = await Promise.all([
@@ -295,13 +300,16 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
   if (!name) {
     throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
+  if (!asset || asset === ZERO) {
+    throw new Error(`Contract at ${vaultAddress} returned zero asset address — RPC may be unreliable`);
+  }
 
   return {
     address: vaultAddress,
     chainId,
     name,
     symbol: symbol ?? '',
-    asset: asset ?? ZERO,
+    asset,
     morphoBlue: morpho ?? getChainConfig(chainId)?.morphoBlue ?? ZERO,
     owner: owner ?? ZERO,
     curator: curator ?? ZERO,
@@ -348,13 +356,16 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
   if (!name) {
     throw new Error(`Contract at ${vaultAddress} is not a Morpho V2 vault (name() failed)`);
   }
+  if (!asset || asset === ZERO) {
+    throw new Error(`Contract at ${vaultAddress} returned zero asset address — RPC may be unreliable`);
+  }
 
   return {
     address: vaultAddress,
     chainId,
     name,
     symbol: symbol ?? '',
-    asset: asset ?? ZERO,
+    asset,
     morphoBlue: getChainConfig(chainId)?.morphoBlue ?? ZERO,
     owner: owner ?? ZERO,
     curator: curator ?? ZERO,
