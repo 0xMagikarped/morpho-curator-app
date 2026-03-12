@@ -633,10 +633,10 @@ export const metaMorphoV2FactoryAbi = [
   {
     anonymous: false,
     inputs: [
-      { indexed: false, name: 'owner', type: 'address' },
-      { indexed: false, name: 'asset', type: 'address' },
+      { indexed: true, name: 'owner', type: 'address' },
+      { indexed: true, name: 'asset', type: 'address' },
       { indexed: false, name: 'salt', type: 'bytes32' },
-      { indexed: false, name: 'newVaultV2', type: 'address' },
+      { indexed: true, name: 'newVaultV2', type: 'address' },
     ],
     name: 'CreateVaultV2',
     type: 'event',

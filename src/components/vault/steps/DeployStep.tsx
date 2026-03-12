@@ -269,9 +269,33 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
         // Parse vault address from deploy step
         if (i === 0) {
-          const addr = isV2
+          let addr = isV2
             ? parseV2VaultAddressFromReceipt(receipt)
             : parseVaultAddressFromReceipt(receipt);
+
+          // Fallback for V2: query factory's vaultV2() view if event parsing failed
+          if (!addr && isV2 && state.salt) {
+            console.warn('[Deploy] Event parsing returned null, trying factory vaultV2() view...');
+            try {
+              const factoryAddr = chainConfig?.vaultFactories.v2;
+              if (factoryAddr) {
+                const client = getPublicClient(state.chainId!);
+                const result = await client.readContract({
+                  address: factoryAddr,
+                  abi: [{ inputs: [{ type: 'address' }, { type: 'address' }, { type: 'bytes32' }], name: 'vaultV2', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' }] as const,
+                  functionName: 'vaultV2',
+                  args: [state.owner!, state.asset!, state.salt],
+                }) as `0x${string}`;
+                if (result && result !== '0x0000000000000000000000000000000000000000') {
+                  addr = result;
+                  console.log('[Deploy] Got vault address from factory view:', addr);
+                }
+              }
+            } catch (viewErr) {
+              console.warn('[Deploy] Factory vaultV2() view failed:', viewErr);
+            }
+          }
+
           if (addr) {
             deployedVaultAddr = addr;
             setVaultAddress(addr);
