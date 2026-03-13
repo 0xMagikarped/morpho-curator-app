@@ -385,7 +385,7 @@ async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[
 
 export function useManagedVaults(walletAddress: Address | undefined) {
   return useQuery({
-    queryKey: dashboardKeys.managed(walletAddress!),
+    queryKey: dashboardKeys.managed(walletAddress ?? ''),
     queryFn: () => fetchManagedVaults(walletAddress!),
     enabled: !!walletAddress,
     staleTime: 5 * 60 * 1000,
