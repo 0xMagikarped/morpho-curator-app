@@ -29,6 +29,7 @@ export const metaMorphoV2Abi = [
   { inputs: [], name: 'guardian', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'sentinel', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'allocator', type: 'address' }], name: 'isAllocator', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'addr', type: 'address' }], name: 'isSentinel', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
 
   // === Config ===
   { inputs: [], name: 'timelock', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
@@ -36,7 +37,7 @@ export const metaMorphoV2Abi = [
   { inputs: [], name: 'feeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'lastTotalAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
 
-  // === Adapter Management ===
+  // === Adapter reads ===
   {
     inputs: [{ name: 'id', type: 'bytes32' }],
     name: 'adapter',
@@ -44,8 +45,18 @@ export const metaMorphoV2Abi = [
     stateMutability: 'view',
     type: 'function',
   },
+  { inputs: [], name: 'adaptersLength', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'index', type: 'uint256' }], name: 'adapters', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'adapter', type: 'address' }], name: 'isAdapterEnabled', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'liquidityAdapter', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
 
-  // === Caps (by market ID) ===
+  // === Cap reads ===
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'absoluteCap', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'relativeCap', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'allocation', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'actionHash', type: 'bytes32' }], name: 'pendingAction', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+
+  // === Caps (by market ID) — timelocked submit ===
   {
     inputs: [
       { name: 'id', type: 'bytes32' },
@@ -75,6 +86,102 @@ export const metaMorphoV2Abi = [
   {
     inputs: [{ name: 'data', type: 'bytes' }],
     name: 'execute',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+
+  // === Adapter management — Curator (timelocked) ===
+  {
+    inputs: [{ name: 'adapter', type: 'address' }],
+    name: 'addAdapter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'adapter', type: 'address' }],
+    name: 'removeAdapter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'idData', type: 'bytes' },
+      { name: 'cap', type: 'uint256' },
+    ],
+    name: 'increaseAbsoluteCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'idData', type: 'bytes' },
+      { name: 'cap', type: 'uint256' },
+    ],
+    name: 'decreaseAbsoluteCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'idData', type: 'bytes' },
+      { name: 'cap', type: 'uint256' },
+    ],
+    name: 'setRelativeCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'adapter', type: 'address' },
+      { name: 'penalty', type: 'uint256' },
+    ],
+    name: 'setForceDeallocatePenalty',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+
+  // === Allocator actions (immediate) ===
+  {
+    inputs: [
+      { name: 'adapter', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+    ],
+    name: 'allocate',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'adapter', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+    ],
+    name: 'deallocate',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'adapter', type: 'address' }],
+    name: 'setLiquidityAdapter',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+
+  // === Sentinel actions ===
+  {
+    inputs: [{ name: 'actionHash', type: 'bytes32' }],
+    name: 'revoke',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -131,4 +238,34 @@ export const metaMorphoV2Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+] as const;
+
+/**
+ * ABI for V1 vault adapter contracts (MorphoVaultV1Adapter).
+ */
+export const v1VaultAdapterAbi = [
+  { inputs: [], name: 'VAULT', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'realAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'asset', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  {
+    inputs: [
+      { name: 'token', type: 'address' },
+      { name: 'to', type: 'address' },
+    ],
+    name: 'skim',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+/**
+ * ABI for V1 market adapter contracts (MorphoMarketV1AdapterV2).
+ */
+export const v1MarketAdapterAbi = [
+  { inputs: [], name: 'MORPHO', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'realAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'asset', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
 ] as const;
