@@ -30,7 +30,7 @@ export function QueueList({
   editing,
   mode,
   decimals,
-  assetSymbol,
+  assetSymbol: _assetSymbol,
   onMove,
   onRemove,
   removableMarkets,

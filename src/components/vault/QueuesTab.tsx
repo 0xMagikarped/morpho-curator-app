@@ -5,7 +5,6 @@ import { ArrowRightLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
-import { SectionHeader } from '../ui/SectionHeader';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole } from '../../lib/hooks/useVault';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount } from '../../lib/utils/format';
