@@ -1,4 +1,4 @@
-import type { Address } from 'viem';
+// viem types used transitively via V2AdapterFull
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';

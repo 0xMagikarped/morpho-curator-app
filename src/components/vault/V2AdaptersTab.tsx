@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Address } from 'viem';
 import { Plus } from 'lucide-react';
-import { Card, CardHeader, CardTitle } from '../ui/Card';
+import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { SectionHeader } from '../ui/SectionHeader';
@@ -201,7 +201,6 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
         idle={idle}
         decimals={decimals}
         assetSymbol={assetSymbol}
-        totalAssets={totalAssets}
       />
 
       <DeallocateDrawer

@@ -16,7 +16,6 @@ interface AllocateDrawerProps {
   idle: bigint;
   decimals: number;
   assetSymbol: string;
-  totalAssets: bigint;
 }
 
 export function AllocateDrawer({
@@ -27,7 +26,6 @@ export function AllocateDrawer({
   idle,
   decimals,
   assetSymbol,
-  totalAssets,
 }: AllocateDrawerProps) {
   const [amount, setAmount] = useState('');
   const { writeContract, data: txHash, isPending } = useWriteContract();
