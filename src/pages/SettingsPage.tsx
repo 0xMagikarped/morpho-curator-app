@@ -8,13 +8,11 @@ import { truncateAddress } from '../lib/utils/format';
 import { clearAllMarketData } from '../lib/indexer/indexedDB';
 
 export function SettingsPage() {
-  const {
-    trackedVaults,
-    removeTrackedVault,
-    customRpcUrls,
-    setCustomRpcUrl,
-    clearAlerts,
-  } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const removeTrackedVault = useAppStore((s) => s.removeTrackedVault);
+  const customRpcUrls = useAppStore((s) => s.customRpcUrls);
+  const setCustomRpcUrl = useAppStore((s) => s.setCustomRpcUrl);
+  const clearAlerts = useAppStore((s) => s.clearAlerts);
 
   const [rpcInputs, setRpcInputs] = useState<Record<number, string>>(customRpcUrls);
 

@@ -21,7 +21,9 @@ import type { RiskAlert } from '../lib/risk/riskTypes';
 
 export function DashboardPage() {
   const { address } = useAccount();
-  const { trackedVaults, addTrackedVault, persistToEdgeConfig } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const addTrackedVault = useAppStore((s) => s.addTrackedVault);
+  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
   const { data: vaultSummaries, isLoading: vaultsLoading } = useDashboardVaults();
   const { data: pendingActionsList } = useDashboardPendingActions();
   const [showAddVault, setShowAddVault] = useState(false);

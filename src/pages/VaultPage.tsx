@@ -57,7 +57,10 @@ export function VaultPage() {
   const { address: walletAddress } = useAccount();
   const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
-  const { trackedVaults, addTrackedVault, removeTrackedVault, persistToEdgeConfig } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const addTrackedVault = useAppStore((s) => s.addTrackedVault);
+  const removeTrackedVault = useAppStore((s) => s.removeTrackedVault);
+  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
 
   if (!chainId || !vaultAddress) {
     return (

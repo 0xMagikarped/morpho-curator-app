@@ -3,6 +3,7 @@ import { type Market, type MarketId } from "@morpho-org/blue-sdk";
 import { fetchMarket } from "@morpho-org/blue-sdk-viem";
 import { getMorphoClient } from "../../lib/morpho/clients";
 import { isMorphoSdkSupported } from "../../lib/morpho/sdk-config";
+import { sdkKeys } from "../../lib/queryKeys";
 
 export interface MarketSdkData {
   market: Market;
@@ -20,7 +21,7 @@ export function useMarketSdk(
   chainId: number | undefined,
 ) {
   return useQuery<MarketSdkData>({
-    queryKey: ["morpho-sdk-market", marketId, chainId],
+    queryKey: sdkKeys.market(marketId!, chainId!),
     queryFn: async () => {
       const client = getMorphoClient(chainId!);
       const market = await fetchMarket(marketId!, client);

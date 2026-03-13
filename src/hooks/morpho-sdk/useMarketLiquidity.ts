@@ -4,6 +4,7 @@ import { LiquidityLoader } from "@morpho-org/liquidity-sdk-viem";
 import type { PublicReallocation, SimulationState, MaybeDraft } from "@morpho-org/simulation-sdk";
 import { getMorphoClient } from "../../lib/morpho/clients";
 import { isMorphoSdkSupported } from "../../lib/morpho/sdk-config";
+import { sdkKeys } from "../../lib/queryKeys";
 
 export interface MarketLiquidityData {
   startState: SimulationState;
@@ -21,7 +22,7 @@ export function useMarketLiquidity(
   chainId: number | undefined,
 ) {
   return useQuery<MarketLiquidityData>({
-    queryKey: ["morpho-liquidity", marketId, chainId],
+    queryKey: sdkKeys.liquidity(marketId!, chainId!),
     queryFn: async () => {
       const client = getMorphoClient(chainId!);
       const loader = new LiquidityLoader(client);

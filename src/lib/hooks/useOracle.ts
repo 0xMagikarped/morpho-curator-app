@@ -4,6 +4,7 @@ import { classifyOracle } from '../oracle/oracleClassifier';
 import { checkOracleHealth, checkOracleHealthBatch } from '../oracle/oracleMonitor';
 import { scoreOracle } from '../oracle/oracleRiskScorer';
 import type { OracleInfo, OracleHealth, OracleRiskScore } from '../oracle/oracleTypes';
+import { oracleKeys } from '../queryKeys';
 
 // ============================================================
 // useOracleInfo — Classify a single oracle
@@ -11,7 +12,7 @@ import type { OracleInfo, OracleHealth, OracleRiskScore } from '../oracle/oracle
 
 export function useOracleInfo(chainId: number | undefined, oracleAddress: Address | undefined) {
   return useQuery<OracleInfo | null>({
-    queryKey: ['oracle-info', chainId, oracleAddress],
+    queryKey: oracleKeys.info(chainId!, oracleAddress!),
     queryFn: async () => {
       if (!chainId || !oracleAddress) return null;
       return classifyOracle(chainId, oracleAddress);
@@ -28,7 +29,7 @@ export function useOracleInfo(chainId: number | undefined, oracleAddress: Addres
 
 export function useOracleHealth(chainId: number | undefined, oracleAddress: Address | undefined) {
   return useQuery<OracleHealth | null>({
-    queryKey: ['oracle-health', chainId, oracleAddress],
+    queryKey: oracleKeys.health(chainId!, oracleAddress!),
     queryFn: async () => {
       if (!chainId || !oracleAddress) return null;
       return checkOracleHealth(chainId, oracleAddress);
@@ -48,7 +49,7 @@ export function useOracleRiskScore(chainId: number | undefined, oracleAddress: A
   const { data: health } = useOracleHealth(chainId, oracleAddress);
 
   return useQuery<OracleRiskScore | null>({
-    queryKey: ['oracle-risk', chainId, oracleAddress, info?.type, health?.isResponding],
+    queryKey: [...oracleKeys.risk(chainId!, oracleAddress!), info?.type, health?.isResponding],
     queryFn: () => {
       if (!info) return null;
       return scoreOracle(info, health ?? null);
@@ -64,7 +65,7 @@ export function useOracleRiskScore(chainId: number | undefined, oracleAddress: A
 
 export function useOracleHealthBatch(chainId: number | undefined, oracleAddresses: Address[] | undefined) {
   return useQuery<Map<Address, OracleHealth>>({
-    queryKey: ['oracle-health-batch', chainId, oracleAddresses?.join(',')],
+    queryKey: oracleKeys.healthBatch(chainId!, oracleAddresses ?? []),
     queryFn: async () => {
       if (!chainId || !oracleAddresses || oracleAddresses.length === 0) {
         return new Map();

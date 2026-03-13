@@ -14,6 +14,7 @@ import {
   isAdapterEnabled,
   type AdapterDetectionResult,
 } from '../v2/adapterUtils';
+import { vaultKeys } from '../queryKeys';
 
 // ============================================================
 // Enhanced adapter data with caps and liquidity status
@@ -87,7 +88,7 @@ export function useV2AdapterOverview(
   totalAssets: bigint | undefined,
 ) {
   return useQuery<V2AdapterOverview>({
-    queryKey: ['v2-adapter-overview', chainId, vaultAddress, totalAssets?.toString()],
+    queryKey: [...vaultKeys.adapters(chainId!, vaultAddress!), 'overview', totalAssets?.toString()],
     queryFn: () => fetchV2AdapterOverview(chainId!, vaultAddress!, totalAssets ?? 0n),
     enabled: !!chainId && !!vaultAddress,
     staleTime: 30_000,
@@ -144,7 +145,7 @@ export function useAdapterPreview(
   enabled: boolean,
 ) {
   return useQuery<AdapterPreview>({
-    queryKey: ['adapter-preview', chainId, vaultAddress, adapterAddress],
+    queryKey: vaultKeys.adapterPreview(chainId!, vaultAddress!, adapterAddress!),
     queryFn: () => fetchAdapterPreview(chainId!, vaultAddress!, adapterAddress!, vaultAsset!),
     enabled: enabled && !!chainId && !!vaultAddress && !!adapterAddress && !!vaultAsset,
     staleTime: 60_000,

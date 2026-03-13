@@ -8,7 +8,7 @@ export function Header() {
   const { isConnected } = useAccount();
   const chainId = useChainId();
   const chainConfig = getChainConfig(chainId);
-  const { trackedVaults } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
 
   const trackedChainIds = isConnected
     ? []

@@ -15,7 +15,9 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar, trackedVaults } = useAppStore();
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
 
   return (
     <aside

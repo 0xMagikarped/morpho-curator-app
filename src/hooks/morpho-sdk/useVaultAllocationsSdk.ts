@@ -4,6 +4,7 @@ import { fetchAccrualVault } from "@morpho-org/blue-sdk-viem";
 import type { Address } from "viem";
 import { getMorphoClient } from "../../lib/morpho/clients";
 import { isMorphoSdkSupported } from "../../lib/morpho/sdk-config";
+import { sdkKeys } from "../../lib/queryKeys";
 
 export interface VaultAllocationsData {
   vault: AccrualVault;
@@ -22,7 +23,7 @@ export function useVaultAllocationsSdk(
   chainId: number | undefined,
 ) {
   return useQuery<VaultAllocationsData>({
-    queryKey: ["morpho-sdk-vault-allocations", vaultAddress, chainId],
+    queryKey: sdkKeys.allocations(vaultAddress!, chainId!),
     queryFn: async () => {
       const client = getMorphoClient(chainId!);
       const vault = await fetchAccrualVault(vaultAddress!, client);

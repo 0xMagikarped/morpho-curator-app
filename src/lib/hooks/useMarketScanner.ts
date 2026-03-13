@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useCallback } from 'react';
+import { marketKeys } from '../queryKeys';
 import { getChainConfig } from '../../config/chains';
 import {
   getMarketsByChain,
@@ -30,7 +31,7 @@ export function useMarketScanner(chainId: number | undefined) {
   const isApiChain = chainConfig?.apiSupported ?? false;
 
   const query = useQuery({
-    queryKey: ['discovered-markets', chainId],
+    queryKey: marketKeys.discovered(chainId!),
     queryFn: async (): Promise<MarketRecord[]> => {
       if (!chainId || !chainConfig) return [];
 
@@ -58,7 +59,7 @@ export function useMarketScanner(chainId: number | undefined) {
     setScanProgress(null);
     await clearChainData(chainId);
     await runFullScan(chainId, setScanProgress);
-    queryClient.invalidateQueries({ queryKey: ['discovered-markets', chainId] });
+    queryClient.invalidateQueries({ queryKey: marketKeys.discovered(chainId!) });
   }, [chainId, queryClient]);
 
   return {
@@ -75,7 +76,7 @@ export function useMarketScanner(chainId: number | undefined) {
 
 export function useScannerState(chainId: number | undefined) {
   return useQuery({
-    queryKey: ['scanner-state', chainId],
+    queryKey: marketKeys.scanner(chainId!),
     queryFn: async () => {
       if (!chainId) return null;
       return getScannerState(chainId);
@@ -95,7 +96,7 @@ export function useEnrichedMarketState(
   market: MarketRecord | undefined,
 ) {
   return useQuery<EnrichedMarketState | null>({
-    queryKey: ['enriched-market', chainId, market?.marketId],
+    queryKey: [...marketKeys.detail(chainId!, market?.marketId ?? ''), 'enriched'],
     queryFn: async () => {
       if (!chainId || !market) return null;
       return fetchEnrichedMarketState(chainId, market);

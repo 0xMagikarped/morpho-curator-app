@@ -4,6 +4,7 @@ import { checkBatchUtilization } from '../risk/utilizationMonitor';
 import { checkSharePrice } from '../risk/sharePriceMonitor';
 import { getSharePriceHistory } from '../risk/riskDB';
 import type { UtilizationData, SharePriceData, SharePriceRecord } from '../risk/riskTypes';
+import { riskKeys } from '../queryKeys';
 
 // ============================================================
 // useVaultUtilization — Poll utilization for markets in a vault
@@ -14,7 +15,7 @@ export function useVaultUtilization(
   marketIds: `0x${string}`[] | undefined,
 ) {
   return useQuery<Map<`0x${string}`, UtilizationData>>({
-    queryKey: ['vault-utilization', chainId, marketIds?.join(',')],
+    queryKey: riskKeys.utilization(chainId!, marketIds?.join(',') ?? ''),
     queryFn: async () => {
       if (!chainId || !marketIds || marketIds.length === 0) return new Map();
       return checkBatchUtilization(chainId, marketIds);
@@ -34,7 +35,7 @@ export function useSharePrice(
   vaultAddress: Address | undefined,
 ) {
   return useQuery<SharePriceData | null>({
-    queryKey: ['share-price', chainId, vaultAddress],
+    queryKey: riskKeys.sharePrice(chainId!, vaultAddress!),
     queryFn: async () => {
       if (!chainId || !vaultAddress) return null;
       return checkSharePrice(chainId, vaultAddress);
@@ -55,7 +56,7 @@ export function useSharePriceHistory(
   limit = 50,
 ) {
   return useQuery<SharePriceRecord[]>({
-    queryKey: ['share-price-history', chainId, vaultAddress],
+    queryKey: riskKeys.sharePriceHistory(chainId!, vaultAddress!),
     queryFn: async () => {
       if (!chainId || !vaultAddress) return [];
       return getSharePriceHistory(vaultAddress, chainId, limit);

@@ -12,7 +12,10 @@ import { getChainConfig } from '../../config/chains';
 export function ManagedVaultsBanner() {
   const { address } = useAccount();
   const { data: managed, isLoading } = useManagedVaults(address);
-  const { trackedVaults, dismissedVaults, trackAll, persistToEdgeConfig } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const dismissedVaults = useAppStore((s) => s.dismissedVaults);
+  const trackAll = useAppStore((s) => s.trackAll);
+  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
 
   // Filter out already-tracked AND explicitly-dismissed vaults
   const untracked = useMemo(() => {

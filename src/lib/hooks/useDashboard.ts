@@ -12,6 +12,7 @@ import {
   fetchPendingCap,
 } from '../data/rpcClient';
 import { isApiSupportedChain, fetchVaultFromApi } from '../data/morphoApi';
+import { dashboardKeys } from '../queryKeys';
 
 // ============================================================
 // Vault Summary (enriched from on-chain data)
@@ -37,10 +38,11 @@ export interface VaultSummary {
 
 export function useDashboardVaults() {
   const { address: walletAddress } = useAccount();
-  const { trackedVaults } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const trackedKey = trackedVaults.map((v) => `${v.chainId}-${v.address}`).join(',');
 
   return useQuery<VaultSummary[]>({
-    queryKey: ['dashboard-vaults', trackedVaults.map((v) => `${v.chainId}-${v.address}`).join(','), walletAddress],
+    queryKey: dashboardKeys.vaults(trackedKey, walletAddress),
     queryFn: async () => {
       if (trackedVaults.length === 0) return [];
 
@@ -63,10 +65,11 @@ export function useDashboardVaults() {
 // ============================================================
 
 export function useDashboardPendingActions() {
-  const { trackedVaults } = useAppStore();
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const trackedKey = trackedVaults.map((v) => `${v.chainId}-${v.address}`).join(',');
 
   return useQuery<Array<PendingAction & { vaultName?: string; chainId: number }>>({
-    queryKey: ['dashboard-pending', trackedVaults.map((v) => `${v.chainId}-${v.address}`).join(',')],
+    queryKey: dashboardKeys.pending(trackedKey),
     queryFn: async () => {
       if (trackedVaults.length === 0) return [];
 

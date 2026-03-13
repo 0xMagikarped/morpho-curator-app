@@ -10,5 +10,14 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-web3': ['wagmi', 'viem', '@tanstack/react-query'],
+          'vendor-ui': ['recharts', 'lucide-react'],
+        },
+      },
+    },
   },
 });

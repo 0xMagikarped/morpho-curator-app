@@ -20,6 +20,7 @@ import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../da
 import type { VaultRole, AllocationState, MarketInfo, PendingAction } from '../../types';
 import type { VaultInfoV1 } from '../../types';
 import { calcUtilization } from '../utils/format';
+import { vaultKeys } from '../queryKeys';
 
 // ============================================================
 // Shared: fetch full vault data (API with RPC fallback)
@@ -32,7 +33,7 @@ import { calcUtilization } from '../utils/format';
  */
 function useVaultFullData(chainId: number | undefined, vaultAddress: Address | undefined) {
   return useQuery({
-    queryKey: ['vault-full-data', chainId, vaultAddress],
+    queryKey: vaultKeys.fullData(chainId!, vaultAddress!),
     queryFn: async (): Promise<ApiVaultData> => {
       if (!chainId || !vaultAddress) throw new Error('Missing params');
 
@@ -162,7 +163,7 @@ export function useVaultMarkets(
   marketIds: `0x${string}`[] | undefined,
 ) {
   return useQuery({
-    queryKey: ['vault-markets', chainId, marketIds],
+    queryKey: [...vaultKeys.detail(chainId!, ''), 'markets', ...(marketIds ?? [])],
     queryFn: async () => {
       if (!chainId || !marketIds?.length) return [];
 
@@ -226,7 +227,7 @@ export function useV2Adapters(
   vaultAddress: Address | undefined,
 ) {
   return useQuery<V2AdapterData[]>({
-    queryKey: ['v2-adapters', chainId, vaultAddress],
+    queryKey: vaultKeys.adapters(chainId!, vaultAddress!),
     queryFn: () => fetchV2Adapters(chainId!, vaultAddress!),
     enabled: !!chainId && !!vaultAddress,
     staleTime: 30_000,
@@ -245,7 +246,7 @@ export function useVaultRole(
   const fullData = useVaultFullData(chainId, vaultAddress);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['vault-role', chainId, vaultAddress, userAddress],
+    queryKey: vaultKeys.role(chainId!, vaultAddress!, userAddress),
     queryFn: async () => {
       if (!chainId || !vaultAddress || !userAddress || !fullData.data) {
         return { isOwner: false, isCurator: false, isAllocator: false, isEmergencyRole: false };
@@ -274,7 +275,7 @@ export function useVaultRole(
       };
     },
     enabled: !!chainId && !!vaultAddress && !!userAddress && !!fullData.data,
-    staleTime: 60_000,
+    staleTime: 10 * 60 * 1000, // Roles rarely change
   });
 
   return {
@@ -296,7 +297,7 @@ export function useVaultPendingActions(
   marketIds: `0x${string}`[] | undefined,
 ) {
   return useQuery({
-    queryKey: ['vault-pending', chainId, vaultAddress, marketIds],
+    queryKey: [...vaultKeys.pending(chainId!, vaultAddress!), marketIds],
     queryFn: async () => {
       if (!chainId || !vaultAddress) return [];
 

@@ -19,8 +19,16 @@ import { OracleDeployerPage } from './pages/OracleDeployerPage';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 2,
-      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000,       // 5 min — DeFi data is fresh for 5 min
+      gcTime: 30 * 60 * 1000,         // 30 min — keep stale data in cache
+      retry: (failureCount, error) => {
+        // Don't retry client errors (4xx)
+        const status = (error as { status?: number })?.status;
+        if (status && status >= 400 && status < 500) return false;
+        return failureCount < 2;
+      },
+      refetchOnWindowFocus: false,     // Prevent surprise refetches burning RPC quota
+      refetchOnReconnect: 'always',    // Do refetch when network comes back
     },
   },
 });

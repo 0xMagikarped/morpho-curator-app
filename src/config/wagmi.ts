@@ -1,4 +1,4 @@
-import { http } from 'wagmi';
+import { http, fallback } from 'wagmi';
 import { mainnet, base } from 'wagmi/chains';
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import type { Chain } from 'wagmi/chains';
@@ -30,9 +30,20 @@ export const config = getDefaultConfig({
   projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
   chains: [sei, mainnet, base],
   transports: {
-    [sei.id]: http('https://sei-evm-rpc.publicnode.com'),
-    [mainnet.id]: http('https://ethereum-rpc.publicnode.com'),
-    [base.id]: http('https://mainnet.base.org'),
+    [sei.id]: fallback([
+      http('https://sei-evm-rpc.publicnode.com'),
+      http('https://evm-rpc.sei-apis.com'),
+    ]),
+    [mainnet.id]: fallback([
+      http('https://ethereum-rpc.publicnode.com'),
+      http('https://eth.public-rpc.com'),
+      http('https://rpc.ankr.com/eth'),
+    ]),
+    [base.id]: fallback([
+      http('https://mainnet.base.org'),
+      http('https://base-rpc.publicnode.com'),
+      http('https://rpc.ankr.com/base'),
+    ]),
   },
 });
 

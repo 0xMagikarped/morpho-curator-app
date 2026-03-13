@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
+import { dashboardKeys } from '../queryKeys';
 import type { VaultVersion } from '../../types';
 import { CHAIN_CONFIGS, SEI_KNOWN_VAULTS, getChainConfig } from '../../config/chains';
 import { getPublicClient } from '../data/rpcClient';
@@ -384,7 +385,7 @@ async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[
 
 export function useManagedVaults(walletAddress: Address | undefined) {
   return useQuery({
-    queryKey: ['managed-vaults', walletAddress],
+    queryKey: dashboardKeys.managed(walletAddress!),
     queryFn: () => fetchManagedVaults(walletAddress!),
     enabled: !!walletAddress,
     staleTime: 5 * 60 * 1000,

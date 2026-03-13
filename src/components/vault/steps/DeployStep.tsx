@@ -89,7 +89,8 @@ async function waitForReceipt(
 export function DeployStep({ state, onBack }: DeployStepProps) {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { addTrackedVault, persistToEdgeConfig } = useAppStore();
+  const addTrackedVault = useAppStore((s) => s.addTrackedVault);
+  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
 
   const [status, setStatus] = useState<DeployStatus>('idle');
   const [steps, setSteps] = useState<TransactionStep[]>([]);
