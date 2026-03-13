@@ -24,7 +24,6 @@ import {
 } from '../../../lib/vault/createVault';
 import { generateRandomSalt } from '../../../lib/vault/vaultSaltGenerator';
 import { useAppStore } from '../../../store/appStore';
-import { useTrackedVaults } from '../../../lib/hooks/useTrackedVaults';
 import type { WizardState } from '../CreateVaultWizard';
 
 interface DeployStepProps {
@@ -90,8 +89,7 @@ async function waitForReceipt(
 export function DeployStep({ state, onBack }: DeployStepProps) {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { addTrackedVault } = useAppStore();
-  const { trackVault } = useTrackedVaults();
+  const { addTrackedVault, persistToEdgeConfig } = useAppStore();
 
   const [status, setStatus] = useState<DeployStatus>('idle');
   const [steps, setSteps] = useState<TransactionStep[]>([]);
@@ -291,7 +289,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
               version: state.version,
             };
             addTrackedVault(vault);
-            trackVault(vault);
+            if (address) persistToEdgeConfig(address);
           }
         }
 
@@ -312,7 +310,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     }
 
     setStatus('complete');
-  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, trackVault, isV2, chainConfig]);
+  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, persistToEdgeConfig, isV2, chainConfig]);
 
   const handleRetry = () => {
     if (currentStepIdx === 0) {

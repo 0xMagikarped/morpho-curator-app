@@ -8,7 +8,7 @@ function walletToKey(wallet: string): string {
   return `tracked_${wallet.toLowerCase().replace('0x', '')}`;
 }
 
-async function upsertEdgeConfigItem(key: string, value: unknown) {
+async function writeEdgeConfig(key: string, value: unknown) {
   const r = await fetch(
     `https://api.vercel.com/v1/edge-config/${process.env.EDGE_CONFIG_ID}/items`,
     {
@@ -49,13 +49,11 @@ export default async function handler(request: Request) {
   }
 
   try {
-    const { wallet, vault } = await request.json();
+    const body = await request.json();
+    const { wallet, vaults, vault } = body;
 
     if (!wallet || !wallet.startsWith('0x')) {
       return new Response(JSON.stringify({ error: 'Invalid wallet address' }), { status: 400, headers });
-    }
-    if (!vault?.address || !vault?.chainId) {
-      return new Response(JSON.stringify({ error: 'Missing vault address or chainId' }), { status: 400, headers });
     }
 
     if (!process.env.EDGE_CONFIG_ID || !process.env.VERCEL_API_TOKEN) {
@@ -63,24 +61,33 @@ export default async function handler(request: Request) {
     }
 
     const key = walletToKey(wallet);
-    const existing = ((await get(key)) ?? []) as Record<string, unknown>[];
+    let finalVaults;
 
-    const alreadyExists = existing.some(
-      (v) =>
-        String(v.address).toLowerCase() === vault.address.toLowerCase() &&
-        v.chainId === vault.chainId,
-    );
-
-    if (alreadyExists) {
-      return new Response(JSON.stringify({ message: 'Already tracked', vaults: existing }), { status: 200, headers });
+    if (Array.isArray(vaults)) {
+      // Full list sync — replace entirely
+      finalVaults = vaults;
+    } else if (vault?.address && vault?.chainId) {
+      // Single vault add — read-modify-write
+      const current = ((await get(key)) ?? []) as Record<string, unknown>[];
+      const exists = current.some(
+        (v) =>
+          String(v.address).toLowerCase() === vault.address.toLowerCase() &&
+          v.chainId === vault.chainId,
+      );
+      if (exists) {
+        return new Response(JSON.stringify({ success: true, message: 'Already tracked', vaults: current }), { status: 200, headers });
+      }
+      finalVaults = [...current, { ...vault, address: vault.address, trackedAt: new Date().toISOString() }];
+    } else {
+      return new Response(JSON.stringify({ error: 'vaults array or vault object required' }), { status: 400, headers });
     }
 
-    const updated = [...existing, { ...vault, address: vault.address, addedAt: Date.now() }];
-    await upsertEdgeConfigItem(key, updated);
+    await writeEdgeConfig(key, finalVaults);
 
-    return new Response(JSON.stringify({ message: 'Tracked', vaults: updated }), { status: 200, headers });
+    return new Response(JSON.stringify({ success: true, vaults: finalVaults }), { status: 200, headers });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
+    console.error('[track-vault] Error:', msg);
     return new Response(JSON.stringify({ error: 'Failed to track vault', detail: msg }), { status: 500, headers });
   }
 }

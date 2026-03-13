@@ -9,6 +9,7 @@ import { ReallocateTab } from '../components/vault/ReallocateTab';
 import { GuardianTab } from '../components/vault/GuardianTab';
 import { V2AdaptersTab } from '../components/vault/V2AdaptersTab';
 import { V2SecurityTab } from '../components/vault/V2SecurityTab';
+import { useAccount } from 'wagmi';
 import { useVaultInfo, useVaultRole } from '../lib/hooks/useVault';
 import { useAppStore } from '../store/appStore';
 import { cn } from '../lib/utils/cn';
@@ -51,9 +52,10 @@ export function VaultPage() {
   const chainId = chainIdStr ? parseInt(chainIdStr) : undefined;
   const vaultAddress = address as Address | undefined;
 
+  const { address: walletAddress } = useAccount();
   const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
-  const { trackedVaults, addTrackedVault, removeTrackedVault } = useAppStore();
+  const { trackedVaults, addTrackedVault, removeTrackedVault, persistToEdgeConfig } = useAppStore();
 
   if (!chainId || !vaultAddress) {
     return (
@@ -97,6 +99,7 @@ export function VaultPage() {
         version: vault.version,
       });
     }
+    if (walletAddress) persistToEdgeConfig(walletAddress);
   };
 
   return (

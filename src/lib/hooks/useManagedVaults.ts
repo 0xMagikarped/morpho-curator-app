@@ -3,7 +3,7 @@ import type { Address } from 'viem';
 import type { VaultVersion } from '../../types';
 import { CHAIN_CONFIGS, SEI_KNOWN_VAULTS, getChainConfig } from '../../config/chains';
 import { getPublicClient } from '../data/rpcClient';
-import { metaMorphoFactoryAbi } from '../contracts/abis';
+import { metaMorphoFactoryAbi, metaMorphoV2FactoryAbi } from '../contracts/abis';
 
 const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 
@@ -88,56 +88,87 @@ async function fetchOnChainManagedVaults(
   chainId: number,
 ): Promise<ManagedVault[]> {
   const config = getChainConfig(chainId);
-  if (!config?.vaultFactories.v1) return [];
+  if (!config) return [];
 
   const client = getPublicClient(chainId);
   const lower = walletAddress.toLowerCase();
 
   try {
-    // Collect vault addresses from all available sources
-    const addressSet = new Set<string>();
+    // Collect vault addresses from all available sources, tagged with version
+    const vaultEntries: { address: string; version: VaultVersion }[] = [];
+    const seen = new Set<string>();
+
+    const addVault = (addr: string, version: VaultVersion) => {
+      const key = addr.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        vaultEntries.push({ address: key, version });
+      }
+    };
 
     // Source 1: known vaults from static config
     if (chainId === 1329) {
       for (const vault of Object.values(SEI_KNOWN_VAULTS)) {
-        addressSet.add(vault.address.toLowerCase());
+        addVault(vault.address, 'v1');
       }
     }
 
-    // Source 2: factory event logs or explorer API + receipts
-    try {
-      const logs = await client.getLogs({
-        address: config.vaultFactories.v1,
-        event: metaMorphoFactoryAbi[3], // CreateMetaMorpho event
-        fromBlock: BigInt(config.deploymentBlock),
-        toBlock: 'latest',
-      });
-      for (const l of logs) {
-        const addr = (l as { args: { metaMorpho: Address } }).args.metaMorpho;
-        if (addr) addressSet.add(addr.toLowerCase());
-      }
-    } catch {
-      // getLogs failed (block range limit) — try explorer + receipts
-      const explorerAddrs = await discoverVaultsViaExplorerReceipts(chainId, config.vaultFactories.v1);
-      for (const addr of explorerAddrs) {
-        addressSet.add(addr.toLowerCase());
+    // Source 2: V1 factory event logs
+    if (config.vaultFactories.v1) {
+      try {
+        const logs = await client.getLogs({
+          address: config.vaultFactories.v1,
+          event: metaMorphoFactoryAbi[3], // CreateMetaMorpho event
+          fromBlock: BigInt(config.deploymentBlock),
+          toBlock: 'latest',
+        });
+        for (const l of logs) {
+          const addr = (l as { args: { metaMorpho: Address } }).args.metaMorpho;
+          if (addr) addVault(addr, 'v1');
+        }
+      } catch {
+        // getLogs failed (block range limit) — try explorer + receipts
+        const explorerAddrs = await discoverVaultsViaExplorerReceipts(chainId, config.vaultFactories.v1);
+        for (const addr of explorerAddrs) addVault(addr, 'v1');
       }
     }
 
-    const vaultAddresses = [...addressSet].map((a) => a as Address);
-    if (vaultAddresses.length === 0) return [];
+    // Source 3: V2 factory event logs
+    if (config.vaultFactories.v2) {
+      try {
+        const v2Event = metaMorphoV2FactoryAbi.find(
+          (e) => e.type === 'event' && e.name === 'CreateVaultV2',
+        );
+        if (v2Event) {
+          const logs = await client.getLogs({
+            address: config.vaultFactories.v2,
+            event: v2Event as typeof v2Event & { type: 'event' },
+            fromBlock: BigInt(config.deploymentBlock),
+            toBlock: 'latest',
+          });
+          for (const l of logs) {
+            const addr = (l as { args: { newVaultV2: Address } }).args.newVaultV2;
+            if (addr) addVault(addr, 'v2');
+          }
+        }
+      } catch (err) {
+        console.warn(`[useManagedVaults] V2 factory scan failed for chain ${chainId}:`, err);
+      }
+    }
+
+    if (vaultEntries.length === 0) return [];
 
     // Multicall owner() + curator() + name() on each vault
-    const calls = vaultAddresses.flatMap((addr) => [
-      { address: addr, abi: ownerCuratorNameAbi, functionName: 'owner' as const },
-      { address: addr, abi: ownerCuratorNameAbi, functionName: 'curator' as const },
-      { address: addr, abi: ownerCuratorNameAbi, functionName: 'name' as const },
+    const calls = vaultEntries.flatMap((v) => [
+      { address: v.address as Address, abi: ownerCuratorNameAbi, functionName: 'owner' as const },
+      { address: v.address as Address, abi: ownerCuratorNameAbi, functionName: 'curator' as const },
+      { address: v.address as Address, abi: ownerCuratorNameAbi, functionName: 'name' as const },
     ]);
 
     const results = await client.multicall({ contracts: calls });
 
     const detected: ManagedVault[] = [];
-    for (let i = 0; i < vaultAddresses.length; i++) {
+    for (let i = 0; i < vaultEntries.length; i++) {
       const ownerResult = results[i * 3];
       const curatorResult = results[i * 3 + 1];
       const nameResult = results[i * 3 + 2];
@@ -153,13 +184,13 @@ async function fetchOnChainManagedVaults(
         const vaultName =
           nameResult?.status === 'success'
             ? (nameResult.result as string)
-            : `Vault ${vaultAddresses[i].slice(0, 10)}...`;
+            : `Vault ${vaultEntries[i].address.slice(0, 10)}...`;
 
         detected.push({
-          address: vaultAddresses[i],
+          address: vaultEntries[i].address as Address,
           chainId,
           name: vaultName,
-          version: 'v1',
+          version: vaultEntries[i].version,
           role: isOwner ? 'owner' : 'curator',
         });
       }
@@ -323,7 +354,9 @@ async function fetchApiManagedVaults(walletAddress: Address): Promise<ManagedVau
 // ============================================================
 
 async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[]> {
-  const onChainPromises = ON_CHAIN_ONLY_CHAINS.map((chainId) =>
+  // Run on-chain scanning for ALL chains (supplements API results with V2 factory vaults)
+  const allChainIds = Object.values(CHAIN_CONFIGS).map((c) => c.chainId);
+  const onChainPromises = allChainIds.map((chainId) =>
     fetchOnChainManagedVaults(walletAddress, chainId),
   );
 
@@ -332,7 +365,26 @@ async function fetchManagedVaults(walletAddress: Address): Promise<ManagedVault[
     ...onChainPromises,
   ]);
 
-  return [...apiResults, ...onChainResults.flat()];
+  // Merge: deduplicate by chainId+address, on-chain results supplement API
+  const seen = new Set<string>();
+  const merged: ManagedVault[] = [];
+
+  for (const v of apiResults) {
+    const key = `${v.chainId}-${v.address.toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(v);
+    }
+  }
+  for (const v of onChainResults.flat()) {
+    const key = `${v.chainId}-${v.address.toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(v);
+    }
+  }
+
+  return merged;
 }
 
 export function useManagedVaults(walletAddress: Address | undefined) {

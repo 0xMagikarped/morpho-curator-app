@@ -6,7 +6,6 @@ import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { useManagedVaults } from '../../lib/hooks/useManagedVaults';
 import { useAppStore } from '../../store/appStore';
-import { useTrackedVaults } from '../../lib/hooks/useTrackedVaults';
 import { truncateAddress } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
@@ -15,8 +14,7 @@ const DISMISSED_KEY = 'morpho-managed-vaults-dismissed';
 export function ManagedVaultsBanner() {
   const { address } = useAccount();
   const { data: managed, isLoading } = useManagedVaults(address);
-  const { trackedVaults, addTrackedVault } = useAppStore();
-  const { trackVault } = useTrackedVaults();
+  const { trackedVaults, trackAll, persistToEdgeConfig } = useAppStore();
   const [dismissed, setDismissed] = useState(() => {
     try {
       return sessionStorage.getItem(DISMISSED_KEY) === 'true';
@@ -39,16 +37,15 @@ export function ManagedVaultsBanner() {
   if (dismissed || isLoading || !address || untracked.length === 0) return null;
 
   const handleTrackAll = () => {
-    for (const v of untracked) {
-      const vault = {
-        address: v.address,
-        chainId: v.chainId,
-        name: v.name,
-        version: v.version,
-      };
-      addTrackedVault(vault);
-      trackVault(vault);
-    }
+    const vaults = untracked.map((v) => ({
+      address: v.address,
+      chainId: v.chainId,
+      name: v.name,
+      version: v.version,
+    }));
+    trackAll(vaults);
+    // Persist to Edge Config in background
+    persistToEdgeConfig(address);
     handleDismiss();
   };
 
