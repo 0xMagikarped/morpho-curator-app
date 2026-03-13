@@ -10,11 +10,6 @@ const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 /** Chains indexed by the Morpho GraphQL API */
 const API_CHAINS = [1, 8453];
 
-/** Chains that need on-chain factory scanning (API doesn't index them) */
-const ON_CHAIN_ONLY_CHAINS = Object.values(CHAIN_CONFIGS)
-  .filter((c) => !c.apiSupported && c.vaultFactories.v1)
-  .map((c) => c.chainId);
-
 export interface ManagedVault {
   address: Address;
   chainId: number;
