@@ -13,10 +13,12 @@ export interface TrackedVault {
 interface AppState {
   // Tracked vaults (persisted locally + synced to Edge Config)
   trackedVaults: TrackedVault[];
+  dismissedVaults: string[]; // vaultKey strings explicitly untracked by user
   isSyncing: boolean;
   addTrackedVault: (vault: TrackedVault) => void;
   removeTrackedVault: (address: Address, chainId: number) => void;
   trackAll: (vaults: TrackedVault[]) => void;
+  isDismissed: (address: string, chainId: number) => boolean;
   syncFromEdgeConfig: (wallet: string) => Promise<void>;
   persistToEdgeConfig: (wallet: string) => Promise<void>;
 
@@ -45,23 +47,12 @@ function vaultKey(v: { address: string; chainId: number }): string {
   return `${v.address.toLowerCase()}-${v.chainId}`;
 }
 
-function mergeVaultLists(local: TrackedVault[], remote: TrackedVault[]): TrackedVault[] {
-  const merged = new Map<string, TrackedVault>();
-  // Remote (Edge Config) is authoritative
-  for (const v of remote) merged.set(vaultKey(v), v);
-  // Add local-only vaults (tracked offline or before sync)
-  for (const v of local) {
-    const k = vaultKey(v);
-    if (!merged.has(k)) merged.set(k, v);
-  }
-  return Array.from(merged.values());
-}
-
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       // Tracked vaults
       trackedVaults: [],
+      dismissedVaults: [],
       isSyncing: false,
 
       addTrackedVault: (vault) =>
@@ -70,23 +61,40 @@ export const useAppStore = create<AppState>()(
             (v) => v.address.toLowerCase() === vault.address.toLowerCase() && v.chainId === vault.chainId,
           );
           if (exists) return state;
-          return { trackedVaults: [...state.trackedVaults, vault] };
+          // Re-tracking clears the dismiss
+          const key = vaultKey(vault);
+          const dismissedVaults = state.dismissedVaults.filter((k) => k !== key);
+          return { trackedVaults: [...state.trackedVaults, vault], dismissedVaults };
         }),
 
       removeTrackedVault: (address, chainId) =>
-        set((state) => ({
-          trackedVaults: state.trackedVaults.filter(
-            (v) => !(v.address.toLowerCase() === address.toLowerCase() && v.chainId === chainId),
-          ),
-        })),
+        set((state) => {
+          const key = vaultKey({ address, chainId });
+          return {
+            trackedVaults: state.trackedVaults.filter(
+              (v) => !(v.address.toLowerCase() === address.toLowerCase() && v.chainId === chainId),
+            ),
+            // Remember this was explicitly untracked
+            dismissedVaults: state.dismissedVaults.includes(key)
+              ? state.dismissedVaults
+              : [...state.dismissedVaults, key],
+          };
+        }),
 
       trackAll: (vaults) =>
         set((state) => {
           const existing = new Set(state.trackedVaults.map(vaultKey));
           const newOnes = vaults.filter((v) => !existing.has(vaultKey(v)));
           if (newOnes.length === 0) return state;
-          return { trackedVaults: [...state.trackedVaults, ...newOnes] };
+          // Clear dismissals for re-tracked vaults
+          const newKeys = new Set(newOnes.map(vaultKey));
+          const dismissedVaults = state.dismissedVaults.filter((k) => !newKeys.has(k));
+          return { trackedVaults: [...state.trackedVaults, ...newOnes], dismissedVaults };
         }),
+
+      isDismissed: (address, chainId) => {
+        return get().dismissedVaults.includes(vaultKey({ address, chainId }));
+      },
 
       syncFromEdgeConfig: async (wallet) => {
         if (!wallet) return;
@@ -102,11 +110,20 @@ export const useAppStore = create<AppState>()(
             console.warn('[tracking] Edge Config returned non-array:', remote);
             return;
           }
-          const local = get().trackedVaults;
-          const merged = mergeVaultLists(local, remote);
+          const { trackedVaults: local, dismissedVaults } = get();
+          const remoteKeys = new Set(remote.map(vaultKey));
+          const dismissedKeys = new Set(dismissedVaults);
+
+          // Start with remote (authoritative)
+          // Add local-only vaults that aren't dismissed (added offline before sync)
+          const localOnly = local.filter(
+            (v) => !remoteKeys.has(vaultKey(v)) && !dismissedKeys.has(vaultKey(v)),
+          );
+          const merged = [...remote, ...localOnly];
+
           set({ trackedVaults: merged });
-          // If local had vaults not in remote, push the merged list back
-          if (merged.length > remote.length) {
+          // Push local-only additions back to Edge Config
+          if (localOnly.length > 0) {
             get().persistToEdgeConfig(wallet);
           }
         } catch (err) {
@@ -169,6 +186,7 @@ export const useAppStore = create<AppState>()(
       name: 'morpho-curator-storage',
       partialize: (state) => ({
         trackedVaults: state.trackedVaults,
+        dismissedVaults: state.dismissedVaults,
         customRpcUrls: state.customRpcUrls,
         sidebarCollapsed: state.sidebarCollapsed,
       }),

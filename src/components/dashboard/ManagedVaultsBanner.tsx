@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useAccount } from 'wagmi';
 import { Scan } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -9,32 +9,25 @@ import { useAppStore } from '../../store/appStore';
 import { truncateAddress } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
-const DISMISSED_KEY = 'morpho-managed-vaults-dismissed';
-
 export function ManagedVaultsBanner() {
   const { address } = useAccount();
   const { data: managed, isLoading } = useManagedVaults(address);
-  const { trackedVaults, trackAll, persistToEdgeConfig } = useAppStore();
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return sessionStorage.getItem(DISMISSED_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const { trackedVaults, dismissedVaults, trackAll, persistToEdgeConfig } = useAppStore();
 
-  // Filter out already-tracked vaults
+  // Filter out already-tracked AND explicitly-dismissed vaults
   const untracked = useMemo(() => {
     if (!managed) return [];
+    const dismissedSet = new Set(dismissedVaults);
     return managed.filter(
       (m) =>
         !trackedVaults.some(
           (t) => t.address.toLowerCase() === m.address.toLowerCase() && t.chainId === m.chainId,
-        ),
+        ) &&
+        !dismissedSet.has(`${m.address.toLowerCase()}-${m.chainId}`),
     );
-  }, [managed, trackedVaults]);
+  }, [managed, trackedVaults, dismissedVaults]);
 
-  if (dismissed || isLoading || !address || untracked.length === 0) return null;
+  if (isLoading || !address || untracked.length === 0) return null;
 
   const handleTrackAll = () => {
     const vaults = untracked.map((v) => ({
@@ -44,18 +37,7 @@ export function ManagedVaultsBanner() {
       version: v.version,
     }));
     trackAll(vaults);
-    // Persist to Edge Config in background
     persistToEdgeConfig(address);
-    handleDismiss();
-  };
-
-  const handleDismiss = () => {
-    setDismissed(true);
-    try {
-      sessionStorage.setItem(DISMISSED_KEY, 'true');
-    } catch {
-      // ignore
-    }
   };
 
   return (
@@ -83,9 +65,6 @@ export function ManagedVaultsBanner() {
         <div className="flex gap-1.5 shrink-0">
           <Button size="sm" onClick={handleTrackAll}>
             Track All
-          </Button>
-          <Button size="sm" variant="ghost" onClick={handleDismiss}>
-            Dismiss
           </Button>
         </div>
       </div>
