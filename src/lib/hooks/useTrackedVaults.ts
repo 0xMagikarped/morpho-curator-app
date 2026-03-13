@@ -59,7 +59,10 @@ export function useTrackedVaults() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: address, vault }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`HTTP ${res.status}: ${body}`);
+      }
       return res.json();
     },
     onMutate: async (vault) => {
@@ -70,15 +73,19 @@ export function useTrackedVaults() {
       localStorage.setItem(CACHE_KEY, JSON.stringify(optimistic));
       return { previous };
     },
-    onError: (_err, _vault, context) => {
+    onError: (err, _vault, context) => {
+      console.error('[useTrackedVaults] track failed:', err);
       if (context?.previous) {
         queryClient.setQueryData([...QUERY_KEY, address], context.previous);
         localStorage.setItem(CACHE_KEY, JSON.stringify(context.previous));
       }
     },
     onSuccess: (data) => {
-      queryClient.setQueryData([...QUERY_KEY, address], data.vaults);
-      localStorage.setItem(CACHE_KEY, JSON.stringify(data.vaults));
+      const vaults = data?.vaults;
+      if (Array.isArray(vaults)) {
+        queryClient.setQueryData([...QUERY_KEY, address], vaults);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(vaults));
+      }
     },
   });
 
@@ -89,7 +96,10 @@ export function useTrackedVaults() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: address, vaultAddress, chainId }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`HTTP ${res.status}: ${body}`);
+      }
       return res.json();
     },
     onMutate: async ({ vaultAddress, chainId }) => {
@@ -103,15 +113,19 @@ export function useTrackedVaults() {
       localStorage.setItem(CACHE_KEY, JSON.stringify(optimistic));
       return { previous };
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
+      console.error('[useTrackedVaults] untrack failed:', err);
       if (context?.previous) {
         queryClient.setQueryData([...QUERY_KEY, address], context.previous);
         localStorage.setItem(CACHE_KEY, JSON.stringify(context.previous));
       }
     },
     onSuccess: (data) => {
-      queryClient.setQueryData([...QUERY_KEY, address], data.vaults);
-      localStorage.setItem(CACHE_KEY, JSON.stringify(data.vaults));
+      const vaults = data?.vaults;
+      if (Array.isArray(vaults)) {
+        queryClient.setQueryData([...QUERY_KEY, address], vaults);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(vaults));
+      }
     },
   });
 

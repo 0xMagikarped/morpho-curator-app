@@ -27,49 +27,36 @@ async function upsertEdgeConfigItem(key: string, value: unknown) {
   return r.json();
 }
 
-export default async function handler(request: Request) {
-  // CORS
+function corsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get('origin');
-  const corsHeaders: Record<string, string> = {};
-  if (origin) {
-    if (origin.endsWith('.vercel.app') || origin.startsWith('http://localhost')) {
-      corsHeaders['Access-Control-Allow-Origin'] = origin;
-      corsHeaders['Access-Control-Allow-Methods'] = 'DELETE, POST, OPTIONS';
-      corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
-    } else {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-  }
+  return {
+    'Content-Type': 'application/json',
+    ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
+    'Access-Control-Allow-Methods': 'DELETE, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+export default async function handler(request: Request) {
+  const headers = corsHeaders(request);
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 200, headers });
   }
 
   if (request.method !== 'DELETE' && request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders },
-    });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers });
   }
 
   try {
     const { wallet, vaultAddress, chainId } = await request.json();
 
     if (!wallet || !vaultAddress || chainId === undefined) {
-      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', ...corsHeaders },
-      });
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers });
     }
 
     if (!process.env.EDGE_CONFIG_ID || !process.env.VERCEL_API_TOKEN) {
-      return new Response(JSON.stringify({ error: 'Edge Config not configured' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json', ...corsHeaders },
-      });
+      return new Response(JSON.stringify({ error: 'Edge Config not configured' }), { status: 500, headers });
     }
 
     const key = walletToKey(wallet);
@@ -83,15 +70,9 @@ export default async function handler(request: Request) {
 
     await upsertEdgeConfigItem(key, updated);
 
-    return new Response(JSON.stringify({ message: 'Untracked', vaults: updated }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders },
-    });
+    return new Response(JSON.stringify({ message: 'Untracked', vaults: updated }), { status: 200, headers });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ error: 'Failed to untrack vault', detail: msg }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders },
-    });
+    return new Response(JSON.stringify({ error: 'Failed to untrack vault', detail: msg }), { status: 500, headers });
   }
 }
