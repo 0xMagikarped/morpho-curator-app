@@ -9,13 +9,14 @@ import { ReallocateTab } from '../components/vault/ReallocateTab';
 import { GuardianTab } from '../components/vault/GuardianTab';
 import { V2AdaptersTab } from '../components/vault/V2AdaptersTab';
 import { V2SecurityTab } from '../components/vault/V2SecurityTab';
+import { QueuesTab } from '../components/vault/QueuesTab';
 import { useAccount } from 'wagmi';
 import { useVaultInfo, useVaultRole } from '../lib/hooks/useVault';
 import { useAppStore } from '../store/appStore';
 import { cn } from '../lib/utils/cn';
 import { getEmergencyRoleLabel } from '../types';
 
-type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'reallocate' | 'guardian' | 'security';
+type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'queues' | 'reallocate' | 'guardian' | 'security';
 
 interface TabDef {
   id: TabId;
@@ -31,6 +32,7 @@ const TABS: TabDef[] = [
   { id: 'markets', label: 'Markets' },
   { id: 'caps', label: 'Caps', requiresRole: 'isCurator' },
   { id: 'adapters', label: 'Adapters', v2Only: true },
+  { id: 'queues', label: 'Queues', requiresRole: 'isAllocator', v1Only: true },
   { id: 'reallocate', label: 'Reallocate', requiresRole: 'isAllocator' },
   { id: 'guardian', label: 'Guardian', requiresRole: 'isEmergencyRole', v1Only: true },
   { id: 'security', label: 'Security', requiresRole: 'isEmergencyRole', v2Only: true },
@@ -41,7 +43,7 @@ export function VaultPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const VALID_TABS: TabId[] = ['overview', 'markets', 'caps', 'adapters', 'reallocate', 'guardian', 'security'];
+  const VALID_TABS: TabId[] = ['overview', 'markets', 'caps', 'adapters', 'queues', 'reallocate', 'guardian', 'security'];
   const tabParam = searchParams.get('tab') as TabId | null;
   const activeTab: TabId = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'overview';
 
@@ -190,6 +192,9 @@ export function VaultPage() {
         )}
         {activeTab === 'adapters' && isV2 && (
           <V2AdaptersTab chainId={chainId} vaultAddress={vaultAddress} />
+        )}
+        {activeTab === 'queues' && !isV2 && (
+          <QueuesTab chainId={chainId} vaultAddress={vaultAddress} />
         )}
         {activeTab === 'guardian' && !isV2 && (
           <GuardianTab chainId={chainId} vaultAddress={vaultAddress} />
