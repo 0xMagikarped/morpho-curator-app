@@ -1,6 +1,9 @@
 /**
  * Page for the Add Market wizard — reached from V2 vault's Adapters tab.
  * Route: /vault/:chainId/:address/add-market
+ *
+ * Detects existing Market V1 Adapter on the vault. If one exists, the wizard
+ * skips the deploy step and goes straight to market selection + cap configuration.
  */
 import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -29,6 +32,18 @@ export function AddMarketPage() {
     if (!markets) return new Set<string>();
     return new Set(markets.map((m) => m.id));
   }, [markets]);
+
+  // Find existing market adapter — the first adapter of type market-v1
+  // In the "one adapter per vault" model, there should be at most one.
+  const existingMarketAdapter = useMemo(() => {
+    if (!overview?.adapters) return null;
+    // Look for a market adapter (has MORPHO() view function → detected as market-v1)
+    // For now, return the first adapter — the overview enrichment already fetches adapters
+    // A more robust approach would check adapter type, but adapters on V2 are typically
+    // all market adapters unless explicitly a vault adapter.
+    // TODO: Filter by detected adapter type once AdapterDetailView detection is integrated
+    return overview.adapters.length > 0 ? overview.adapters[0].address : null;
+  }, [overview]);
 
   if (!chainId || !vaultAddress) {
     return (
@@ -93,6 +108,7 @@ export function AddMarketPage() {
         assetSymbol={vault.assetInfo.symbol}
         assetDecimals={vault.assetInfo.decimals}
         idle={overview?.idle ?? 0n}
+        existingAdapter={existingMarketAdapter}
         existingMarketIds={existingMarketIds}
         onComplete={() => navigate(`/vault/${chainId}/${vaultAddress}?tab=adapters`)}
         onBack={() => navigate(`/vault/${chainId}/${vaultAddress}?tab=adapters`)}

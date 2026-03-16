@@ -4,7 +4,7 @@
  */
 import { useState, useMemo } from 'react';
 import type { Address } from 'viem';
-import { Search, ChevronDown, ChevronRight, ArrowUpRight } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ArrowUpRight, Check } from 'lucide-react';
 import { Card } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { useMorphoMarkets } from '../../../hooks/useMorphoMarkets';
@@ -17,6 +17,10 @@ interface MarketBrowserProps {
   assetSymbol: string;
   onSelect: (market: MarketInfo) => void;
   excludeMarketIds?: Set<string>;
+  /** Enable multi-select mode with checkboxes */
+  multiSelect?: boolean;
+  /** Currently selected market IDs (for multi-select) */
+  selectedMarketIds?: Set<string>;
 }
 
 interface CollateralGroup {
@@ -31,6 +35,8 @@ export function MarketBrowser({
   assetSymbol,
   onSelect,
   excludeMarketIds,
+  multiSelect,
+  selectedMarketIds,
 }: MarketBrowserProps) {
   const [search, setSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -172,6 +178,8 @@ export function MarketBrowser({
                         market={market}
                         assetSymbol={assetSymbol}
                         onSelect={() => onSelect(market)}
+                        multiSelect={multiSelect}
+                        isSelected={selectedMarketIds?.has(market.id)}
                       />
                     ))}
                   </div>
@@ -189,10 +197,14 @@ function MarketRow({
   market,
   assetSymbol,
   onSelect,
+  multiSelect,
+  isSelected,
 }: {
   market: MarketInfo;
   assetSymbol: string;
   onSelect: () => void;
+  multiSelect?: boolean;
+  isSelected?: boolean;
 }) {
   const supplyUsd = Number(market.state.totalSupplyAssets) / 10 ** market.loanToken.decimals;
   const lltvPct = (Number(market.params.lltv) / 1e18) * 100;
@@ -200,9 +212,18 @@ function MarketRow({
   return (
     <button
       onClick={onSelect}
-      className="w-full flex items-center justify-between p-3 border-b border-border-subtle hover:bg-bg-hover transition-colors text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
+      className={`w-full flex items-center justify-between p-3 border-b border-border-subtle hover:bg-bg-hover transition-colors text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary ${
+        isSelected ? 'bg-accent-primary/5 border-l-2 border-l-accent-primary' : ''
+      }`}
     >
       <div className="flex items-center gap-3 min-w-0">
+        {multiSelect && (
+          <div className={`w-4 h-4 border flex items-center justify-center shrink-0 ${
+            isSelected ? 'bg-accent-primary border-accent-primary' : 'border-border-subtle'
+          }`}>
+            {isSelected && <Check className="w-3 h-3 text-bg-root" />}
+          </div>
+        )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-medium text-text-primary">
@@ -233,7 +254,7 @@ function MarketRow({
                 : supplyUsd.toFixed(0)}
           </p>
         </div>
-        <ArrowUpRight className="w-3.5 h-3.5 text-text-tertiary" />
+        {!multiSelect && <ArrowUpRight className="w-3.5 h-3.5 text-text-tertiary" />}
       </div>
     </button>
   );

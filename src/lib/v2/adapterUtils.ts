@@ -229,7 +229,8 @@ export async function contractExists(
 }
 
 /**
- * Check if an adapter is already enabled on a V2 vault.
+ * Check if an adapter is registered on a V2 vault.
+ * V2 vaults use isAdapter(address), not isAdapterEnabled.
  */
 export async function isAdapterEnabled(
   vaultAddress: Address,
@@ -241,34 +242,17 @@ export async function isAdapterEnabled(
       address: vaultAddress,
       abi: [{
         inputs: [{ name: 'adapter', type: 'address' }],
-        name: 'isAdapterEnabled',
+        name: 'isAdapter',
         outputs: [{ type: 'bool' }],
         stateMutability: 'view',
         type: 'function',
       }] as const,
-      functionName: 'isAdapterEnabled',
+      functionName: 'isAdapter',
       args: [adapterAddress],
     });
     return result;
   } catch {
-    // Function may not exist — try isAdapter as fallback
-    try {
-      const result = await client.readContract({
-        address: vaultAddress,
-        abi: [{
-          inputs: [{ name: 'adapter', type: 'address' }],
-          name: 'isAdapter',
-          outputs: [{ type: 'bool' }],
-          stateMutability: 'view',
-          type: 'function',
-        }] as const,
-        functionName: 'isAdapter',
-        args: [adapterAddress],
-      });
-      return result;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 

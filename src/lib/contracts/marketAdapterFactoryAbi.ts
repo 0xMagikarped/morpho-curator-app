@@ -2,10 +2,13 @@
  * ABIs for Market V1 Adapter V2 Factory and Vault V1 Adapter Factory.
  *
  * MorphoMarketV1AdapterV2Factory: deploys adapters that connect V2 vaults
- * to individual Morpho Blue markets. Takes only the parentVault as arg.
+ * to Morpho Blue markets. One adapter per vault — markets added via caps.
+ * Takes only the parentVault as arg.
  *
  * MorphoVaultV1AdapterFactory: deploys adapters that connect V2 vaults
- * to existing V1 MetaMorpho vaults.
+ * to existing V1 MetaMorpho vaults. Takes (parentVault, morphoVaultV1).
+ *
+ * IMPORTANT: Factory events emit adapter address in data (NOT indexed).
  */
 
 // ============================================================
@@ -30,8 +33,8 @@ export const marketV1AdapterV2FactoryAbi = [
   {
     anonymous: false,
     inputs: [
-      { indexed: true, name: 'adapter', type: 'address' },
       { indexed: true, name: 'parentVault', type: 'address' },
+      { indexed: false, name: 'adapter', type: 'address' },
     ],
     name: 'CreateMorphoMarketV1AdapterV2',
     type: 'event',
@@ -44,7 +47,10 @@ export const marketV1AdapterV2FactoryAbi = [
 
 export const vaultV1AdapterFactoryAbi = [
   {
-    inputs: [{ name: 'parentVault', type: 'address' }],
+    inputs: [
+      { name: 'parentVault', type: 'address' },
+      { name: 'morphoVaultV1', type: 'address' },
+    ],
     name: 'createMorphoVaultV1Adapter',
     outputs: [{ name: 'adapter', type: 'address' }],
     stateMutability: 'nonpayable',
@@ -60,8 +66,8 @@ export const vaultV1AdapterFactoryAbi = [
   {
     anonymous: false,
     inputs: [
-      { indexed: true, name: 'adapter', type: 'address' },
       { indexed: true, name: 'parentVault', type: 'address' },
+      { indexed: false, name: 'adapter', type: 'address' },
     ],
     name: 'CreateMorphoVaultV1Adapter',
     type: 'event',

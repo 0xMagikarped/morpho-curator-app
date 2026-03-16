@@ -8,7 +8,8 @@ import { Loader2, Check } from 'lucide-react';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { Button } from '../../ui/Button';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
-import { isUnlimitedCap, MAX_UINT128, formatWadPercent } from '../../../lib/v2/adapterCapUtils';
+import { isUnlimitedCap, MAX_UINT128 } from '../../../lib/v2/adapterCapUtils';
+import { formatWadPercent } from '../../../lib/utils/format';
 
 interface InlineCapEditorProps {
   vaultAddress: Address;

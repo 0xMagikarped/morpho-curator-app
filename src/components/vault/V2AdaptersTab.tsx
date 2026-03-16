@@ -118,7 +118,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
             <>
               <Button size="sm" variant="secondary" onClick={() => navigate(`/vault/${chainId}/${vaultAddress}/add-market`)}>
                 <Zap size={14} className="mr-1" />
-                Deploy Market
+                Add Market
               </Button>
               <Button size="sm" variant="secondary" onClick={() => openDrawer('add')}>
                 <Plus size={14} className="mr-1" />

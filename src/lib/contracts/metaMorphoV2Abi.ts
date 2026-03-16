@@ -47,12 +47,14 @@ export const metaMorphoV2Abi = [
   },
   { inputs: [], name: 'adaptersLength', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'index', type: 'uint256' }], name: 'adapters', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: 'adapter', type: 'address' }], name: 'isAdapterEnabled', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'adapter', type: 'address' }], name: 'isAdapter', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'adapterRegistry', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'liquidityAdapter', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'liquidityAdapterData', outputs: [{ type: 'bytes' }], stateMutability: 'view', type: 'function' },
 
-  // === Cap reads ===
-  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'absoluteCap', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'relativeCap', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  // === Cap reads (cap types are uint128 on-chain) ===
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'absoluteCap', outputs: [{ type: 'uint128' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'relativeCap', outputs: [{ type: 'uint128' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'id', type: 'bytes32' }], name: 'allocation', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'actionHash', type: 'bytes32' }], name: 'pendingAction', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
 
@@ -109,7 +111,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint256' },
+      { name: 'cap', type: 'uint128' },
     ],
     name: 'increaseAbsoluteCap',
     outputs: [],
@@ -119,7 +121,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint256' },
+      { name: 'cap', type: 'uint128' },
     ],
     name: 'decreaseAbsoluteCap',
     outputs: [],
@@ -129,7 +131,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint256' },
+      { name: 'cap', type: 'uint128' },
     ],
     name: 'increaseRelativeCap',
     outputs: [],
@@ -139,7 +141,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint256' },
+      { name: 'cap', type: 'uint128' },
     ],
     name: 'decreaseRelativeCap',
     outputs: [],
@@ -173,7 +175,7 @@ export const metaMorphoV2Abi = [
     inputs: [
       { name: 'adapter', type: 'address' },
       { name: 'data', type: 'bytes' },
-      { name: 'amount', type: 'uint256' },
+      { name: 'totalAllocated', type: 'uint256' },
     ],
     name: 'deallocate',
     outputs: [],

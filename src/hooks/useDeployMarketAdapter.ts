@@ -75,6 +75,8 @@ export function useDeployMarketAdapter(
       });
 
       // Parse adapter address from event logs
+      // Event: CreateMorphoMarketV1AdapterV2(parentVault indexed, adapter NOT indexed)
+      // adapter is in data, not in topics
       let adapterAddress: Address | null = null;
       for (const log of receipt.logs) {
         try {
@@ -84,19 +86,11 @@ export function useDeployMarketAdapter(
             topics: log.topics as [signature: `0x${string}`, ...args: `0x${string}`[]],
           });
           if (decoded.eventName === 'CreateMorphoMarketV1AdapterV2') {
-            adapterAddress = (decoded.args as { adapter?: Address }).adapter ?? null;
+            adapterAddress = (decoded.args as { adapter: Address }).adapter;
             break;
           }
         } catch {
           // Not our event
-        }
-      }
-
-      if (!adapterAddress) {
-        // Fallback: try indexed topic
-        const lastLog = receipt.logs[receipt.logs.length - 1];
-        if (lastLog?.topics[1]) {
-          adapterAddress = `0x${lastLog.topics[1].slice(26)}` as Address;
         }
       }
 

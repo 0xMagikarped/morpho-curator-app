@@ -1,13 +1,17 @@
 /**
- * Multi-step wizard for adding a Morpho Blue market to a V2 vault:
- * 1. Browse & select market
- * 2. Deploy adapter via factory + add to vault
- * 3. Configure caps (adapter, collateral, market levels)
- * 4. Optionally allocate capital
+ * Multi-step wizard for adding Morpho Blue markets to a V2 vault.
+ *
+ * Architecture: One vault → ONE Market V1 Adapter → many markets.
+ * "Adding a market" means setting caps on the existing adapter, NOT deploying
+ * a new adapter per market.
+ *
+ * Flow:
+ * - If no market adapter exists: Deploy → Add Adapter → Select Markets → Set Caps → Allocate
+ * - If adapter exists: Select Markets → Set Caps → Allocate
  *
  * Optimized for zero-timelock vaults — all steps are immediate.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Address } from 'viem';
 import { Check, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
@@ -16,7 +20,7 @@ import { Button } from '../../ui/Button';
 import { AddressDisplay } from '../../ui/AddressDisplay';
 import { MarketBrowser } from './MarketBrowser';
 import { useDeployMarketAdapter, type DeployStep } from '../../../hooks/useDeployMarketAdapter';
-import { useSequentialSetCaps, type CapAction } from '../../../hooks/useSetCaps';
+import { useBatchSetCaps, type CapAction } from '../../../hooks/useSetCaps';
 import { useAllocateV2 } from '../../../hooks/useAllocateV2';
 import {
   adapterIdData,
@@ -28,7 +32,7 @@ import {
 import { formatTokenAmount } from '../../../lib/utils/format';
 import type { MarketInfo } from '../../../types';
 
-type WizardStep = 'select' | 'deploy' | 'caps' | 'allocate' | 'done';
+type WizardStep = 'deploy' | 'select' | 'caps' | 'allocate' | 'done';
 
 interface AddMarketWizardProps {
   chainId: number;
@@ -37,6 +41,8 @@ interface AddMarketWizardProps {
   assetSymbol: string;
   assetDecimals: number;
   idle: bigint;
+  /** Existing market adapter address — null if none deployed yet */
+  existingAdapter: Address | null;
   existingMarketIds?: Set<string>;
   onComplete: () => void;
   onBack: () => void;
@@ -49,14 +55,17 @@ export function AddMarketWizard({
   assetSymbol,
   assetDecimals,
   idle,
+  existingAdapter,
   existingMarketIds,
   onComplete,
   onBack,
 }: AddMarketWizardProps) {
-  const [wizardStep, setWizardStep] = useState<WizardStep>('select');
-  const [selectedMarket, setSelectedMarket] = useState<MarketInfo | null>(null);
+  const needsDeploy = !existingAdapter;
+  const [wizardStep, setWizardStep] = useState<WizardStep>(needsDeploy ? 'deploy' : 'select');
+  const [selectedMarkets, setSelectedMarkets] = useState<MarketInfo[]>([]);
+  const [adapterAddress, setAdapterAddress] = useState<Address | null>(existingAdapter);
 
-  // Cap form state
+  // Cap form state — applies to all selected markets
   const [adapterAbsCap, setAdapterAbsCap] = useState('unlimited');
   const [adapterRelCap, setAdapterRelCap] = useState('100');
   const [collateralAbsCap, setCollateralAbsCap] = useState('unlimited');
@@ -66,30 +75,59 @@ export function AddMarketWizard({
 
   // Allocate form state
   const [allocateAmount, setAllocateAmount] = useState('');
+  const [allocateMarketIdx, setAllocateMarketIdx] = useState(0);
 
   // Hooks
   const deployHook = useDeployMarketAdapter(vaultAddress, chainId);
-  const capsHook = useSequentialSetCaps(vaultAddress, chainId);
+  const capsHook = useBatchSetCaps(vaultAddress, chainId);
   const allocateHook = useAllocateV2(vaultAddress, chainId);
 
-  const handleSelectMarket = (market: MarketInfo) => {
-    setSelectedMarket(market);
-    setWizardStep('deploy');
-  };
+  // Auto-advance from deploy to select once adapter is deployed
+  useEffect(() => {
+    if (deployHook.step === 'done' && deployHook.deployedAdapter && wizardStep === 'deploy') {
+      setAdapterAddress(deployHook.deployedAdapter);
+      setWizardStep('select');
+    }
+  }, [deployHook.step, deployHook.deployedAdapter, wizardStep]);
+
+  // Auto-advance from caps to allocate
+  useEffect(() => {
+    if (capsHook.step === 'done' && wizardStep === 'caps') {
+      setWizardStep('allocate');
+    }
+  }, [capsHook.step, wizardStep]);
+
+  // Auto-advance from allocate to done
+  useEffect(() => {
+    if (allocateHook.step === 'done' && wizardStep === 'allocate') {
+      setWizardStep('done');
+    }
+  }, [allocateHook.step, wizardStep]);
 
   const handleDeploy = () => {
-    if (!selectedMarket) return;
     deployHook.deploy();
   };
 
+  const handleSelectComplete = () => {
+    if (selectedMarkets.length === 0) return;
+    setWizardStep('caps');
+  };
+
+  const handleToggleMarket = (market: MarketInfo) => {
+    setSelectedMarkets((prev) => {
+      const exists = prev.find((m) => m.id === market.id);
+      if (exists) return prev.filter((m) => m.id !== market.id);
+      return [...prev, market];
+    });
+  };
+
   const handleSetCaps = () => {
-    if (!deployHook.deployedAdapter || !selectedMarket) return;
+    if (!adapterAddress || selectedMarkets.length === 0) return;
 
     const actions: CapAction[] = [];
-    const adapter = deployHook.deployedAdapter;
 
-    // Adapter-level caps
-    const adapterData = adapterIdData(adapter);
+    // Adapter-level caps (set once, applies to the single adapter)
+    const adapterData = adapterIdData(adapterAddress);
     if (adapterAbsCap === 'unlimited') {
       actions.push({ label: 'Adapter absolute cap', functionName: 'increaseAbsoluteCap', idData: adapterData, cap: MAX_UINT128 });
     } else if (adapterAbsCap) {
@@ -100,127 +138,85 @@ export function AddMarketWizard({
       actions.push({ label: 'Adapter relative cap', functionName: 'increaseRelativeCap', idData: adapterData, cap: percentToWad(parseFloat(adapterRelCap)) });
     }
 
-    // Collateral-level caps
-    const collData = collateralIdData(selectedMarket.params.collateralToken);
-    if (collateralAbsCap === 'unlimited') {
-      actions.push({ label: 'Collateral absolute cap', functionName: 'increaseAbsoluteCap', idData: collData, cap: MAX_UINT128 });
-    } else if (collateralAbsCap) {
-      const val = BigInt(Math.round(parseFloat(collateralAbsCap) * 10 ** assetDecimals));
-      actions.push({ label: 'Collateral absolute cap', functionName: 'increaseAbsoluteCap', idData: collData, cap: val });
-    }
-    if (collateralRelCap) {
-      actions.push({ label: 'Collateral relative cap', functionName: 'increaseRelativeCap', idData: collData, cap: percentToWad(parseFloat(collateralRelCap)) });
-    }
+    // Per-market: collateral-level + market-level caps
+    const seenCollaterals = new Set<string>();
+    for (const market of selectedMarkets) {
+      const collKey = market.params.collateralToken.toLowerCase();
 
-    // Market-level caps
-    const mktData = marketIdData(adapter, selectedMarket.params);
-    if (marketAbsCap === 'unlimited') {
-      actions.push({ label: 'Market absolute cap', functionName: 'increaseAbsoluteCap', idData: mktData, cap: MAX_UINT128 });
-    } else if (marketAbsCap) {
-      const val = BigInt(Math.round(parseFloat(marketAbsCap) * 10 ** assetDecimals));
-      actions.push({ label: 'Market absolute cap', functionName: 'increaseAbsoluteCap', idData: mktData, cap: val });
-    }
-    if (marketRelCap) {
-      actions.push({ label: 'Market relative cap', functionName: 'increaseRelativeCap', idData: mktData, cap: percentToWad(parseFloat(marketRelCap)) });
+      // Collateral-level (once per unique collateral token)
+      if (!seenCollaterals.has(collKey)) {
+        seenCollaterals.add(collKey);
+        const collData = collateralIdData(market.params.collateralToken);
+        if (collateralAbsCap === 'unlimited') {
+          actions.push({ label: `${market.collateralToken.symbol} collateral abs cap`, functionName: 'increaseAbsoluteCap', idData: collData, cap: MAX_UINT128 });
+        } else if (collateralAbsCap) {
+          const val = BigInt(Math.round(parseFloat(collateralAbsCap) * 10 ** assetDecimals));
+          actions.push({ label: `${market.collateralToken.symbol} collateral abs cap`, functionName: 'increaseAbsoluteCap', idData: collData, cap: val });
+        }
+        if (collateralRelCap) {
+          actions.push({ label: `${market.collateralToken.symbol} collateral rel cap`, functionName: 'increaseRelativeCap', idData: collData, cap: percentToWad(parseFloat(collateralRelCap)) });
+        }
+      }
+
+      // Market-level
+      const mktData = marketIdData(adapterAddress, market.params);
+      if (marketAbsCap === 'unlimited') {
+        actions.push({ label: `${market.collateralToken.symbol} market abs cap`, functionName: 'increaseAbsoluteCap', idData: mktData, cap: MAX_UINT128 });
+      } else if (marketAbsCap) {
+        const val = BigInt(Math.round(parseFloat(marketAbsCap) * 10 ** assetDecimals));
+        actions.push({ label: `${market.collateralToken.symbol} market abs cap`, functionName: 'increaseAbsoluteCap', idData: mktData, cap: val });
+      }
+      if (marketRelCap) {
+        actions.push({ label: `${market.collateralToken.symbol} market rel cap`, functionName: 'increaseRelativeCap', idData: mktData, cap: percentToWad(parseFloat(marketRelCap)) });
+      }
     }
 
     capsHook.execute(actions);
   };
 
   const handleAllocate = () => {
-    if (!deployHook.deployedAdapter || !selectedMarket || !allocateAmount) return;
+    if (!adapterAddress || !allocateAmount || allocateMarketIdx >= selectedMarkets.length) return;
+    const market = selectedMarkets[allocateMarketIdx];
     const amount = BigInt(Math.round(parseFloat(allocateAmount) * 10 ** assetDecimals));
-    allocateHook.allocate(deployHook.deployedAdapter, amount, selectedMarket.params);
+    allocateHook.allocate(adapterAddress, amount, market.params);
   };
 
-  // Step progression
-  const stepDeployDone = deployHook.step === 'done';
+  const stepDeployDone = !needsDeploy || deployHook.step === 'done';
   const stepCapsDone = capsHook.step === 'done';
   const stepAllocateDone = allocateHook.step === 'done';
-
-  // Auto-advance from deploy to caps
-  if (stepDeployDone && wizardStep === 'deploy') {
-    setWizardStep('caps');
-  }
-  // Auto-advance from caps to allocate
-  if (stepCapsDone && wizardStep === 'caps') {
-    setWizardStep('allocate');
-  }
-  if (stepAllocateDone && wizardStep === 'allocate') {
-    setWizardStep('done');
-  }
-
-  const lltvPct = selectedMarket ? (Number(selectedMarket.params.lltv) / 1e18 * 100).toFixed(0) : '0';
 
   return (
     <div className="space-y-4">
       {/* Back + Progress */}
       <div className="flex items-center justify-between">
         <button
-          onClick={wizardStep === 'select' ? onBack : () => setWizardStep('select')}
+          onClick={onBack}
           className="flex items-center gap-1.5 text-sm text-text-tertiary hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
         >
           <ArrowLeft className="w-4 h-4" />
-          {wizardStep === 'select' ? 'Back' : 'Change Market'}
+          Back
         </button>
         <div className="flex gap-1.5">
-          <StepDot active={wizardStep === 'select'} done={wizardStep !== 'select'} label="1" />
-          <StepDot active={wizardStep === 'deploy'} done={stepDeployDone} label="2" />
-          <StepDot active={wizardStep === 'caps'} done={stepCapsDone} label="3" />
-          <StepDot active={wizardStep === 'allocate'} done={stepAllocateDone} label="4" />
+          {needsDeploy && <StepDot active={wizardStep === 'deploy'} done={stepDeployDone} label="1" />}
+          <StepDot active={wizardStep === 'select'} done={selectedMarkets.length > 0 && wizardStep !== 'select'} label={needsDeploy ? '2' : '1'} />
+          <StepDot active={wizardStep === 'caps'} done={stepCapsDone} label={needsDeploy ? '3' : '2'} />
+          <StepDot active={wizardStep === 'allocate'} done={stepAllocateDone} label={needsDeploy ? '4' : '3'} />
         </div>
       </div>
 
-      {/* Step 1: Select Market */}
-      {wizardStep === 'select' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Market</CardTitle>
-            <Badge variant="info">Step 1</Badge>
-          </CardHeader>
-          <MarketBrowser
-            chainId={chainId}
-            loanToken={vaultAsset}
-            assetSymbol={assetSymbol}
-            onSelect={handleSelectMarket}
-            excludeMarketIds={existingMarketIds}
-          />
-        </Card>
-      )}
-
-      {/* Step 2: Deploy Adapter */}
-      {wizardStep === 'deploy' && selectedMarket && (
+      {/* Step: Deploy Adapter (only if no existing adapter) */}
+      {wizardStep === 'deploy' && needsDeploy && (
         <Card>
           <CardHeader>
             <CardTitle>Deploy Market Adapter</CardTitle>
-            <Badge variant="info">Step 2</Badge>
+            <Badge variant="info">Step 1</Badge>
           </CardHeader>
           <div className="space-y-4">
-            {/* Market summary */}
-            <div className="p-3 bg-bg-hover border border-border-subtle space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-text-primary">
-                  {selectedMarket.collateralToken.symbol}/{assetSymbol}
-                </span>
-                <Badge variant="info">LLTV {lltvPct}%</Badge>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-[10px]">
-                <div>
-                  <span className="text-text-tertiary">Supply APY</span>
-                  <p className="font-mono text-accent-primary">{(selectedMarket.supplyAPY * 100).toFixed(2)}%</p>
-                </div>
-                <div>
-                  <span className="text-text-tertiary">Utilization</span>
-                  <p className="font-mono text-text-primary">{(selectedMarket.utilization * 100).toFixed(1)}%</p>
-                </div>
-                <div>
-                  <span className="text-text-tertiary">Market ID</span>
-                  <p className="font-mono text-text-primary">{selectedMarket.id.slice(0, 10)}...</p>
-                </div>
-              </div>
-            </div>
+            <p className="text-xs text-text-tertiary">
+              This vault has no Market V1 Adapter. Deploy one to start allocating to Morpho Blue markets.
+              One adapter handles ALL markets.
+            </p>
 
-            {/* Deploy status */}
             <DeployStatus step={deployHook.step} error={deployHook.error} adapterAddress={deployHook.deployedAdapter} />
 
             {deployHook.step === 'idle' && (
@@ -238,17 +234,71 @@ export function AddMarketWizard({
         </Card>
       )}
 
-      {/* Step 3: Configure Caps */}
-      {wizardStep === 'caps' && selectedMarket && deployHook.deployedAdapter && (
+      {/* Step: Select Markets (multi-select) */}
+      {wizardStep === 'select' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <CardTitle>Select Markets</CardTitle>
+              <Badge variant="info">Step {needsDeploy ? '2' : '1'}</Badge>
+              {selectedMarkets.length > 0 && (
+                <Badge variant="purple">{selectedMarkets.length} selected</Badge>
+              )}
+            </div>
+          </CardHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-text-tertiary">
+              Select one or more markets to add to the vault. Adding a market = setting caps on the existing adapter.
+            </p>
+            <MarketBrowser
+              chainId={chainId}
+              loanToken={vaultAsset}
+              assetSymbol={assetSymbol}
+              onSelect={handleToggleMarket}
+              excludeMarketIds={existingMarketIds}
+              multiSelect
+              selectedMarketIds={new Set(selectedMarkets.map((m) => m.id))}
+            />
+            {selectedMarkets.length > 0 && (
+              <div className="space-y-2">
+                <div className="p-2 bg-bg-hover border border-border-subtle">
+                  <span className="text-[10px] text-text-tertiary uppercase">Selected Markets</span>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {selectedMarkets.map((m) => (
+                      <Badge key={m.id} variant="info">
+                        {m.collateralToken.symbol}/{assetSymbol} ({(Number(m.params.lltv) / 1e18 * 100).toFixed(0)}%)
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <Button className="w-full" onClick={handleSelectComplete}>
+                  Configure Caps ({selectedMarkets.length} market{selectedMarkets.length !== 1 ? 's' : ''})
+                </Button>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* Step: Configure Caps */}
+      {wizardStep === 'caps' && adapterAddress && selectedMarkets.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Configure Caps</CardTitle>
-            <Badge variant="info">Step 3</Badge>
+            <Badge variant="info">Step {needsDeploy ? '3' : '2'}</Badge>
           </CardHeader>
           <div className="space-y-4">
             <p className="text-xs text-text-tertiary">
-              Set absolute and relative caps at three levels. Relative caps are % of total vault assets. Absolute caps are in {assetSymbol}.
+              Set absolute and relative caps at three levels. These apply to the single market adapter.
+              Caps are batched via vault multicall (one wallet confirmation).
             </p>
+
+            {adapterAddress && (
+              <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                <span>Adapter:</span>
+                <AddressDisplay address={adapterAddress} chainId={chainId} />
+              </div>
+            )}
 
             {/* Adapter-level */}
             <CapInputGroup
@@ -262,7 +312,7 @@ export function AddMarketWizard({
 
             {/* Collateral-level */}
             <CapInputGroup
-              label={`Collateral (${selectedMarket.collateralToken.symbol})`}
+              label="Collateral Level (per token)"
               absCap={collateralAbsCap}
               relCap={collateralRelCap}
               onAbsCapChange={setCollateralAbsCap}
@@ -272,7 +322,7 @@ export function AddMarketWizard({
 
             {/* Market-level */}
             <CapInputGroup
-              label={`Market (${selectedMarket.collateralToken.symbol}/${assetSymbol})`}
+              label="Market Level (per market)"
               absCap={marketAbsCap}
               relCap={marketRelCap}
               onAbsCapChange={setMarketAbsCap}
@@ -284,13 +334,13 @@ export function AddMarketWizard({
             {capsHook.step === 'pending' && (
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Confirm tx {capsHook.currentIndex + 1}/{capsHook.totalActions} in wallet...
+                Confirm batch tx in wallet...
               </div>
             )}
             {capsHook.step === 'confirming' && (
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Confirming tx {capsHook.currentIndex + 1}/{capsHook.totalActions}...
+                Confirming...
               </div>
             )}
             {capsHook.error && (
@@ -302,23 +352,23 @@ export function AddMarketWizard({
 
             {capsHook.step !== 'done' && capsHook.step !== 'pending' && capsHook.step !== 'confirming' && (
               <Button className="w-full" onClick={handleSetCaps}>
-                {capsHook.step === 'error' ? 'Retry Caps' : 'Set Caps'}
+                {capsHook.step === 'error' ? 'Retry Caps' : 'Set Caps (Batch)'}
               </Button>
             )}
           </div>
         </Card>
       )}
 
-      {/* Step 4: Allocate */}
-      {wizardStep === 'allocate' && selectedMarket && deployHook.deployedAdapter && (
+      {/* Step: Allocate */}
+      {wizardStep === 'allocate' && adapterAddress && selectedMarkets.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Allocate Capital</CardTitle>
-            <Badge variant="info">Step 4</Badge>
+            <Badge variant="info">Step {needsDeploy ? '4' : '3'}</Badge>
           </CardHeader>
           <div className="space-y-4">
             <p className="text-xs text-text-tertiary">
-              Allocate vault capital to this market. You can skip this step and allocate later.
+              Allocate vault capital to a market. You can skip this step and allocate later.
             </p>
 
             <div className="p-3 bg-bg-hover border border-border-subtle">
@@ -327,6 +377,23 @@ export function AddMarketWizard({
                 {formatTokenAmount(idle, assetDecimals)} {assetSymbol}
               </p>
             </div>
+
+            {selectedMarkets.length > 1 && (
+              <div>
+                <label className="text-[10px] text-text-tertiary uppercase">Market</label>
+                <select
+                  value={allocateMarketIdx}
+                  onChange={(e) => setAllocateMarketIdx(Number(e.target.value))}
+                  className="w-full mt-1 px-3 py-2 text-sm bg-bg-hover border border-border-subtle text-text-primary focus:outline-none focus:border-accent-primary"
+                >
+                  {selectedMarkets.map((m, i) => (
+                    <option key={m.id} value={i}>
+                      {m.collateralToken.symbol}/{assetSymbol} ({(Number(m.params.lltv) / 1e18 * 100).toFixed(0)}% LLTV)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="text-[10px] text-text-tertiary uppercase">Amount ({assetSymbol})</label>
@@ -375,7 +442,7 @@ export function AddMarketWizard({
               <Button
                 variant="ghost"
                 className="flex-1"
-                onClick={() => { setWizardStep('done'); }}
+                onClick={() => setWizardStep('done')}
               >
                 Skip
               </Button>
@@ -391,13 +458,15 @@ export function AddMarketWizard({
             <div className="w-12 h-12 mx-auto flex items-center justify-center bg-success/10 border border-success/20">
               <Check className="w-6 h-6 text-success" />
             </div>
-            <h2 className="text-lg font-bold text-text-primary">Market Added</h2>
+            <h2 className="text-lg font-bold text-text-primary">
+              {selectedMarkets.length === 1 ? 'Market Added' : `${selectedMarkets.length} Markets Added`}
+            </h2>
             <p className="text-sm text-text-tertiary">
-              {selectedMarket?.collateralToken.symbol}/{assetSymbol} adapter is live.
+              {selectedMarkets.map((m) => m.collateralToken.symbol).join(', ')}/{assetSymbol} — caps configured.
             </p>
-            {deployHook.deployedAdapter && (
+            {adapterAddress && (
               <div className="flex justify-center">
-                <AddressDisplay address={deployHook.deployedAdapter} chainId={chainId} />
+                <AddressDisplay address={adapterAddress} chainId={chainId} />
               </div>
             )}
             <Button className="w-full" onClick={onComplete}>
