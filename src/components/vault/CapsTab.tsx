@@ -6,8 +6,9 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
+import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { metaMorphoV1Abi } from '../../lib/contracts/abis';
-import { formatTokenAmount, formatCountdown, parseTokenAmount } from '../../lib/utils/format';
+import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 
 interface CapsTabProps {
@@ -21,6 +22,8 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const role = useVaultRole(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
+  // All discovered markets on this chain — for adding new markets not yet in the vault
+  const { data: allChainMarkets } = useMarketScanner(chainId);
   const marketIds = allocation
     ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
     : undefined;
@@ -41,20 +44,54 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
 
   const pendingCaps = pendingActions?.filter((a) => a.type === 'cap') ?? [];
 
+  // Filter discovered markets to only those with the same loan token as the vault asset
+  const vaultAsset = vault?.asset?.toLowerCase();
+  const availableNewMarkets = (allChainMarkets ?? []).filter((m) => {
+    if (!vaultAsset) return false;
+    // Only show markets with matching loan token
+    if (m.loanToken.toLowerCase() !== vaultAsset) return false;
+    // Exclude markets already in the vault
+    const existingIds = new Set(markets?.map((vm) => vm.id) ?? []);
+    return !existingIds.has(m.marketId);
+  });
+
   const handleSubmitCap = () => {
-    if (!selectedMarket || !newCapValue || !markets) return;
-    const market = markets.find((m) => m.id === selectedMarket);
-    if (!market) return;
+    if (!selectedMarket || !newCapValue) return;
 
     const decimals = vault?.assetInfo.decimals ?? 18;
     const capWei = parseTokenAmount(newCapValue, decimals);
 
-    writeContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'submitCap',
-      args: [market.params, capWei],
-    });
+    // Check if it's an existing vault market or a new discovered market
+    const existingMarket = markets?.find((m) => m.id === selectedMarket);
+    if (existingMarket) {
+      writeContract({
+        address: vaultAddress,
+        abi: metaMorphoV1Abi,
+        functionName: 'submitCap',
+        args: [existingMarket.params, capWei],
+      });
+      return;
+    }
+
+    // It's a new market from chain discovery
+    const discovered = availableNewMarkets.find((m) => m.marketId === selectedMarket);
+    if (discovered) {
+      writeContract({
+        address: vaultAddress,
+        abi: metaMorphoV1Abi,
+        functionName: 'submitCap',
+        args: [
+          {
+            loanToken: discovered.loanToken,
+            collateralToken: discovered.collateralToken,
+            oracle: discovered.oracle as Address,
+            irm: discovered.irm as Address,
+            lltv: BigInt(discovered.lltv),
+          },
+          capWei,
+        ],
+      });
+    }
   };
 
   const handleAcceptCap = (marketId: `0x${string}`) => {
@@ -198,11 +235,24 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                 className="w-full mt-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary"
               >
                 <option value="">Select market...</option>
-                {markets?.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.collateralToken.symbol} / {m.loanToken.symbol} ({(Number(m.params.lltv) / 1e18 * 100).toFixed(1)}%)
-                  </option>
-                ))}
+                {markets && markets.length > 0 && (
+                  <optgroup label="Vault markets">
+                    {markets.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.collateralToken.symbol} / {m.loanToken.symbol} ({(Number(m.params.lltv) / 1e18 * 100).toFixed(1)}%)
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {availableNewMarkets.length > 0 && (
+                  <optgroup label="Add new market">
+                    {availableNewMarkets.map((m) => (
+                      <option key={m.marketId} value={m.marketId}>
+                        {m.collateralTokenSymbol || m.collateralToken.slice(0, 10)} / {m.loanTokenSymbol || m.loanToken.slice(0, 10)} ({formatPercent(Number(m.lltv) / 1e18)})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
             <div>

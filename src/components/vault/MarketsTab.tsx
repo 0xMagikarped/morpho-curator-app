@@ -59,7 +59,7 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
       <Card className="py-8 text-center">
         <p className="text-text-tertiary text-sm">No markets enabled in this vault.</p>
         <p className="text-text-tertiary text-xs mt-1">
-          The supply and withdraw queues are empty.
+          Go to the <span className="text-accent-primary font-medium">Caps</span> tab to submit a supply cap and add a market.
         </p>
       </Card>
     );
