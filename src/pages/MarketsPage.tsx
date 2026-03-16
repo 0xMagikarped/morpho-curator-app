@@ -20,6 +20,7 @@ import { MarketSearchOverlay } from '../components/market/MarketSearchOverlay';
 import { getChainConfig, getSupportedChainIds } from '../config/chains';
 import { truncateAddress, formatWadPercent } from '../lib/utils/format';
 import { useMarketScanner, useScannerState } from '../lib/hooks/useMarketScanner';
+import { isIdleMarketRecord } from '../lib/scanner/marketScanner';
 import { useOracleHealthBatch } from '../lib/hooks/useOracle';
 import { cn } from '../lib/utils/cn';
 import type { MarketRecord } from '../lib/indexer/indexedDB';
@@ -49,6 +50,12 @@ export function MarketsPage() {
 
   useScannerState(selectedChainId);
 
+  // Filter out IDLE markets (collateral = 0x0, lltv = 0) — defense in depth
+  const displayableMarkets = useMemo(
+    () => markets?.filter((m) => !isIdleMarketRecord(m)),
+    [markets],
+  );
+
   // Cmd+K shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -63,35 +70,35 @@ export function MarketsPage() {
 
   // Oracle health
   const oracleAddresses = useMemo(() => {
-    if (!markets) return undefined;
+    if (!displayableMarkets) return undefined;
     const addrs = new Set<Address>();
-    for (const m of markets) {
+    for (const m of displayableMarkets) {
       if (m.oracle !== '0x0000000000000000000000000000000000000000') {
         addrs.add(m.oracle as Address);
       }
     }
     return addrs.size > 0 ? [...addrs] : undefined;
-  }, [markets]);
+  }, [displayableMarkets]);
 
   const { data: oracleHealthMap } = useOracleHealthBatch(selectedChainId, oracleAddresses);
 
   // Unique loan tokens for filter chips
   const loanTokenOptions = useMemo(() => {
-    if (!markets) return [];
+    if (!displayableMarkets) return [];
     const tokens = new Map<string, string>();
-    for (const m of markets) {
+    for (const m of displayableMarkets) {
       const addr = m.loanToken.toLowerCase();
       if (!tokens.has(addr)) {
         tokens.set(addr, m.loanTokenSymbol ?? truncateAddress(m.loanToken));
       }
     }
     return Array.from(tokens.entries()).map(([addr, label]) => ({ address: addr, label }));
-  }, [markets]);
+  }, [displayableMarkets]);
 
   // Filter and sort
   const filteredMarkets = useMemo(() => {
-    if (!markets) return [];
-    let result = [...markets];
+    if (!displayableMarkets) return [];
+    let result = [...displayableMarkets];
 
     if (selectedTokens.length > 0) {
       result = result.filter((m) =>
@@ -160,8 +167,8 @@ export function MarketsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-text-primary">Markets</h1>
-          {markets && (
-            <Badge>{markets.length} market{markets.length !== 1 ? 's' : ''}</Badge>
+          {displayableMarkets && (
+            <Badge>{displayableMarkets.length} market{displayableMarkets.length !== 1 ? 's' : ''}</Badge>
           )}
         </div>
         <button
@@ -252,7 +259,7 @@ export function MarketsPage() {
 
         {/* Count */}
         <span className="text-[11px] text-text-tertiary ml-auto font-mono">
-          Showing {filteredMarkets.length} of {markets?.length ?? 0}
+          Showing {filteredMarkets.length} of {displayableMarkets?.length ?? 0}
         </span>
       </div>
 
@@ -297,11 +304,11 @@ export function MarketsPage() {
           <div className="flex flex-col items-center justify-center py-12 gap-3">
             <Filter size={24} className="text-text-tertiary" />
             <p className="text-sm text-text-tertiary">
-              {markets?.length === 0
+              {displayableMarkets?.length === 0
                 ? 'No markets found on this chain.'
                 : 'No markets match your filters.'}
             </p>
-            {markets?.length === 0 ? (
+            {displayableMarkets?.length === 0 ? (
               <Button variant="secondary" size="sm" onClick={rescan}>
                 <RefreshCw size={12} className="mr-1" />
                 Rescan
@@ -441,7 +448,7 @@ export function MarketsPage() {
       <MarketSearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
-        markets={markets ?? []}
+        markets={displayableMarkets ?? []}
         onSelect={(m) => setDrawerMarket(m)}
       />
     </div>

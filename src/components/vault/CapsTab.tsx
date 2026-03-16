@@ -45,11 +45,15 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const pendingCaps = pendingActions?.filter((a) => a.type === 'cap') ?? [];
 
   // Filter discovered markets to only those with the same loan token as the vault asset
+  // Also exclude IDLE markets (collateral = 0x0, lltv = 0)
+  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
   const vaultAsset = vault?.asset?.toLowerCase();
   const availableNewMarkets = (allChainMarkets ?? []).filter((m) => {
     if (!vaultAsset) return false;
     // Only show markets with matching loan token
     if (m.loanToken.toLowerCase() !== vaultAsset) return false;
+    // Exclude IDLE markets
+    if (m.collateralToken.toLowerCase() === ZERO_ADDRESS && (m.lltv === '0' || m.lltv === '0n')) return false;
     // Exclude markets already in the vault
     const existingIds = new Set(markets?.map((vm) => vm.id) ?? []);
     return !existingIds.has(m.marketId);
