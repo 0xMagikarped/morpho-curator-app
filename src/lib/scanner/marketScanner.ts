@@ -57,8 +57,62 @@ function getEventClient(chainId: number) {
 }
 
 /**
- * Scan CreateMarket events from Morpho Blue contract in batches.
- * Reports progress via callback for UI updates.
+ * Scan a single block range for CreateMarket events with adaptive retry.
+ * On failure, halves the range and retries sub-ranges.
+ * This handles pruned RPCs where some block ranges fail but sub-ranges may succeed.
+ */
+async function scanRangeWithRetry(
+  client: ReturnType<typeof getEventClient>,
+  morphoBlue: Address,
+  chainId: number,
+  start: number,
+  end: number,
+  minBatchSize: number,
+): Promise<DiscoveredMarket[]> {
+  try {
+    const logs = await client.getLogs({
+      address: morphoBlue,
+      event: createMarketEvent,
+      fromBlock: BigInt(start),
+      toBlock: BigInt(end),
+    });
+
+    const markets: DiscoveredMarket[] = [];
+    for (const log of logs) {
+      if (!log.args.id || !log.args.marketParams) continue;
+      markets.push({
+        id: log.args.id,
+        loanToken: log.args.marketParams.loanToken as Address,
+        collateralToken: log.args.marketParams.collateralToken as Address,
+        oracle: log.args.marketParams.oracle as Address,
+        irm: log.args.marketParams.irm as Address,
+        lltv: log.args.marketParams.lltv,
+        discoveredAtBlock: Number(log.blockNumber),
+        chainId,
+      });
+    }
+    return markets;
+  } catch {
+    // If range is already at minimum, this range is pruned — skip it
+    const rangeSize = end - start;
+    if (rangeSize <= minBatchSize) {
+      return [];
+    }
+    // Split in half and try each sub-range
+    const mid = start + Math.floor(rangeSize / 2);
+    const [left, right] = await Promise.all([
+      scanRangeWithRetry(client, morphoBlue, chainId, start, mid, minBatchSize),
+      scanRangeWithRetry(client, morphoBlue, chainId, mid + 1, end, minBatchSize),
+    ]);
+    return [...left, ...right];
+  }
+}
+
+/**
+ * Scan CreateMarket events from Morpho Blue contract.
+ * Uses large initial batch sizes (getLogs is not gas-limited) with adaptive
+ * retry: on failure, halves the range to find working sub-ranges.
+ * This handles SEI's pruned RPC where some block ranges fail.
  */
 export async function scanCreateMarketEvents(
   chainId: number,
@@ -70,37 +124,19 @@ export async function scanCreateMarketEvents(
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
 
   const client = getEventClient(chainId);
-  const batchSize = chainConfig.scanner.batchSize;
+  // Use large batches — getLogs is a read query, not gas-limited.
+  // 500K blocks per batch covers ~2.3 days on SEI (400ms blocks).
+  const batchSize = 500_000;
+  const minBatchSize = chainConfig.scanner.batchSize; // Smallest retry unit
   const markets: DiscoveredMarket[] = [];
 
   for (let start = fromBlock; start <= toBlock; start += batchSize) {
     const end = Math.min(start + batchSize - 1, toBlock);
 
-    try {
-      const logs = await client.getLogs({
-        address: chainConfig.morphoBlue,
-        event: createMarketEvent,
-        fromBlock: BigInt(start),
-        toBlock: BigInt(end),
-      });
-
-      for (const log of logs) {
-        if (!log.args.id || !log.args.marketParams) continue;
-        markets.push({
-          id: log.args.id,
-          loanToken: log.args.marketParams.loanToken as Address,
-          collateralToken: log.args.marketParams.collateralToken as Address,
-          oracle: log.args.marketParams.oracle as Address,
-          irm: log.args.marketParams.irm as Address,
-          lltv: log.args.marketParams.lltv,
-          discoveredAtBlock: Number(log.blockNumber),
-          chainId,
-        });
-      }
-    } catch (err) {
-      console.warn(`getLogs failed for blocks ${start}-${end}:`, err);
-      // On SEI, historical blocks may be pruned — stop scanning older blocks
-    }
+    const batch = await scanRangeWithRetry(
+      client, chainConfig.morphoBlue, chainId, start, end, minBatchSize,
+    );
+    markets.push(...batch);
 
     onProgress?.({
       fromBlock,
