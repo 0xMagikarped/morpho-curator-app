@@ -2,10 +2,9 @@
  * Detailed view for a single adapter showing type info, caps at all three levels,
  * and inline editing for caps.
  */
-import { useMemo } from 'react';
 import type { Address } from 'viem';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, Shield, Layers, Database } from 'lucide-react';
+import { Shield, Layers, Database } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { AddressDisplay } from '../../ui/AddressDisplay';
@@ -24,7 +23,6 @@ interface AdapterDetailViewProps {
   vaultAddress: Address;
   decimals: number;
   assetSymbol: string;
-  totalAssets: bigint;
   canSetCaps: boolean;
   marketParams?: MarketParams;
 }
@@ -35,7 +33,6 @@ export function AdapterDetailView({
   vaultAddress,
   decimals,
   assetSymbol,
-  totalAssets,
   canSetCaps,
   marketParams,
 }: AdapterDetailViewProps) {
@@ -132,7 +129,7 @@ export function AdapterDetailView({
                 vaultAddress={vaultAddress}
                 decimals={decimals}
                 assetSymbol={assetSymbol}
-                totalAssets={totalAssets}
+
                 canEdit={canSetCaps}
               />
             ))}
@@ -150,14 +147,12 @@ function CapLevelRow({
   vaultAddress,
   decimals,
   assetSymbol,
-  totalAssets,
   canEdit,
 }: {
   cap: CapReading;
   vaultAddress: Address;
   decimals: number;
   assetSymbol: string;
-  totalAssets: bigint;
   canEdit: boolean;
 }) {
   const levelIcon = cap.level === 'adapter'

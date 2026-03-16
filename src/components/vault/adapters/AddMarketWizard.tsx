@@ -7,7 +7,7 @@
  *
  * Optimized for zero-timelock vaults — all steps are immediate.
  */
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import type { Address } from 'viem';
 import { Check, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
@@ -23,11 +23,10 @@ import {
   collateralIdData,
   marketIdData,
   MAX_UINT128,
-  WAD,
   percentToWad,
 } from '../../../lib/v2/adapterCapUtils';
 import { formatTokenAmount } from '../../../lib/utils/format';
-import type { MarketInfo, MarketParams } from '../../../types';
+import type { MarketInfo } from '../../../types';
 
 type WizardStep = 'select' | 'deploy' | 'caps' | 'allocate' | 'done';
 
@@ -37,7 +36,6 @@ interface AddMarketWizardProps {
   vaultAsset: Address;
   assetSymbol: string;
   assetDecimals: number;
-  totalAssets: bigint;
   idle: bigint;
   existingMarketIds?: Set<string>;
   onComplete: () => void;
@@ -50,7 +48,6 @@ export function AddMarketWizard({
   vaultAsset,
   assetSymbol,
   assetDecimals,
-  totalAssets,
   idle,
   existingMarketIds,
   onComplete,

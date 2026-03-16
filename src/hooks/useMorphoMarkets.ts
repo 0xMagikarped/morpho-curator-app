@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import { isApiSupportedChain } from '../lib/data/morphoApi';
 import { marketKeys } from '../lib/queryKeys';
-import type { MarketInfo, TokenInfo, MarketParams } from '../types';
+import type { MarketInfo, TokenInfo } from '../types';
 
 const MORPHO_API_URL = 'https://blue-api.morpho.org/graphql';
 

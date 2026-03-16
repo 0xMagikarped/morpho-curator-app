@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import type { Address } from 'viem';
-import { ArrowUp, ArrowDown, Loader2, Check, AlertTriangle } from 'lucide-react';
+import { Loader2, Check } from 'lucide-react';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { Button } from '../../ui/Button';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';

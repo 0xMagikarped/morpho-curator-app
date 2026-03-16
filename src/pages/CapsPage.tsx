@@ -7,10 +7,9 @@
  * 2. Collateral-level caps (grouped by collateral token)
  * 3. Market-level caps (per adapter × market combination)
  */
-import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { Address } from 'viem';
-import { ArrowLeft, Shield, Layers, Database } from 'lucide-react';
+import { ArrowLeft, Database } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';

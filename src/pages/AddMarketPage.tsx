@@ -92,7 +92,6 @@ export function AddMarketPage() {
         vaultAsset={vault.asset}
         assetSymbol={vault.assetInfo.symbol}
         assetDecimals={vault.assetInfo.decimals}
-        totalAssets={vault.totalAssets}
         idle={overview?.idle ?? 0n}
         existingMarketIds={existingMarketIds}
         onComplete={() => navigate(`/vault/${chainId}/${vaultAddress}?tab=adapters`)}
