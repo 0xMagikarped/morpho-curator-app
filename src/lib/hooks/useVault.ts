@@ -371,7 +371,8 @@ export function useDiscoveredMarketStatuses(
     queryFn: async (): Promise<DiscoveredMarketStatus[]> => {
       if (!chainId || !vaultAddress || !discoveredMarketIds?.length) return [];
 
-      const results = await Promise.all(
+      // Fetch each market independently — one RPC failure shouldn't block all
+      const settled = await Promise.allSettled(
         discoveredMarketIds.map(async (marketId) => {
           const [config, pendingCap] = await Promise.all([
             fetchMarketCap(chainId, vaultAddress, marketId),
@@ -381,10 +382,20 @@ export function useDiscoveredMarketStatuses(
         }),
       );
 
-      // Only return markets that have on-chain state (enabled or pending)
-      return results.filter(
-        (r) => r.config.enabled || r.config.cap > 0n || r.pendingCap !== null,
-      );
+      const results: DiscoveredMarketStatus[] = [];
+      for (const s of settled) {
+        if (s.status === 'rejected') {
+          console.warn('[useDiscoveredMarketStatuses] RPC call failed:', s.reason);
+          continue;
+        }
+        const r = s.value;
+        // Only include markets that have on-chain state (enabled or pending)
+        if (r.config.enabled || r.config.cap > 0n || r.pendingCap !== null) {
+          results.push(r);
+        }
+      }
+
+      return results;
     },
     enabled: !!chainId && !!vaultAddress && !!discoveredMarketIds?.length,
     staleTime: 30_000,
