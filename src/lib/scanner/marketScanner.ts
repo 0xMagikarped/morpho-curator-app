@@ -6,6 +6,7 @@ import {
   saveDiscoveredMarkets,
   getLastScannedBlock,
   saveScanProgress,
+  resetScanProgress,
   getMarketsByChain,
   enrichMarketTokens,
   getCachedToken,
@@ -269,20 +270,16 @@ export async function runIncrementalScan(
   }
 
   // Step 2: Try event scanning for additional markets
-  // On chains with pruned logs, only scan recent blocks (not from deployment)
+  // Scan from deployment block to catch ALL markets (including PYUSD etc.)
+  // On pruned RPCs, getLogs for old blocks will fail per-batch but newer blocks succeed.
   try {
     const eventClient = getEventClient(chainId);
     const currentBlock = Number(await eventClient.getBlockNumber());
     const lastScanned = await getLastScannedBlock(chainId);
 
-    // If never scanned before, only scan the last ~50K blocks (not from deployment)
-    // This avoids 15K+ failed getLogs calls on pruned RPCs like SEI
-    const maxHistoricalBlocks = 50_000;
-    const defaultFromBlock = Math.max(
-      chainConfig.deploymentBlock,
-      currentBlock - maxHistoricalBlocks,
-    );
-    const fromBlock = lastScanned != null ? lastScanned + 1 : defaultFromBlock;
+    // Always scan from deployment block on first run to catch all markets.
+    // Subsequent runs resume from last scanned block.
+    const fromBlock = lastScanned != null ? lastScanned + 1 : chainConfig.deploymentBlock;
 
     if (fromBlock <= currentBlock) {
       const eventMarkets = await scanCreateMarketEvents(
@@ -321,14 +318,15 @@ export async function runIncrementalScan(
 }
 
 /**
- * Force a full rescan.
+ * Force a full rescan from deployment block.
+ * Resets the last-scanned-block so the incremental scan starts over.
  */
 export async function runFullScan(
   chainId: number,
   onProgress?: ScanProgressCallback,
 ): Promise<DiscoveredMarket[]> {
-  // Full scan = same as incremental but from scratch
-  // The incremental scan already handles vault-based + event-based discovery
+  // Delete scan state so incremental scan starts from deployment block
+  await resetScanProgress(chainId);
   return runIncrementalScan(chainId, onProgress);
 }
 

@@ -193,6 +193,11 @@ export async function getScannerState(chainId: number): Promise<ScannerStateReco
   return db.get('scannerState', chainId);
 }
 
+export async function resetScanProgress(chainId: number): Promise<void> {
+  const db = await openMarketDB();
+  await db.delete('scannerState', chainId);
+}
+
 // ============================================================
 // Market State Cache
 // ============================================================
