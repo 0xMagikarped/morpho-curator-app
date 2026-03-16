@@ -44,6 +44,17 @@ const createMarketEvent = parseAbiItem(
   'event CreateMarket(bytes32 indexed id, (address loanToken, address collateralToken, address oracle, address irm, uint256 lltv) marketParams)',
 );
 
+// Supply event — indexed by market ID. Any market with recent supply activity
+// will emit this, letting us discover markets whose CreateMarket event was pruned.
+const supplyEvent = parseAbiItem(
+  'event Supply(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets, uint256 shares)',
+);
+
+// Borrow event — same logic, catches markets that only have borrow activity
+const borrowEvent = parseAbiItem(
+  'event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)',
+);
+
 // ============================================================
 // Event Scanner — RPC-based
 // ============================================================
@@ -264,6 +275,137 @@ export async function discoverMarketsFromVaults(
 }
 
 // ============================================================
+// Activity-Based Discovery — catches markets with pruned CreateMarket events
+// ============================================================
+
+/**
+ * Discover markets by scanning Supply and Borrow events on recent blocks.
+ * This catches markets whose CreateMarket event is in pruned block ranges.
+ * We extract unique market IDs from the indexed `id` field, then look up
+ * their params via idToMarketParams().
+ */
+async function discoverMarketsFromActivity(
+  chainId: number,
+  recentBlocks: number,
+  existingIds: Set<string>,
+  onProgress?: ScanProgressCallback,
+): Promise<DiscoveredMarket[]> {
+  const chainConfig = getChainConfig(chainId);
+  if (!chainConfig) return [];
+
+  const client = getEventClient(chainId);
+  const currentBlock = Number(await client.getBlockNumber());
+  const fromBlock = Math.max(chainConfig.deploymentBlock, currentBlock - recentBlocks);
+
+  const discoveredIds = new Set<string>();
+  const batchSize = 100_000; // Large batches for indexed-only queries
+
+  // Scan Supply events for unique market IDs
+  for (let start = fromBlock; start <= currentBlock; start += batchSize) {
+    const end = Math.min(start + batchSize - 1, currentBlock);
+    try {
+      const logs = await client.getLogs({
+        address: chainConfig.morphoBlue,
+        event: supplyEvent,
+        fromBlock: BigInt(start),
+        toBlock: BigInt(end),
+      });
+      for (const log of logs) {
+        if (log.args.id) discoveredIds.add(log.args.id);
+      }
+    } catch {
+      // Try smaller batches on failure
+      const smallBatch = 10_000;
+      for (let s = start; s <= end; s += smallBatch) {
+        const e = Math.min(s + smallBatch - 1, end);
+        try {
+          const logs = await client.getLogs({
+            address: chainConfig.morphoBlue,
+            event: supplyEvent,
+            fromBlock: BigInt(s),
+            toBlock: BigInt(e),
+          });
+          for (const log of logs) {
+            if (log.args.id) discoveredIds.add(log.args.id);
+          }
+        } catch { /* pruned range, skip */ }
+      }
+    }
+  }
+
+  // Scan Borrow events too
+  for (let start = fromBlock; start <= currentBlock; start += batchSize) {
+    const end = Math.min(start + batchSize - 1, currentBlock);
+    try {
+      const logs = await client.getLogs({
+        address: chainConfig.morphoBlue,
+        event: borrowEvent,
+        fromBlock: BigInt(start),
+        toBlock: BigInt(end),
+      });
+      for (const log of logs) {
+        if (log.args.id) discoveredIds.add(log.args.id);
+      }
+    } catch {
+      const smallBatch = 10_000;
+      for (let s = start; s <= end; s += smallBatch) {
+        const e = Math.min(s + smallBatch - 1, end);
+        try {
+          const logs = await client.getLogs({
+            address: chainConfig.morphoBlue,
+            event: borrowEvent,
+            fromBlock: BigInt(s),
+            toBlock: BigInt(e),
+          });
+          for (const log of logs) {
+            if (log.args.id) discoveredIds.add(log.args.id);
+          }
+        } catch { /* pruned range, skip */ }
+      }
+    }
+  }
+
+  // Filter out already-known markets, then fetch params for new ones
+  const newIds = [...discoveredIds].filter((id) => !existingIds.has(id));
+  const markets: DiscoveredMarket[] = [];
+  const readClient = getPublicClient(chainId);
+
+  for (const marketId of newIds) {
+    try {
+      const params = await readClient.readContract({
+        address: chainConfig.morphoBlue,
+        abi: morphoBlueAbi,
+        functionName: 'idToMarketParams',
+        args: [marketId as `0x${string}`],
+      });
+
+      markets.push({
+        id: marketId as `0x${string}`,
+        loanToken: params.loanToken as Address,
+        collateralToken: params.collateralToken as Address,
+        oracle: params.oracle as Address,
+        irm: params.irm as Address,
+        lltv: params.lltv as bigint,
+        discoveredAtBlock: 0,
+        chainId,
+      });
+    } catch (err) {
+      console.warn(`Failed to fetch params for activity-discovered market ${marketId}:`, err);
+    }
+  }
+
+  onProgress?.({
+    fromBlock,
+    toBlock: currentBlock,
+    currentBlock,
+    marketsFound: markets.length,
+    isComplete: true,
+  });
+
+  return markets;
+}
+
+// ============================================================
 // Unified Discovery
 // ============================================================
 
@@ -335,6 +477,25 @@ export async function runIncrementalScan(
     }
   } catch (err) {
     console.warn('Event scanning failed (may be expected on pruned RPCs):', err);
+  }
+
+  // Step 3: Activity-based discovery (Supply/Borrow events on recent blocks)
+  // Catches markets whose CreateMarket event is in pruned block ranges
+  try {
+    const existingIds = new Set(allMarkets.map((m) => m.id));
+    // Scan last 5M blocks (~23 days on SEI at 400ms/block)
+    const activityMarkets = await discoverMarketsFromActivity(
+      chainId,
+      5_000_000,
+      existingIds,
+      onProgress,
+    );
+    allMarkets.push(...activityMarkets);
+    if (activityMarkets.length > 0) {
+      console.log(`Activity scan discovered ${activityMarkets.length} additional markets`);
+    }
+  } catch (err) {
+    console.warn('Activity-based market discovery failed:', err);
   }
 
   // Persist
