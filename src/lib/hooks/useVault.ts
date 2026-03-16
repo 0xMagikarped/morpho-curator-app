@@ -19,7 +19,6 @@ import type { V2AdapterData } from '../data/rpcClient';
 import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../data/morphoApi';
 import type { VaultRole, AllocationState, MarketInfo, PendingAction, MarketCap, PendingCap } from '../../types';
 import type { VaultInfoV1 } from '../../types';
-import type { MarketRecord } from '../indexer/indexedDB';
 import { calcUtilization } from '../utils/format';
 import { vaultKeys } from '../queryKeys';
 
