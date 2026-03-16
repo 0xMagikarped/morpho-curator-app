@@ -279,16 +279,53 @@ export async function discoverMarketsFromVaults(
 // ============================================================
 
 /**
+ * Scan a single event type across a block range for unique market IDs.
+ * Uses a single large getLogs call; on failure falls back to 2 halves.
+ */
+async function collectMarketIdsFromEvent(
+  client: ReturnType<typeof getEventClient>,
+  morphoBlue: Address,
+  event: typeof supplyEvent | typeof borrowEvent,
+  fromBlock: number,
+  toBlock: number,
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  try {
+    const logs = await client.getLogs({
+      address: morphoBlue,
+      event,
+      fromBlock: BigInt(fromBlock),
+      toBlock: BigInt(toBlock),
+    });
+    for (const log of logs) {
+      if (log.args.id) ids.add(log.args.id);
+    }
+  } catch {
+    // Split in half if range is large enough
+    const range = toBlock - fromBlock;
+    if (range > 50_000) {
+      const mid = fromBlock + Math.floor(range / 2);
+      const [left, right] = await Promise.all([
+        collectMarketIdsFromEvent(client, morphoBlue, event, fromBlock, mid),
+        collectMarketIdsFromEvent(client, morphoBlue, event, mid + 1, toBlock),
+      ]);
+      for (const id of left) ids.add(id);
+      for (const id of right) ids.add(id);
+    }
+    // If range <= 50K and fails, it's pruned — skip
+  }
+  return ids;
+}
+
+/**
  * Discover markets by scanning Supply and Borrow events on recent blocks.
  * This catches markets whose CreateMarket event is in pruned block ranges.
- * We extract unique market IDs from the indexed `id` field, then look up
- * their params via idToMarketParams().
+ * Uses parallel scanning with adaptive splitting for speed.
  */
 async function discoverMarketsFromActivity(
   chainId: number,
   recentBlocks: number,
   existingIds: Set<string>,
-  onProgress?: ScanProgressCallback,
 ): Promise<DiscoveredMarket[]> {
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) return [];
@@ -297,89 +334,28 @@ async function discoverMarketsFromActivity(
   const currentBlock = Number(await client.getBlockNumber());
   const fromBlock = Math.max(chainConfig.deploymentBlock, currentBlock - recentBlocks);
 
-  const discoveredIds = new Set<string>();
-  const batchSize = 100_000; // Large batches for indexed-only queries
+  // Scan Supply + Borrow events in parallel for unique market IDs
+  const [supplyIds, borrowIds] = await Promise.all([
+    collectMarketIdsFromEvent(client, chainConfig.morphoBlue, supplyEvent, fromBlock, currentBlock),
+    collectMarketIdsFromEvent(client, chainConfig.morphoBlue, borrowEvent, fromBlock, currentBlock),
+  ]);
 
-  // Scan Supply events for unique market IDs
-  for (let start = fromBlock; start <= currentBlock; start += batchSize) {
-    const end = Math.min(start + batchSize - 1, currentBlock);
-    try {
-      const logs = await client.getLogs({
-        address: chainConfig.morphoBlue,
-        event: supplyEvent,
-        fromBlock: BigInt(start),
-        toBlock: BigInt(end),
-      });
-      for (const log of logs) {
-        if (log.args.id) discoveredIds.add(log.args.id);
-      }
-    } catch {
-      // Try smaller batches on failure
-      const smallBatch = 10_000;
-      for (let s = start; s <= end; s += smallBatch) {
-        const e = Math.min(s + smallBatch - 1, end);
-        try {
-          const logs = await client.getLogs({
-            address: chainConfig.morphoBlue,
-            event: supplyEvent,
-            fromBlock: BigInt(s),
-            toBlock: BigInt(e),
-          });
-          for (const log of logs) {
-            if (log.args.id) discoveredIds.add(log.args.id);
-          }
-        } catch { /* pruned range, skip */ }
-      }
-    }
-  }
+  // Merge and filter out already-known
+  const allIds = new Set([...supplyIds, ...borrowIds]);
+  const newIds = [...allIds].filter((id) => !existingIds.has(id));
+  if (newIds.length === 0) return [];
 
-  // Scan Borrow events too
-  for (let start = fromBlock; start <= currentBlock; start += batchSize) {
-    const end = Math.min(start + batchSize - 1, currentBlock);
-    try {
-      const logs = await client.getLogs({
-        address: chainConfig.morphoBlue,
-        event: borrowEvent,
-        fromBlock: BigInt(start),
-        toBlock: BigInt(end),
-      });
-      for (const log of logs) {
-        if (log.args.id) discoveredIds.add(log.args.id);
-      }
-    } catch {
-      const smallBatch = 10_000;
-      for (let s = start; s <= end; s += smallBatch) {
-        const e = Math.min(s + smallBatch - 1, end);
-        try {
-          const logs = await client.getLogs({
-            address: chainConfig.morphoBlue,
-            event: borrowEvent,
-            fromBlock: BigInt(s),
-            toBlock: BigInt(e),
-          });
-          for (const log of logs) {
-            if (log.args.id) discoveredIds.add(log.args.id);
-          }
-        } catch { /* pruned range, skip */ }
-      }
-    }
-  }
-
-  // Filter out already-known markets, then fetch params for new ones
-  const newIds = [...discoveredIds].filter((id) => !existingIds.has(id));
-  const markets: DiscoveredMarket[] = [];
+  // Fetch params for new market IDs in parallel
   const readClient = getPublicClient(chainId);
-
-  for (const marketId of newIds) {
-    try {
+  const results = await Promise.allSettled(
+    newIds.map(async (marketId) => {
       const params = await readClient.readContract({
         address: chainConfig.morphoBlue,
         abi: morphoBlueAbi,
         functionName: 'idToMarketParams',
         args: [marketId as `0x${string}`],
       });
-
-      markets.push({
+      return {
         id: marketId as `0x${string}`,
         loanToken: params.loanToken as Address,
         collateralToken: params.collateralToken as Address,
@@ -388,21 +364,13 @@ async function discoverMarketsFromActivity(
         lltv: params.lltv as bigint,
         discoveredAtBlock: 0,
         chainId,
-      });
-    } catch (err) {
-      console.warn(`Failed to fetch params for activity-discovered market ${marketId}:`, err);
-    }
-  }
+      } satisfies DiscoveredMarket;
+    }),
+  );
 
-  onProgress?.({
-    fromBlock,
-    toBlock: currentBlock,
-    currentBlock,
-    marketsFound: markets.length,
-    isComplete: true,
-  });
-
-  return markets;
+  return results
+    .filter((r): r is PromiseFulfilledResult<DiscoveredMarket> => r.status === 'fulfilled')
+    .map((r) => r.value);
 }
 
 // ============================================================
@@ -447,17 +415,18 @@ export async function runIncrementalScan(
     allMarkets.push(...vaultMarkets);
   }
 
-  // Step 2: Try event scanning for additional markets
-  // Scan from deployment block to catch ALL markets (including PYUSD etc.)
-  // On pruned RPCs, getLogs for old blocks will fail per-batch but newer blocks succeed.
+  // Step 2: Try event scanning for additional markets via CreateMarket events
+  // On first load, scan last 2M blocks for speed (~9 days on SEI).
+  // On subsequent loads, resume from last scanned block.
+  // Full scan from deployment block only happens via explicit Rescan button.
   try {
     const eventClient = getEventClient(chainId);
     const currentBlock = Number(await eventClient.getBlockNumber());
     const lastScanned = await getLastScannedBlock(chainId);
 
-    // Always scan from deployment block on first run to catch all markets.
-    // Subsequent runs resume from last scanned block.
-    const fromBlock = lastScanned != null ? lastScanned + 1 : chainConfig.deploymentBlock;
+    const fromBlock = lastScanned != null
+      ? lastScanned + 1
+      : Math.max(chainConfig.deploymentBlock, currentBlock - 2_000_000);
 
     if (fromBlock <= currentBlock) {
       const eventMarkets = await scanCreateMarketEvents(
@@ -480,20 +449,16 @@ export async function runIncrementalScan(
   }
 
   // Step 3: Activity-based discovery (Supply/Borrow events on recent blocks)
-  // Catches markets whose CreateMarket event is in pruned block ranges
+  // Catches markets whose CreateMarket event is in pruned block ranges.
+  // Scan last 500K blocks (~2.3 days on SEI) — fast, covers active markets.
   try {
     const existingIds = new Set(allMarkets.map((m) => m.id));
-    // Scan last 5M blocks (~23 days on SEI at 400ms/block)
     const activityMarkets = await discoverMarketsFromActivity(
       chainId,
-      5_000_000,
+      500_000,
       existingIds,
-      onProgress,
     );
     allMarkets.push(...activityMarkets);
-    if (activityMarkets.length > 0) {
-      console.log(`Activity scan discovered ${activityMarkets.length} additional markets`);
-    }
   } catch (err) {
     console.warn('Activity-based market discovery failed:', err);
   }
