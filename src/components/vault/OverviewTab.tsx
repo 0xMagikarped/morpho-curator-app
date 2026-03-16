@@ -6,6 +6,7 @@ import { VaultOracleDashboard } from '../oracle/VaultOracleDashboard';
 import { RiskAlertBanner } from '../risk/RiskAlertBanner';
 import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
+import { RegistryAlertBanner } from './RegistryAlertBanner';
 import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
 import { useVaultInfo, useVaultRole, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
@@ -98,6 +99,9 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
     <div className="space-y-4">
       {/* USDC Migration Banner (SEI only) */}
       <UsdcMigrationBanner chainId={chainId} vaultAddress={vaultAddress} vaultAsset={vault.asset} />
+
+      {/* V2 Registry Alert */}
+      <RegistryAlertBanner vaultAddress={vaultAddress} chainId={chainId} isV2Vault={vault.version === 'v2'} />
 
       {/* Risk Alerts */}
       <RiskAlertBanner alerts={riskAlerts} />

@@ -88,6 +88,9 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
         '0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC' as Address,
       oracleV2Factory:
         '0x3A7bB36Ee3f3eE32A60e9f2b33c1e5f2E83ad766' as Address,
+      v2AdapterRegistry: '0x3696c5eAe4a7Ffd04Ea163564571E9CD8Ed9364e' as Address,
+      morphoMarketV1AdapterV2Factory: '0x32BB1c0D48D8b1B3363e86eeB9A0300BAd61ccc1' as Address,
+      morphoVaultV1AdapterFactory: '0xD1B8E2dee25c2b89DCD2f98448a7ce87d6F63394' as Address,
     },
     apiSupported: true,
     blockTime: 12_000,
@@ -146,6 +149,9 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
         '0x46415998764C29aB2a25CbeA6254146D50D22687' as Address,
       oracleV2Factory:
         '0x2DC205F24BCb6B311E5cdf0745B0741648Aebd3d' as Address,
+      v2AdapterRegistry: '0x3696c5eAe4a7Ffd04Ea163564571E9CD8Ed9364e' as Address,
+      morphoMarketV1AdapterV2Factory: '0x32BB1c0D48D8b1B3363e86eeB9A0300BAd61ccc1' as Address,
+      morphoVaultV1AdapterFactory: '0xD1B8E2dee25c2b89DCD2f98448a7ce87d6F63394' as Address,
     },
     apiSupported: true,
     blockTime: 2_000,

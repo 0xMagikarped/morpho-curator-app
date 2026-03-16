@@ -4,6 +4,8 @@
 import type { Address, PublicClient } from 'viem';
 import { keccak256, encodeAbiParameters, parseAbiParameters } from 'viem';
 import { v1VaultAdapterAbi, v1MarketAdapterAbi } from '../contracts/metaMorphoV2Abi';
+import { marketV1AdapterV2FactoryAbi, vaultV1AdapterFactoryAbi } from '../contracts/marketAdapterFactoryAbi';
+import { getChainConfig } from '../../config/chains';
 
 // ============================================================
 // Adapter Type Detection
@@ -91,6 +93,103 @@ export async function detectAdapterType(
   } catch { /* not a market adapter */ }
 
   return result;
+}
+
+/**
+ * Detect adapter type using the factory's view functions.
+ * This is the canonical way — falls back to probe-based detection.
+ */
+export async function detectAdapterTypeViaFactory(
+  adapterAddress: Address,
+  chainId: number,
+  client: PublicClient,
+): Promise<AdapterDetectionResult> {
+  const config = getChainConfig(chainId);
+  const marketFactory = config?.periphery.morphoMarketV1AdapterV2Factory;
+  const vaultFactory = config?.periphery.morphoVaultV1AdapterFactory;
+
+  // Try factory-based detection first
+  if (marketFactory) {
+    try {
+      const isMarket = await client.readContract({
+        address: marketFactory,
+        abi: marketV1AdapterV2FactoryAbi,
+        functionName: 'isMorphoMarketV1AdapterV2',
+        args: [adapterAddress],
+      });
+      if (isMarket) {
+        const result: AdapterDetectionResult = {
+          type: 'market-v1',
+          targetVault: null,
+          targetVaultName: null,
+          morphoBlue: null,
+          asset: null,
+        };
+        try {
+          result.morphoBlue = await client.readContract({
+            address: adapterAddress,
+            abi: v1MarketAdapterAbi,
+            functionName: 'MORPHO',
+          });
+        } catch { /* ignore */ }
+        try {
+          result.asset = await client.readContract({
+            address: adapterAddress,
+            abi: v1MarketAdapterAbi,
+            functionName: 'asset',
+          });
+        } catch { /* ignore */ }
+        return result;
+      }
+    } catch { /* factory call failed */ }
+  }
+
+  if (vaultFactory) {
+    try {
+      const isVault = await client.readContract({
+        address: vaultFactory,
+        abi: vaultV1AdapterFactoryAbi,
+        functionName: 'isMorphoVaultV1Adapter',
+        args: [adapterAddress],
+      });
+      if (isVault) {
+        const result: AdapterDetectionResult = {
+          type: 'vault-v1',
+          targetVault: null,
+          targetVaultName: null,
+          morphoBlue: null,
+          asset: null,
+        };
+        try {
+          result.targetVault = await client.readContract({
+            address: adapterAddress,
+            abi: v1VaultAdapterAbi,
+            functionName: 'VAULT',
+          });
+          if (result.targetVault) {
+            try {
+              result.targetVaultName = await client.readContract({
+                address: result.targetVault,
+                abi: [{ inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' }] as const,
+                functionName: 'name',
+              });
+            } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
+        try {
+          result.asset = await client.readContract({
+            address: adapterAddress,
+            abi: v1VaultAdapterAbi,
+            functionName: 'asset',
+          });
+        } catch { /* ignore */ }
+        return result;
+      }
+    } catch { /* factory call failed */ }
+  }
+
+  // Fallback to probe-based detection
+  return detectAdapterType(adapterAddress, client);
 }
 
 // ============================================================

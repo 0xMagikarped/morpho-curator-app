@@ -131,7 +131,17 @@ export const metaMorphoV2Abi = [
       { name: 'idData', type: 'bytes' },
       { name: 'cap', type: 'uint256' },
     ],
-    name: 'setRelativeCap',
+    name: 'increaseRelativeCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'idData', type: 'bytes' },
+      { name: 'cap', type: 'uint256' },
+    ],
+    name: 'decreaseRelativeCap',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -151,8 +161,8 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'adapter', type: 'address' },
-      { name: 'amount', type: 'uint256' },
       { name: 'data', type: 'bytes' },
+      { name: 'amount', type: 'uint256' },
     ],
     name: 'allocate',
     outputs: [],
@@ -162,8 +172,8 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'adapter', type: 'address' },
-      { name: 'amount', type: 'uint256' },
       { name: 'data', type: 'bytes' },
+      { name: 'amount', type: 'uint256' },
     ],
     name: 'deallocate',
     outputs: [],
@@ -174,6 +184,25 @@ export const metaMorphoV2Abi = [
     inputs: [{ name: 'adapter', type: 'address' }],
     name: 'setLiquidityAdapter',
     outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'adapter', type: 'address' },
+      { name: 'data', type: 'bytes' },
+    ],
+    name: 'setLiquidityAdapterAndData',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+
+  // === Multicall (preserves msg.sender) ===
+  {
+    inputs: [{ name: 'data', type: 'bytes[]' }],
+    name: 'multicall',
+    outputs: [{ name: 'results', type: 'bytes[]' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },

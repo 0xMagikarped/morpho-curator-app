@@ -53,7 +53,7 @@ export function AllocateDrawer({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
       functionName: 'allocate',
-      args: [adapter.address, parsedAmount, '0x' as `0x${string}`],
+      args: [adapter.address, '0x' as `0x${string}`, parsedAmount],
     });
   };
 

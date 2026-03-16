@@ -21,6 +21,12 @@ export interface ChainConfig {
     publicAllocator?: Address;
     adaptiveCurveIrm?: Address;
     oracleV2Factory?: Address;
+    /** Morpho V2 Adapter Registry — required for V2 vaults to manage adapters */
+    v2AdapterRegistry?: Address;
+    /** MorphoMarketV1AdapterV2 factory — deploys market adapters for V2 vaults */
+    morphoMarketV1AdapterV2Factory?: Address;
+    /** MorphoVaultV1Adapter factory — deploys vault adapters for V2 vaults */
+    morphoVaultV1AdapterFactory?: Address;
   };
   apiSupported: boolean;
   blockTime: number;

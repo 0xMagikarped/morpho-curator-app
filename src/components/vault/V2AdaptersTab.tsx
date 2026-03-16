@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Address } from 'viem';
-import { Plus } from 'lucide-react';
+import { Plus, Zap, Shield } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -29,6 +30,7 @@ type DrawerType = 'add' | 'allocate' | 'deallocate' | 'liquidity' | 'caps' | 're
 export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
+  const navigate = useNavigate();
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
 
   const decimals = vault?.assetInfo.decimals ?? 18;
@@ -105,12 +107,26 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
           <Badge variant="info">V2</Badge>
           <Badge>{adapters.length} adapter{adapters.length !== 1 ? 's' : ''}</Badge>
         </div>
-        {canAddAdapter && (
-          <Button size="sm" variant="secondary" onClick={() => openDrawer('add')}>
-            <Plus size={14} className="mr-1" />
-            Add Adapter
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {canSetCaps && (
+            <Button size="sm" variant="ghost" onClick={() => navigate(`/vault/${chainId}/${vaultAddress}/caps`)}>
+              <Shield size={14} className="mr-1" />
+              Caps
+            </Button>
+          )}
+          {canAddAdapter && (
+            <>
+              <Button size="sm" variant="secondary" onClick={() => navigate(`/vault/${chainId}/${vaultAddress}/add-market`)}>
+                <Zap size={14} className="mr-1" />
+                Deploy Market
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => openDrawer('add')}>
+                <Plus size={14} className="mr-1" />
+                Add Adapter
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Liquidity Adapter Banner */}

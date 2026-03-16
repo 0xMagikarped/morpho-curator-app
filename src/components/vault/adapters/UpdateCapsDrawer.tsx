@@ -76,7 +76,7 @@ export function UpdateCapsDrawer({
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
-      functionName: 'setRelativeCap',
+      functionName: 'increaseRelativeCap',
       args: [adapter.adapterId, wadValue],
     });
   };

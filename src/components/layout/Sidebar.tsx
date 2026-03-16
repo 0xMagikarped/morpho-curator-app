@@ -3,6 +3,7 @@ import { LayoutDashboard, BarChart3, Vault, PlusCircle, Settings, PanelLeftClose
 import { useAppStore } from '../../store/appStore';
 import { cn } from '../../lib/utils/cn';
 import { ChainBadge } from '../ui/ChainBadge';
+import { prefetchRoute } from '../../lib/prefetchRoute';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -52,6 +53,8 @@ export function Sidebar() {
             key={item.path}
             to={item.path}
             end={item.path === '/'}
+            onMouseEnter={() => prefetchRoute(item.path)}
+            onFocus={() => prefetchRoute(item.path)}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-3 px-3 py-2 text-sm transition-colors relative',
@@ -78,6 +81,8 @@ export function Sidebar() {
               <NavLink
                 key={`${v.chainId}-${v.address}`}
                 to={`/vault/${v.chainId}/${v.address}`}
+                onMouseEnter={() => prefetchRoute('vault-detail')}
+                onFocus={() => prefetchRoute('vault-detail')}
                 className={({ isActive }) =>
                   cn(
                     'flex items-center gap-2 px-2 py-1.5 text-xs truncate transition-colors',

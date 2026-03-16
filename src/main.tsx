@@ -1,3 +1,6 @@
+import { initSentry } from './lib/sentry';
+initSentry(); // Must be before any other code
+
 import './lib/morpho/augment'; // Morpho SDK augmentation — must be first
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
