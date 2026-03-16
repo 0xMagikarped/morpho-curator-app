@@ -1,4 +1,11 @@
-import { parseAbiItem, type Address } from 'viem';
+import {
+  parseAbiItem,
+  decodeAbiParameters,
+  parseAbiParameters,
+  keccak256,
+  encodeAbiParameters,
+  type Address,
+} from 'viem';
 import { getPublicClient } from '../data/rpcClient';
 import { getChainConfig, SEI_KNOWN_VAULTS } from '../../config/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, erc20Abi } from '../contracts/abis';
@@ -44,33 +51,155 @@ const createMarketEvent = parseAbiItem(
   'event CreateMarket(bytes32 indexed id, (address loanToken, address collateralToken, address oracle, address irm, uint256 lltv) marketParams)',
 );
 
-// Supply event — indexed by market ID. Any market with recent supply activity
-// will emit this, letting us discover markets whose CreateMarket event was pruned.
-const supplyEvent = parseAbiItem(
-  'event Supply(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets, uint256 shares)',
+// ============================================================
+// Block Explorer API Discovery (SEI — seitrace/blockscout)
+// ============================================================
+
+/** createMarket(MarketParams) function selector */
+const CREATE_MARKET_SELECTOR = '0x8c1358a2';
+
+/** ABI types for decoding createMarket params */
+const marketParamsTypes = parseAbiParameters(
+  'address loanToken, address collateralToken, address oracle, address irm, uint256 lltv',
 );
 
-// Borrow event — same logic, catches markets that only have borrow activity
-const borrowEvent = parseAbiItem(
-  'event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)',
-);
+interface SeitraceTransaction {
+  hash: string;
+  method: string;
+  block: number;
+}
 
-// ============================================================
-// Event Scanner — RPC-based
-// ============================================================
+interface SeitracePage {
+  items: SeitraceTransaction[];
+  next_page_params: Record<string, string | number> | null;
+}
 
 /**
- * Get a client suitable for getLogs calls.
- * Uses the same client as eth_call — publicnode supports both on SEI.
+ * Discover ALL markets on SEI by scanning the block explorer API for
+ * createMarket transactions to the Morpho Blue contract.
+ *
+ * SEI's RPC has a ~2000 block getLogs limit, making event-based scanning
+ * useless across 32M+ blocks. The seitrace (blockscout) API provides
+ * paginated transaction history without block range limits.
  */
+async function discoverMarketsViaSeitrace(
+  chainId: number,
+  onProgress?: ScanProgressCallback,
+): Promise<DiscoveredMarket[]> {
+  const chainConfig = getChainConfig(chainId);
+  if (!chainConfig) return [];
+
+  const morphoBlue = chainConfig.morphoBlue;
+  const baseUrl = `https://seitrace.com/pacific-1/api/v2/addresses/${morphoBlue}/transactions?filter=to`;
+
+  const createMarketTxHashes: string[] = [];
+  let nextParams = '';
+  const MAX_PAGES = 30; // Safety limit
+
+  // Paginate through all transactions to find createMarket calls
+  for (let page = 0; page < MAX_PAGES; page++) {
+    try {
+      const url = baseUrl + nextParams;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        console.warn(`Seitrace API returned ${resp.status} on page ${page}`);
+        break;
+      }
+      const data: SeitracePage = await resp.json();
+      const items = data.items ?? [];
+
+      for (const tx of items) {
+        if (tx.method === CREATE_MARKET_SELECTOR) {
+          createMarketTxHashes.push(tx.hash);
+        }
+      }
+
+      onProgress?.({
+        fromBlock: 0,
+        toBlock: 0,
+        currentBlock: 0,
+        marketsFound: createMarketTxHashes.length,
+        isComplete: false,
+      });
+
+      if (!data.next_page_params) break;
+      nextParams =
+        '&' +
+        Object.entries(data.next_page_params)
+          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+          .join('&');
+    } catch (err) {
+      console.warn(`Seitrace page ${page} failed:`, err);
+      break;
+    }
+  }
+
+  if (createMarketTxHashes.length === 0) return [];
+
+  // Fetch tx input data and decode market params
+  const client = getPublicClient(chainId);
+  const markets: DiscoveredMarket[] = [];
+
+  // Process in batches of 5 to avoid overwhelming the RPC
+  for (let i = 0; i < createMarketTxHashes.length; i += 5) {
+    const batch = createMarketTxHashes.slice(i, i + 5);
+    const results = await Promise.allSettled(
+      batch.map(async (txHash) => {
+        const tx = await client.getTransaction({ hash: txHash as `0x${string}` });
+        if (!tx.input || tx.input.length < 10) return null;
+
+        // Strip 4-byte selector, decode (address, address, address, address, uint256)
+        const paramsData = (`0x${tx.input.slice(10)}`) as `0x${string}`;
+        const [loanToken, collateralToken, oracle, irm, lltv] =
+          decodeAbiParameters(marketParamsTypes, paramsData);
+
+        // Compute market ID = keccak256(abi.encode(params))
+        const encoded = encodeAbiParameters(marketParamsTypes, [
+          loanToken, collateralToken, oracle, irm, lltv,
+        ]);
+        const marketId = keccak256(encoded);
+
+        return {
+          id: marketId,
+          loanToken: loanToken as Address,
+          collateralToken: collateralToken as Address,
+          oracle: oracle as Address,
+          irm: irm as Address,
+          lltv,
+          discoveredAtBlock: Number(tx.blockNumber),
+          chainId,
+        } satisfies DiscoveredMarket;
+      }),
+    );
+
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) {
+        markets.push(r.value);
+      }
+    }
+  }
+
+  onProgress?.({
+    fromBlock: 0,
+    toBlock: 0,
+    currentBlock: 0,
+    marketsFound: markets.length,
+    isComplete: true,
+  });
+
+  return markets;
+}
+
+// ============================================================
+// Event Scanner — RPC-based (for chains with full getLogs support)
+// ============================================================
+
 function getEventClient(chainId: number) {
   return getPublicClient(chainId);
 }
 
 /**
- * Scan a single block range for CreateMarket events with adaptive retry.
- * On failure, halves the range and retries sub-ranges.
- * This handles pruned RPCs where some block ranges fail but sub-ranges may succeed.
+ * Scan a block range for CreateMarket events with adaptive binary-split retry.
  */
 async function scanRangeWithRetry(
   client: ReturnType<typeof getEventClient>,
@@ -104,12 +233,8 @@ async function scanRangeWithRetry(
     }
     return markets;
   } catch {
-    // If range is already at minimum, this range is pruned — skip it
     const rangeSize = end - start;
-    if (rangeSize <= minBatchSize) {
-      return [];
-    }
-    // Split in half and try each sub-range
+    if (rangeSize <= minBatchSize) return [];
     const mid = start + Math.floor(rangeSize / 2);
     const [left, right] = await Promise.all([
       scanRangeWithRetry(client, morphoBlue, chainId, start, mid, minBatchSize),
@@ -120,10 +245,8 @@ async function scanRangeWithRetry(
 }
 
 /**
- * Scan CreateMarket events from Morpho Blue contract.
- * Uses large initial batch sizes (getLogs is not gas-limited) with adaptive
- * retry: on failure, halves the range to find working sub-ranges.
- * This handles SEI's pruned RPC where some block ranges fail.
+ * Scan CreateMarket events via RPC getLogs.
+ * Works on Ethereum/Base but NOT on SEI (2K block limit).
  */
 export async function scanCreateMarketEvents(
   chainId: number,
@@ -135,48 +258,38 @@ export async function scanCreateMarketEvents(
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
 
   const client = getEventClient(chainId);
-  // Use large batches — getLogs is a read query, not gas-limited.
-  // 500K blocks per batch covers ~2.3 days on SEI (400ms blocks).
   const batchSize = 500_000;
-  const minBatchSize = chainConfig.scanner.batchSize; // Smallest retry unit
+  const minBatchSize = chainConfig.scanner.batchSize;
   const markets: DiscoveredMarket[] = [];
 
   for (let start = fromBlock; start <= toBlock; start += batchSize) {
     const end = Math.min(start + batchSize - 1, toBlock);
-
     const batch = await scanRangeWithRetry(
       client, chainConfig.morphoBlue, chainId, start, end, minBatchSize,
     );
     markets.push(...batch);
 
     onProgress?.({
-      fromBlock,
-      toBlock,
-      currentBlock: end,
-      marketsFound: markets.length,
-      isComplete: false,
+      fromBlock, toBlock, currentBlock: end,
+      marketsFound: markets.length, isComplete: false,
     });
   }
 
   onProgress?.({
-    fromBlock,
-    toBlock,
-    currentBlock: toBlock,
-    marketsFound: markets.length,
-    isComplete: true,
+    fromBlock, toBlock, currentBlock: toBlock,
+    marketsFound: markets.length, isComplete: true,
   });
 
   return markets;
 }
 
 // ============================================================
-// Vault-Based Discovery — Fallback for chains with pruned logs
+// Vault-Based Discovery — reads market IDs from vault queues
 // ============================================================
 
 /**
  * Discover markets by reading known vault supply/withdraw queues.
- * This works even when historical event logs are unavailable.
- * Uses eth_call (works on publicnode, drpc).
+ * Uses eth_call — works on all RPCs including SEI.
  */
 export async function discoverMarketsFromVaults(
   chainId: number,
@@ -192,7 +305,6 @@ export async function discoverMarketsFromVaults(
 
   for (const vaultAddress of vaultAddresses) {
     try {
-      // Read supply and withdraw queue lengths
       const [supplyLen, withdrawLen] = await Promise.all([
         client.readContract({
           address: vaultAddress,
@@ -206,7 +318,6 @@ export async function discoverMarketsFromVaults(
         }),
       ]);
 
-      // Read all market IDs from both queues
       const allPromises: Promise<`0x${string}`>[] = [];
       for (let i = 0; i < Number(supplyLen); i++) {
         allPromises.push(
@@ -231,7 +342,6 @@ export async function discoverMarketsFromVaults(
 
       const marketIds = await Promise.all(allPromises);
 
-      // Deduplicate and fetch params
       for (const marketId of marketIds) {
         if (marketIdSet.has(marketId)) continue;
         marketIdSet.add(marketId);
@@ -251,7 +361,7 @@ export async function discoverMarketsFromVaults(
             oracle: params.oracle as Address,
             irm: params.irm as Address,
             lltv: params.lltv as bigint,
-            discoveredAtBlock: 0, // Unknown — discovered via vault queue
+            discoveredAtBlock: 0,
             chainId,
           });
         } catch (err) {
@@ -259,118 +369,17 @@ export async function discoverMarketsFromVaults(
         }
       }
     } catch (err) {
+      // Vault may have empty queues or different ABI — skip silently
       console.warn(`Failed to read queues from vault ${vaultAddress}:`, err);
     }
   }
 
   onProgress?.({
-    fromBlock: 0,
-    toBlock: 0,
-    currentBlock: 0,
-    marketsFound: markets.length,
-    isComplete: true,
+    fromBlock: 0, toBlock: 0, currentBlock: 0,
+    marketsFound: markets.length, isComplete: true,
   });
 
   return markets;
-}
-
-// ============================================================
-// Activity-Based Discovery — catches markets with pruned CreateMarket events
-// ============================================================
-
-/**
- * Scan a single event type across a block range for unique market IDs.
- * Uses a single large getLogs call; on failure falls back to 2 halves.
- */
-async function collectMarketIdsFromEvent(
-  client: ReturnType<typeof getEventClient>,
-  morphoBlue: Address,
-  event: typeof supplyEvent | typeof borrowEvent,
-  fromBlock: number,
-  toBlock: number,
-): Promise<Set<string>> {
-  const ids = new Set<string>();
-  try {
-    const logs = await client.getLogs({
-      address: morphoBlue,
-      event,
-      fromBlock: BigInt(fromBlock),
-      toBlock: BigInt(toBlock),
-    });
-    for (const log of logs) {
-      if (log.args.id) ids.add(log.args.id);
-    }
-  } catch {
-    // Split in half if range is large enough
-    const range = toBlock - fromBlock;
-    if (range > 50_000) {
-      const mid = fromBlock + Math.floor(range / 2);
-      const [left, right] = await Promise.all([
-        collectMarketIdsFromEvent(client, morphoBlue, event, fromBlock, mid),
-        collectMarketIdsFromEvent(client, morphoBlue, event, mid + 1, toBlock),
-      ]);
-      for (const id of left) ids.add(id);
-      for (const id of right) ids.add(id);
-    }
-    // If range <= 50K and fails, it's pruned — skip
-  }
-  return ids;
-}
-
-/**
- * Discover markets by scanning Supply and Borrow events on recent blocks.
- * This catches markets whose CreateMarket event is in pruned block ranges.
- * Uses parallel scanning with adaptive splitting for speed.
- */
-async function discoverMarketsFromActivity(
-  chainId: number,
-  recentBlocks: number,
-  existingIds: Set<string>,
-): Promise<DiscoveredMarket[]> {
-  const chainConfig = getChainConfig(chainId);
-  if (!chainConfig) return [];
-
-  const client = getEventClient(chainId);
-  const currentBlock = Number(await client.getBlockNumber());
-  const fromBlock = Math.max(chainConfig.deploymentBlock, currentBlock - recentBlocks);
-
-  // Scan Supply + Borrow events in parallel for unique market IDs
-  const [supplyIds, borrowIds] = await Promise.all([
-    collectMarketIdsFromEvent(client, chainConfig.morphoBlue, supplyEvent, fromBlock, currentBlock),
-    collectMarketIdsFromEvent(client, chainConfig.morphoBlue, borrowEvent, fromBlock, currentBlock),
-  ]);
-
-  // Merge and filter out already-known
-  const allIds = new Set([...supplyIds, ...borrowIds]);
-  const newIds = [...allIds].filter((id) => !existingIds.has(id));
-  if (newIds.length === 0) return [];
-
-  // Fetch params for new market IDs in parallel
-  const readClient = getPublicClient(chainId);
-  const results = await Promise.allSettled(
-    newIds.map(async (marketId) => {
-      const params = await readClient.readContract({
-        address: chainConfig.morphoBlue,
-        abi: morphoBlueAbi,
-        functionName: 'idToMarketParams',
-        args: [marketId as `0x${string}`],
-      });
-      return {
-        id: marketId as `0x${string}`,
-        loanToken: params.loanToken as Address,
-        collateralToken: params.collateralToken as Address,
-        oracle: params.oracle as Address,
-        irm: params.irm as Address,
-        lltv: params.lltv as bigint,
-        discoveredAtBlock: 0,
-        chainId,
-      } satisfies DiscoveredMarket;
-    }),
-  );
-
-  return results
-    .filter((r): r is PromiseFulfilledResult<DiscoveredMarket> => r.status === 'fulfilled')
-    .map((r) => r.value);
 }
 
 // ============================================================
@@ -391,9 +400,20 @@ function toRecords(markets: DiscoveredMarket[]): MarketRecord[] {
 }
 
 /**
- * Run an incremental scan: event logs + vault-based discovery.
- * For SEI: reads market IDs from known vault queues (always works),
- * then tries recent event logs for any newly created markets.
+ * Check if a chain uses the block explorer API for market discovery.
+ * SEI's RPC has a ~2000 block getLogs limit, making event scanning useless
+ * across 32M+ blocks. We use the seitrace API instead.
+ */
+function usesExplorerApi(chainId: number): boolean {
+  return chainId === 1329;
+}
+
+/**
+ * Run an incremental scan to discover markets on a chain.
+ *
+ * Strategy per chain:
+ * - SEI (1329): seitrace block explorer API + vault queue reads
+ * - Ethereum/Base: RPC getLogs events + vault queue reads
  */
 export async function runIncrementalScan(
   chainId: number,
@@ -408,66 +428,57 @@ export async function runIncrementalScan(
   const knownVaultAddrs = getKnownVaultAddresses(chainId);
   if (knownVaultAddrs.length > 0) {
     const vaultMarkets = await discoverMarketsFromVaults(
-      chainId,
-      knownVaultAddrs,
-      onProgress,
+      chainId, knownVaultAddrs, onProgress,
     );
     allMarkets.push(...vaultMarkets);
   }
 
-  // Step 2: Try event scanning for additional markets via CreateMarket events
-  // On first load, scan last 2M blocks for speed (~9 days on SEI).
-  // On subsequent loads, resume from last scanned block.
-  // Full scan from deployment block only happens via explicit Rescan button.
-  try {
-    const eventClient = getEventClient(chainId);
-    const currentBlock = Number(await eventClient.getBlockNumber());
-    const lastScanned = await getLastScannedBlock(chainId);
-
-    const fromBlock = lastScanned != null
-      ? lastScanned + 1
-      : Math.max(chainConfig.deploymentBlock, currentBlock - 2_000_000);
-
-    if (fromBlock <= currentBlock) {
-      const eventMarkets = await scanCreateMarketEvents(
-        chainId,
-        fromBlock,
-        currentBlock,
-        onProgress,
-      );
-      // Add any markets not already found via vaults
+  if (usesExplorerApi(chainId)) {
+    // Step 2a: SEI — use block explorer API to find ALL createMarket txs
+    try {
       const existingIds = new Set(allMarkets.map((m) => m.id));
-      for (const m of eventMarkets) {
+      const explorerMarkets = await discoverMarketsViaSeitrace(chainId, onProgress);
+      for (const m of explorerMarkets) {
         if (!existingIds.has(m.id)) {
           allMarkets.push(m);
+          existingIds.add(m.id);
         }
       }
-      await saveScanProgress(chainId, currentBlock, allMarkets.length);
+    } catch (err) {
+      console.warn('Block explorer market discovery failed:', err);
     }
-  } catch (err) {
-    console.warn('Event scanning failed (may be expected on pruned RPCs):', err);
-  }
+  } else {
+    // Step 2b: Ethereum/Base — use RPC getLogs for CreateMarket events
+    try {
+      const eventClient = getEventClient(chainId);
+      const currentBlock = Number(await eventClient.getBlockNumber());
+      const lastScanned = await getLastScannedBlock(chainId);
 
-  // Step 3: Activity-based discovery (Supply/Borrow events on recent blocks)
-  // Catches markets whose CreateMarket event is in pruned block ranges.
-  // Scan last 500K blocks (~2.3 days on SEI) — fast, covers active markets.
-  try {
-    const existingIds = new Set(allMarkets.map((m) => m.id));
-    const activityMarkets = await discoverMarketsFromActivity(
-      chainId,
-      500_000,
-      existingIds,
-    );
-    allMarkets.push(...activityMarkets);
-  } catch (err) {
-    console.warn('Activity-based market discovery failed:', err);
+      const fromBlock = lastScanned != null
+        ? lastScanned + 1
+        : Math.max(chainConfig.deploymentBlock, currentBlock - 2_000_000);
+
+      if (fromBlock <= currentBlock) {
+        const eventMarkets = await scanCreateMarketEvents(
+          chainId, fromBlock, currentBlock, onProgress,
+        );
+        const existingIds = new Set(allMarkets.map((m) => m.id));
+        for (const m of eventMarkets) {
+          if (!existingIds.has(m.id)) {
+            allMarkets.push(m);
+          }
+        }
+        await saveScanProgress(chainId, currentBlock, allMarkets.length);
+      }
+    } catch (err) {
+      console.warn('Event scanning failed:', err);
+    }
   }
 
   // Persist
   const records = toRecords(allMarkets);
   if (records.length > 0) {
     await saveDiscoveredMarkets(records);
-    // Enrich token symbols in the background
     await enrichTokensForMarkets(chainId, records);
   }
 
@@ -480,14 +491,12 @@ export async function runIncrementalScan(
 }
 
 /**
- * Force a full rescan from deployment block.
- * Resets the last-scanned-block so the incremental scan starts over.
+ * Force a full rescan from scratch.
  */
 export async function runFullScan(
   chainId: number,
   onProgress?: ScanProgressCallback,
 ): Promise<DiscoveredMarket[]> {
-  // Delete scan state so incremental scan starts from deployment block
   await resetScanProgress(chainId);
   return runIncrementalScan(chainId, onProgress);
 }
@@ -501,14 +510,12 @@ async function enrichTokensForMarkets(
 ): Promise<void> {
   const client = getPublicClient(chainId);
 
-  // Collect unique token addresses
   const tokenAddrs = new Set<string>();
   for (const m of markets) {
     tokenAddrs.add(m.loanToken.toLowerCase());
     tokenAddrs.add(m.collateralToken.toLowerCase());
   }
 
-  // Fetch and cache each token
   const tokenMap = new Map<string, TokenRecord>();
   for (const addr of tokenAddrs) {
     const cached = await getCachedToken(chainId, addr as Address);
@@ -540,7 +547,6 @@ async function enrichTokensForMarkets(
     }
   }
 
-  // Enrich each market record
   for (const m of markets) {
     const loan = tokenMap.get(m.loanToken.toLowerCase());
     const collateral = tokenMap.get(m.collateralToken.toLowerCase());
@@ -562,6 +568,5 @@ function getKnownVaultAddresses(chainId: number): Address[] {
   if (chainId === 1329) {
     return Object.values(SEI_KNOWN_VAULTS).map((v) => v.address as Address);
   }
-  // For other chains, the user's tracked vaults could also be used
   return [];
 }

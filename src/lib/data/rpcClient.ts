@@ -38,12 +38,12 @@ const VIEM_CHAINS: Record<number, Chain> = {
  */
 const clientCache = new Map<number, PublicClient>();
 
-// Public RPCs used client-side. Paid RPC keys (Infura, Alchemy) must NOT
-// be exposed here — they belong in server-side API routes only.
+// Environment-configured RPCs (e.g. Infura) take priority over hardcoded public RPCs.
+// Set VITE_ETH_RPC_URL, VITE_BASE_RPC_URL, VITE_SEI_RPC_URL in .env.local.
 const ENV_RPC_URLS: Record<number, string | undefined> = {
-  1: undefined,
-  8453: undefined,
-  1329: undefined,
+  1: import.meta.env.VITE_ETH_RPC_URL || undefined,
+  8453: import.meta.env.VITE_BASE_RPC_URL || undefined,
+  1329: import.meta.env.VITE_SEI_RPC_URL || undefined,
 };
 
 export function getPublicClient(chainId: number): PublicClient {

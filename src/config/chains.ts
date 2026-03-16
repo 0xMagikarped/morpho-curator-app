@@ -49,6 +49,11 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
         address: '0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392' as Address,
         decimals: 6,
       },
+      {
+        symbol: 'PYUSD',
+        address: '0x142cdc44890978B506e745bB3Bd11607B7f7faEf' as Address,
+        decimals: 6,
+      },
     ],
     oracleProviders: ['chainlink-data-streams', 'pyth', 'redstone', 'api3'],
     deploymentBlock: 166036723, // Morpho Blue deployment block on SEI
@@ -190,11 +195,19 @@ export const MORPHO_API_CHAINS = Object.values(CHAIN_CONFIGS)
 /** Morpho GraphQL API endpoint */
 export const MORPHO_API_URL = 'https://api.morpho.org/graphql';
 
-/** Known vaults on SEI (discovered via on-chain verification) */
+/** Known vaults on SEI (discovered via on-chain verification + seitrace factory scan) */
 export const SEI_KNOWN_VAULTS: Record<string, { address: `0x${string}`; name: string }> = {
   featherUSDC: {
     address: '0x015F10a56e97e02437D294815D8e079e1903E41C',
     name: 'Feather USDC',
+  },
+  pyusd0YieldNetwork: {
+    address: '0x433Ee8A4Cda6e6f1D8009D5748Ab02c8E4430beB',
+    name: 'PYUSD0 Yield Network',
+  },
+  seiLeveredRWA: {
+    address: '0x959C4C55876C193132eaEC2675a13b7fE3e85648',
+    name: 'Sei Levered RWA Vault',
   },
 };
 

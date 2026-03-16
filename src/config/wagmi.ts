@@ -25,25 +25,33 @@ export const sei: Chain = {
   },
 };
 
+// Build transport lists — env-configured RPCs (e.g. Infura) get priority
+const seiTransports = [
+  ...(import.meta.env.VITE_SEI_RPC_URL ? [http(import.meta.env.VITE_SEI_RPC_URL)] : []),
+  http('https://sei-evm-rpc.publicnode.com'),
+  http('https://evm-rpc.sei-apis.com'),
+];
+const ethTransports = [
+  ...(import.meta.env.VITE_ETH_RPC_URL ? [http(import.meta.env.VITE_ETH_RPC_URL)] : []),
+  http('https://ethereum-rpc.publicnode.com'),
+  http('https://eth.public-rpc.com'),
+  http('https://rpc.ankr.com/eth'),
+];
+const baseTransports = [
+  ...(import.meta.env.VITE_BASE_RPC_URL ? [http(import.meta.env.VITE_BASE_RPC_URL)] : []),
+  http('https://mainnet.base.org'),
+  http('https://base-rpc.publicnode.com'),
+  http('https://rpc.ankr.com/base'),
+];
+
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
   chains: [sei, mainnet, base],
   transports: {
-    [sei.id]: fallback([
-      http('https://sei-evm-rpc.publicnode.com'),
-      http('https://evm-rpc.sei-apis.com'),
-    ]),
-    [mainnet.id]: fallback([
-      http('https://ethereum-rpc.publicnode.com'),
-      http('https://eth.public-rpc.com'),
-      http('https://rpc.ankr.com/eth'),
-    ]),
-    [base.id]: fallback([
-      http('https://mainnet.base.org'),
-      http('https://base-rpc.publicnode.com'),
-      http('https://rpc.ankr.com/base'),
-    ]),
+    [sei.id]: fallback(seiTransports),
+    [mainnet.id]: fallback(ethTransports),
+    [base.id]: fallback(baseTransports),
   },
 });
 
