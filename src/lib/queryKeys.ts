@@ -26,6 +26,8 @@ export const vaultKeys = {
     [...vaultKeys.detail(chainId, address), 'role', lower(user)] as const,
   pending: (chainId: number, address: string) =>
     [...vaultKeys.detail(chainId, address), 'pending'] as const,
+  discoveredStatuses: (chainId: number, address: string) =>
+    [...vaultKeys.detail(chainId, address), 'discovered-statuses'] as const,
   adapters: (chainId: number, address: string) =>
     [...vaultKeys.detail(chainId, address), 'adapters'] as const,
   adapterPreview: (chainId: number, vaultAddress: string, adapterAddress: string) =>

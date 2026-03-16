@@ -1,17 +1,19 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Address } from 'viem';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
 import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
-import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
-import type { MarketInfo, PendingAction } from '../../types';
+import { vaultKeys } from '../../lib/queryKeys';
+import type { MarketInfo, PendingAction, PendingCap } from '../../types';
 import type { MarketRecord } from '../../lib/indexer/indexedDB';
 
 interface CapsTabProps {
@@ -32,9 +34,11 @@ interface MarketLifecycleItem {
   supplyAssets: bigint;
   capUsedPct: number;
   pendingAction?: PendingAction;
-  /** Set when status is 'available' — needed for submitCap with new market params */
+  /** Pending cap from on-chain read (for discovered markets) */
+  discoveredPendingCap?: PendingCap;
+  /** Set when from discovered markets — needed for submitCap/acceptCap with market params */
   discoveredMarket?: MarketRecord;
-  /** Set when status is not 'available' — existing vault market */
+  /** Set when from vault market list — existing vault market */
   vaultMarket?: MarketInfo;
 }
 
@@ -48,6 +52,7 @@ const STATUS_CONFIG: Record<MarketStatus, { label: string; variant: 'default' | 
 };
 
 export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
+  const queryClient = useQueryClient();
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const role = useVaultRole(chainId, vaultAddress);
@@ -61,6 +66,19 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const { writeContract, data: txHash, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
+  // Compute discovered market IDs that are NOT already in vault queues
+  const vaultAssetLower = vault?.asset?.toLowerCase();
+  const existingMarketIds = useMemo(() => new Set(marketIds ?? []), [marketIds]);
+  const discoveredMarketIds = useMemo(() => {
+    if (!allChainMarkets || !vaultAssetLower) return [];
+    return allChainMarkets
+      .filter((m) => m.loanToken.toLowerCase() === vaultAssetLower && !existingMarketIds.has(m.marketId))
+      .map((m) => m.marketId);
+  }, [allChainMarkets, vaultAssetLower, existingMarketIds]);
+
+  // Read on-chain config + pendingCap for discovered markets
+  const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
+
   const [expandedMarket, setExpandedMarket] = useState<string | null>(null);
   const [newCapValue, setNewCapValue] = useState('');
   const [nowSeconds, setNowSeconds] = useState(() => BigInt(Math.floor(Date.now() / 1000)));
@@ -72,6 +90,15 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Invalidate vault + discovered statuses when tx confirms
+  useEffect(() => {
+    if (isSuccess && chainId && vaultAddress) {
+      queryClient.invalidateQueries({ queryKey: vaultKeys.fullData(chainId, vaultAddress) });
+      queryClient.invalidateQueries({ queryKey: vaultKeys.pending(chainId, vaultAddress) });
+      queryClient.invalidateQueries({ queryKey: vaultKeys.discoveredStatuses(chainId, vaultAddress) });
+    }
+  }, [isSuccess, chainId, vaultAddress, queryClient]);
 
   const pendingCaps = useMemo(
     () => pendingActions?.filter((a) => a.type === 'cap') ?? [],
@@ -85,14 +112,21 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     return map;
   }, [pendingCaps]);
 
-  const vaultAsset = vault?.asset?.toLowerCase();
   const decimals = vault?.assetInfo.decimals ?? 18;
+
+  // Index discovered statuses by marketId for fast lookup
+  const discoveredStatusMap = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof discoveredStatuses>[number]>();
+    if (discoveredStatuses) {
+      for (const ds of discoveredStatuses) map.set(ds.marketId, ds);
+    }
+    return map;
+  }, [discoveredStatuses]);
 
   // Build unified market lifecycle list
   const lifecycleItems: MarketLifecycleItem[] = useMemo(() => {
     const items: MarketLifecycleItem[] = [];
     const supplyQueueSet = new Set(allocation?.supplyQueue ?? []);
-    const existingIds = new Set<string>();
 
     // 1. Vault markets (enabled or in supply queue)
     if (markets && allocation) {
@@ -130,37 +164,54 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
           pendingAction: pendingCapsByMarket.get(market.id),
           vaultMarket: market,
         });
-
-        existingIds.add(market.id);
       }
     }
 
-    // 2. Discovered markets not yet in vault (available)
-    if (allChainMarkets && vaultAsset) {
+    // 2. Discovered markets not yet in vault queues
+    if (allChainMarkets && vaultAssetLower) {
       for (const m of allChainMarkets) {
-        if (m.loanToken.toLowerCase() !== vaultAsset) continue;
+        if (m.loanToken.toLowerCase() !== vaultAssetLower) continue;
         if (m.collateralToken.toLowerCase() === ZERO_ADDRESS && (m.lltv === '0' || m.lltv === '0n')) continue;
-        if (existingIds.has(m.marketId)) continue;
+        if (existingMarketIds.has(m.marketId)) continue;
 
         const lltv = Number(m.lltv) / 1e18;
 
+        // Check on-chain state for this discovered market
+        const onChain = discoveredStatusMap.get(m.marketId);
+        let status: MarketStatus = 'available';
+        let supplyCap = 0n;
+        let discoveredPendingCap: PendingCap | undefined;
+
+        if (onChain) {
+          if (onChain.pendingCap) {
+            // Has a pending cap → PENDING
+            status = 'pending';
+            discoveredPendingCap = onChain.pendingCap;
+          } else if (onChain.config.enabled || onChain.config.cap > 0n) {
+            // Cap accepted but not in supply queue yet → ENABLED
+            status = 'enabled';
+            supplyCap = onChain.config.cap;
+          }
+        }
+
         items.push({
           marketId: m.marketId,
-          status: 'available',
+          status,
           label: `${m.collateralTokenSymbol || m.collateralToken.slice(0, 10)} / ${m.loanTokenSymbol || m.loanToken.slice(0, 10)}`,
           collateralSymbol: m.collateralTokenSymbol || m.collateralToken.slice(0, 10),
           loanSymbol: m.loanTokenSymbol || m.loanToken.slice(0, 10),
           lltv,
-          supplyCap: 0n,
+          supplyCap,
           supplyAssets: 0n,
           capUsedPct: 0,
           discoveredMarket: m,
+          discoveredPendingCap,
         });
       }
     }
 
     return items;
-  }, [markets, allocation, allChainMarkets, vaultAsset, pendingCapsByMarket]);
+  }, [markets, allocation, allChainMarkets, vaultAssetLower, existingMarketIds, pendingCapsByMarket, discoveredStatusMap]);
 
   const filteredItems = statusFilter === 'all'
     ? lifecycleItems
@@ -207,13 +258,31 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   };
 
   const handleAcceptCap = (item: MarketLifecycleItem) => {
-    if (!item.vaultMarket) return;
-    writeContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'acceptCap',
-      args: [item.vaultMarket.params],
-    });
+    // Accept works with market params — available from either vaultMarket or discoveredMarket
+    if (item.vaultMarket) {
+      writeContract({
+        address: vaultAddress,
+        abi: metaMorphoV1Abi,
+        functionName: 'acceptCap',
+        args: [item.vaultMarket.params],
+      });
+    } else if (item.discoveredMarket) {
+      const d = item.discoveredMarket;
+      writeContract({
+        address: vaultAddress,
+        abi: metaMorphoV1Abi,
+        functionName: 'acceptCap',
+        args: [
+          {
+            loanToken: d.loanToken as Address,
+            collateralToken: d.collateralToken as Address,
+            oracle: d.oracle as Address,
+            irm: d.irm as Address,
+            lltv: BigInt(d.lltv),
+          },
+        ],
+      });
+    }
   };
 
   const handleRevokeCap = (marketId: string) => {
@@ -271,64 +340,75 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         )}
       </div>
 
-      {/* Pending Caps Alert */}
-      {pendingCaps.length > 0 && (
-        <Card className="border-warning/20">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={14} className="text-warning" />
-              <CardTitle>Pending Cap Changes</CardTitle>
+      {/* Pending Caps Alert — includes both vault queue pending caps and discovered market pending caps */}
+      {(() => {
+        // Combine pending caps from vault queues + discovered markets
+        const allPendingItems = lifecycleItems.filter((li) => li.status === 'pending');
+        if (allPendingItems.length === 0) return null;
+        return (
+          <Card className="border-warning/20">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={14} className="text-warning" />
+                <CardTitle>Pending Cap Changes</CardTitle>
+              </div>
+              <Badge variant="warning">{allPendingItems.length}</Badge>
+            </CardHeader>
+            <div className="space-y-2">
+              {allPendingItems.map((item) => {
+                // Get pending cap info from either source
+                const pc = item.pendingAction ?? (item.discoveredPendingCap ? {
+                  type: 'cap' as const,
+                  description: '',
+                  validAt: item.discoveredPendingCap.validAt,
+                  marketId: item.discoveredPendingCap.marketId,
+                  value: item.discoveredPendingCap.value,
+                } : null);
+                if (!pc) return null;
+                const isReady = pc.validAt <= nowSeconds;
+                return (
+                  <div key={item.marketId} className="flex items-center justify-between py-2 px-3 bg-bg-hover/50">
+                    <div>
+                      <p className="text-sm text-text-primary">{item.label}</p>
+                      <p className="text-xs text-text-tertiary">
+                        New cap: <span className="font-mono">{pc.value ? formatTokenAmount(pc.value as bigint, decimals) : '?'}</span>
+                        {' · '}
+                        {isReady
+                          ? <span className="text-success">Ready to accept</span>
+                          : <span>Available in <span className="font-mono">{formatCountdown(pc.validAt)}</span></span>
+                        }
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {isReady && canSubmit && (
+                        <Button
+                          size="sm"
+                          onClick={() => handleAcceptCap(item)}
+                          disabled={isMismatch || isPending || isConfirming}
+                          loading={isPending || isConfirming}
+                        >
+                          Accept
+                        </Button>
+                      )}
+                      {role.isEmergencyRole && pc.marketId && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleRevokeCap(pc.marketId!)}
+                          disabled={isMismatch || isPending || isConfirming}
+                          loading={isPending || isConfirming}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <Badge variant="warning">{pendingCaps.length}</Badge>
-          </CardHeader>
-          <div className="space-y-2">
-            {pendingCaps.map((pc, i) => {
-              const isReady = pc.validAt <= nowSeconds;
-              const item = lifecycleItems.find((li) => li.marketId === pc.marketId);
-              return (
-                <div key={i} className="flex items-center justify-between py-2 px-3 bg-bg-hover/50">
-                  <div>
-                    <p className="text-sm text-text-primary">
-                      {item?.label ?? pc.marketId?.slice(0, 10) ?? 'Unknown'}
-                    </p>
-                    <p className="text-xs text-text-tertiary">
-                      New cap: <span className="font-mono">{pc.value ? formatTokenAmount(pc.value as bigint, decimals) : '?'}</span>
-                      {' · '}
-                      {isReady
-                        ? <span className="text-success">Ready to accept</span>
-                        : <span>Available in <span className="font-mono">{formatCountdown(pc.validAt)}</span></span>
-                      }
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    {isReady && item && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleAcceptCap(item)}
-                        disabled={isMismatch || isPending || isConfirming}
-                        loading={isPending || isConfirming}
-                      >
-                        Accept
-                      </Button>
-                    )}
-                    {role.isEmergencyRole && pc.marketId && (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleRevokeCap(pc.marketId!)}
-                        disabled={isMismatch || isPending || isConfirming}
-                        loading={isPending || isConfirming}
-                      >
-                        Revoke
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
+          </Card>
+        );
+      })()}
 
       {/* Market Lifecycle Table */}
       <Card>
@@ -388,6 +468,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                       isExpanded={isExpanded}
                       canSubmit={canSubmit}
                       decimals={decimals}
+                      timelockSeconds={timelockSeconds}
                       isMismatch={isMismatch}
                       isPending={isPending}
                       isConfirming={isConfirming}
@@ -426,6 +507,7 @@ function MarketRow({
   isExpanded,
   canSubmit,
   decimals,
+  timelockSeconds,
   isMismatch,
   isPending,
   isConfirming,
@@ -439,6 +521,7 @@ function MarketRow({
   isExpanded: boolean;
   canSubmit: boolean;
   decimals: number;
+  timelockSeconds: number;
   isMismatch: boolean;
   isPending: boolean;
   isConfirming: boolean;
@@ -467,6 +550,11 @@ function MarketRow({
         </td>
         <td className="text-right py-2.5 px-2 font-mono text-text-secondary">
           {item.supplyCap > 0n ? formatTokenAmount(item.supplyCap, decimals) : '—'}
+          {item.discoveredPendingCap && (
+            <span className="block text-[10px] text-warning">
+              ({formatTokenAmount(item.discoveredPendingCap.value, decimals)} pending)
+            </span>
+          )}
         </td>
         <td className="text-right py-2.5 px-2 font-mono text-text-primary">
           {item.supplyAssets > 0n ? formatTokenAmount(item.supplyAssets, decimals) : '—'}
@@ -542,6 +630,12 @@ function MarketRow({
               {item.status === 'available' && (
                 <p className="text-xs text-info bg-info/10 p-2">
                   This market is not yet in the vault. Submitting a cap will register it.
+                  {timelockSeconds > 0 && (
+                    <span className="block mt-1 text-warning">
+                      This vault has a <span className="font-mono">{formatDuration(timelockSeconds)}</span> timelock.
+                      After submitting, you must wait before accepting the cap.
+                    </span>
+                  )}
                 </p>
               )}
             </div>

@@ -17,8 +17,9 @@ import {
 } from '../data/rpcClient';
 import type { V2AdapterData } from '../data/rpcClient';
 import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../data/morphoApi';
-import type { VaultRole, AllocationState, MarketInfo, PendingAction } from '../../types';
+import type { VaultRole, AllocationState, MarketInfo, PendingAction, MarketCap, PendingCap } from '../../types';
 import type { VaultInfoV1 } from '../../types';
+import type { MarketRecord } from '../indexer/indexedDB';
 import { calcUtilization } from '../utils/format';
 import { vaultKeys } from '../queryKeys';
 
@@ -343,6 +344,49 @@ export function useVaultPendingActions(
       return actions.sort((a, b) => Number(a.validAt - b.validAt));
     },
     enabled: !!chainId && !!vaultAddress,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+// ============================================================
+// useDiscoveredMarketStatuses — Read config + pendingCap for
+// discovered markets that are NOT already in the vault queues.
+// This detects PENDING/ENABLED states for markets added via submitCap.
+// ============================================================
+
+export interface DiscoveredMarketStatus {
+  marketId: `0x${string}`;
+  config: MarketCap;
+  pendingCap: PendingCap | null;
+}
+
+export function useDiscoveredMarketStatuses(
+  chainId: number | undefined,
+  vaultAddress: Address | undefined,
+  discoveredMarketIds: `0x${string}`[] | undefined,
+) {
+  return useQuery({
+    queryKey: [...vaultKeys.discoveredStatuses(chainId!, vaultAddress!), discoveredMarketIds],
+    queryFn: async (): Promise<DiscoveredMarketStatus[]> => {
+      if (!chainId || !vaultAddress || !discoveredMarketIds?.length) return [];
+
+      const results = await Promise.all(
+        discoveredMarketIds.map(async (marketId) => {
+          const [config, pendingCap] = await Promise.all([
+            fetchMarketCap(chainId, vaultAddress, marketId),
+            fetchPendingCap(chainId, vaultAddress, marketId),
+          ]);
+          return { marketId, config, pendingCap };
+        }),
+      );
+
+      // Only return markets that have on-chain state (enabled or pending)
+      return results.filter(
+        (r) => r.config.enabled || r.config.cap > 0n || r.pendingCap !== null,
+      );
+    },
+    enabled: !!chainId && !!vaultAddress && !!discoveredMarketIds?.length,
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
