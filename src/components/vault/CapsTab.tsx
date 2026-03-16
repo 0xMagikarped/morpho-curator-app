@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Address } from 'viem';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -8,13 +9,43 @@ import { ProgressBar } from '../ui/ProgressBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { metaMorphoV1Abi } from '../../lib/contracts/abis';
-import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent } from '../../lib/utils/format';
+import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
+import type { MarketInfo, PendingAction } from '../../types';
+import type { MarketRecord } from '../../lib/indexer/indexedDB';
 
 interface CapsTabProps {
   chainId: number;
   vaultAddress: Address;
 }
+
+type MarketStatus = 'available' | 'pending' | 'enabled' | 'in_supply_queue';
+
+interface MarketLifecycleItem {
+  marketId: string;
+  status: MarketStatus;
+  label: string;
+  collateralSymbol: string;
+  loanSymbol: string;
+  lltv: number;
+  supplyCap: bigint;
+  supplyAssets: bigint;
+  capUsedPct: number;
+  pendingAction?: PendingAction;
+  /** Set when status is 'available' — needed for submitCap with new market params */
+  discoveredMarket?: MarketRecord;
+  /** Set when status is not 'available' — existing vault market */
+  vaultMarket?: MarketInfo;
+}
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+const STATUS_CONFIG: Record<MarketStatus, { label: string; variant: 'default' | 'warning' | 'info' | 'success'; icon: typeof Circle }> = {
+  available: { label: 'Available', variant: 'default', icon: Circle },
+  pending: { label: 'Pending', variant: 'warning', icon: Clock },
+  enabled: { label: 'Enabled', variant: 'info', icon: CheckCircle },
+  in_supply_queue: { label: 'In Queue', variant: 'success', icon: ArrowRight },
+};
 
 export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
@@ -22,18 +53,18 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const role = useVaultRole(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
-  // All discovered markets on this chain — for adding new markets not yet in the vault
   const { data: allChainMarkets } = useMarketScanner(chainId);
   const marketIds = allocation
     ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
     : undefined;
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
   const { writeContract, data: txHash, isPending } = useWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
-  const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [expandedMarket, setExpandedMarket] = useState<string | null>(null);
   const [newCapValue, setNewCapValue] = useState('');
   const [nowSeconds, setNowSeconds] = useState(() => BigInt(Math.floor(Date.now() / 1000)));
+  const [statusFilter, setStatusFilter] = useState<MarketStatus | 'all'>('all');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -42,84 +73,160 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     return () => clearInterval(interval);
   }, []);
 
-  const pendingCaps = pendingActions?.filter((a) => a.type === 'cap') ?? [];
+  const pendingCaps = useMemo(
+    () => pendingActions?.filter((a) => a.type === 'cap') ?? [],
+    [pendingActions],
+  );
+  const pendingCapsByMarket = useMemo(() => {
+    const map = new Map<string, PendingAction>();
+    for (const pc of pendingCaps) {
+      if (pc.marketId) map.set(pc.marketId, pc);
+    }
+    return map;
+  }, [pendingCaps]);
 
-  // Filter discovered markets to only those with the same loan token as the vault asset
-  // Also exclude IDLE markets (collateral = 0x0, lltv = 0)
-  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
   const vaultAsset = vault?.asset?.toLowerCase();
-  const availableNewMarkets = (allChainMarkets ?? []).filter((m) => {
-    if (!vaultAsset) return false;
-    // Only show markets with matching loan token
-    if (m.loanToken.toLowerCase() !== vaultAsset) return false;
-    // Exclude IDLE markets
-    if (m.collateralToken.toLowerCase() === ZERO_ADDRESS && (m.lltv === '0' || m.lltv === '0n')) return false;
-    // Exclude markets already in the vault
-    const existingIds = new Set(markets?.map((vm) => vm.id) ?? []);
-    return !existingIds.has(m.marketId);
-  });
+  const decimals = vault?.assetInfo.decimals ?? 18;
 
-  const handleSubmitCap = () => {
-    if (!selectedMarket || !newCapValue) return;
+  // Build unified market lifecycle list
+  const lifecycleItems: MarketLifecycleItem[] = useMemo(() => {
+    const items: MarketLifecycleItem[] = [];
+    const supplyQueueSet = new Set(allocation?.supplyQueue ?? []);
+    const existingIds = new Set<string>();
 
-    const decimals = vault?.assetInfo.decimals ?? 18;
+    // 1. Vault markets (enabled or in supply queue)
+    if (markets && allocation) {
+      for (const market of markets) {
+        const alloc = allocation.allocations.find((a) => a.marketId === market.id);
+        const inSupplyQueue = supplyQueueSet.has(market.id);
+        const hasPending = pendingCapsByMarket.has(market.id);
+        const supplyCap = alloc?.supplyCap ?? 0n;
+        const supplyAssets = alloc?.supplyAssets ?? 0n;
+        const capUsedPct = supplyCap > 0n
+          ? Number((supplyAssets * 10000n) / supplyCap) / 100
+          : 0;
+
+        let status: MarketStatus;
+        if (hasPending) {
+          status = 'pending';
+        } else if (inSupplyQueue) {
+          status = 'in_supply_queue';
+        } else {
+          status = 'enabled';
+        }
+
+        const lltv = Number(market.params.lltv) / 1e18;
+
+        items.push({
+          marketId: market.id,
+          status,
+          label: `${market.collateralToken.symbol} / ${market.loanToken.symbol}`,
+          collateralSymbol: market.collateralToken.symbol,
+          loanSymbol: market.loanToken.symbol,
+          lltv,
+          supplyCap,
+          supplyAssets,
+          capUsedPct,
+          pendingAction: pendingCapsByMarket.get(market.id),
+          vaultMarket: market,
+        });
+
+        existingIds.add(market.id);
+      }
+    }
+
+    // 2. Discovered markets not yet in vault (available)
+    if (allChainMarkets && vaultAsset) {
+      for (const m of allChainMarkets) {
+        if (m.loanToken.toLowerCase() !== vaultAsset) continue;
+        if (m.collateralToken.toLowerCase() === ZERO_ADDRESS && (m.lltv === '0' || m.lltv === '0n')) continue;
+        if (existingIds.has(m.marketId)) continue;
+
+        const lltv = Number(m.lltv) / 1e18;
+
+        items.push({
+          marketId: m.marketId,
+          status: 'available',
+          label: `${m.collateralTokenSymbol || m.collateralToken.slice(0, 10)} / ${m.loanTokenSymbol || m.loanToken.slice(0, 10)}`,
+          collateralSymbol: m.collateralTokenSymbol || m.collateralToken.slice(0, 10),
+          loanSymbol: m.loanTokenSymbol || m.loanToken.slice(0, 10),
+          lltv,
+          supplyCap: 0n,
+          supplyAssets: 0n,
+          capUsedPct: 0,
+          discoveredMarket: m,
+        });
+      }
+    }
+
+    return items;
+  }, [markets, allocation, allChainMarkets, vaultAsset, pendingCapsByMarket]);
+
+  const filteredItems = statusFilter === 'all'
+    ? lifecycleItems
+    : lifecycleItems.filter((item) => item.status === statusFilter);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<MarketStatus, number> = { available: 0, pending: 0, enabled: 0, in_supply_queue: 0 };
+    for (const item of lifecycleItems) counts[item.status]++;
+    return counts;
+  }, [lifecycleItems]);
+
+  // ---- Handlers ----
+
+  const handleSubmitCap = (item: MarketLifecycleItem) => {
+    if (!newCapValue) return;
     const capWei = parseTokenAmount(newCapValue, decimals);
 
-    // Check if it's an existing vault market or a new discovered market
-    const existingMarket = markets?.find((m) => m.id === selectedMarket);
-    if (existingMarket) {
+    if (item.vaultMarket) {
       writeContract({
         address: vaultAddress,
         abi: metaMorphoV1Abi,
         functionName: 'submitCap',
-        args: [existingMarket.params, capWei],
+        args: [item.vaultMarket.params, capWei],
       });
-      return;
-    }
-
-    // It's a new market from chain discovery
-    const discovered = availableNewMarkets.find((m) => m.marketId === selectedMarket);
-    if (discovered) {
+    } else if (item.discoveredMarket) {
+      const d = item.discoveredMarket;
       writeContract({
         address: vaultAddress,
         abi: metaMorphoV1Abi,
         functionName: 'submitCap',
         args: [
           {
-            loanToken: discovered.loanToken,
-            collateralToken: discovered.collateralToken,
-            oracle: discovered.oracle as Address,
-            irm: discovered.irm as Address,
-            lltv: BigInt(discovered.lltv),
+            loanToken: d.loanToken as Address,
+            collateralToken: d.collateralToken as Address,
+            oracle: d.oracle as Address,
+            irm: d.irm as Address,
+            lltv: BigInt(d.lltv),
           },
           capWei,
         ],
       });
     }
+    setNewCapValue('');
   };
 
-  const handleAcceptCap = (marketId: `0x${string}`) => {
-    const market = markets?.find((m) => m.id === marketId);
-    if (!market) return;
+  const handleAcceptCap = (item: MarketLifecycleItem) => {
+    if (!item.vaultMarket) return;
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: 'acceptCap',
-      args: [market.params],
+      args: [item.vaultMarket.params],
     });
   };
 
-  const handleRevokeCap = (marketId: `0x${string}`) => {
+  const handleRevokeCap = (marketId: string) => {
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: 'revokePendingCap',
-      args: [marketId],
+      args: [marketId as `0x${string}`],
     });
   };
 
   if (allocLoading || marketsLoading) {
-    return <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 bg-bg-hover animate-shimmer" />)}</div>;
+    return <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-16 bg-bg-hover animate-shimmer" />)}</div>;
   }
 
   if (allocError || marketsError) {
@@ -132,6 +239,10 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     );
   }
 
+  const canSubmit = role.isCurator || role.isOwner;
+  const timelockSeconds = vault ? Number(vault.timelock) : 0;
+  const isZeroTimelock = timelockSeconds === 0;
+
   return (
     <div className="space-y-4">
       {/* Chain Mismatch Warning */}
@@ -142,36 +253,72 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         </div>
       )}
 
-      {/* Pending Caps */}
+      {/* Success Banner */}
+      {isSuccess && (
+        <div className="bg-success/10 border border-success/20 px-3 py-2 text-xs text-success">
+          Transaction confirmed. Data will refresh shortly.
+        </div>
+      )}
+
+      {/* Timelock Info */}
+      <div className="flex items-center gap-2 text-xs text-text-tertiary">
+        <Clock size={12} />
+        <span>
+          Vault timelock: <span className="font-mono text-text-secondary">{isZeroTimelock ? 'None (instant)' : formatDuration(timelockSeconds)}</span>
+        </span>
+        {isZeroTimelock && (
+          <Badge variant="success">Zero timelock</Badge>
+        )}
+      </div>
+
+      {/* Pending Caps Alert */}
       {pendingCaps.length > 0 && (
         <Card className="border-warning/20">
           <CardHeader>
-            <CardTitle>Pending Cap Changes</CardTitle>
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="text-warning" />
+              <CardTitle>Pending Cap Changes</CardTitle>
+            </div>
             <Badge variant="warning">{pendingCaps.length}</Badge>
           </CardHeader>
           <div className="space-y-2">
             {pendingCaps.map((pc, i) => {
               const isReady = pc.validAt <= nowSeconds;
-
+              const item = lifecycleItems.find((li) => li.marketId === pc.marketId);
               return (
-                <div
-                  key={i}
-                  className="flex items-center justify-between py-2 px-3 bg-bg-hover/50"
-                >
+                <div key={i} className="flex items-center justify-between py-2 px-3 bg-bg-hover/50">
                   <div>
-                    <p className="text-sm text-text-primary">{pc.description}</p>
+                    <p className="text-sm text-text-primary">
+                      {item?.label ?? pc.marketId?.slice(0, 10) ?? 'Unknown'}
+                    </p>
                     <p className="text-xs text-text-tertiary">
-                      {isReady ? 'Ready to accept' : `Available in ${formatCountdown(pc.validAt)}`}
+                      New cap: <span className="font-mono">{pc.value ? formatTokenAmount(pc.value as bigint, decimals) : '?'}</span>
+                      {' · '}
+                      {isReady
+                        ? <span className="text-success">Ready to accept</span>
+                        : <span>Available in <span className="font-mono">{formatCountdown(pc.validAt)}</span></span>
+                      }
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    {isReady && pc.marketId && (
-                      <Button size="sm" onClick={() => handleAcceptCap(pc.marketId!)}>
+                    {isReady && item && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleAcceptCap(item)}
+                        disabled={isMismatch || isPending || isConfirming}
+                        loading={isPending || isConfirming}
+                      >
                         Accept
                       </Button>
                     )}
                     {role.isEmergencyRole && pc.marketId && (
-                      <Button size="sm" variant="danger" onClick={() => handleRevokeCap(pc.marketId!)}>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => handleRevokeCap(pc.marketId!)}
+                        disabled={isMismatch || isPending || isConfirming}
+                        loading={isPending || isConfirming}
+                      >
                         Revoke
                       </Button>
                     )}
@@ -183,106 +330,224 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         </Card>
       )}
 
-      {/* Current Caps */}
+      {/* Market Lifecycle Table */}
       <Card>
         <CardHeader>
           <CardTitle>Market Supply Caps</CardTitle>
-        </CardHeader>
-        {allocation?.allocations && markets ? (
-          <div className="space-y-2">
-            {allocation.allocations.map((alloc) => {
-              const market = markets.find((m) => m.id === alloc.marketId);
-              const capUsed = alloc.supplyCap > 0n
-                ? Number((alloc.supplyAssets * 10000n) / alloc.supplyCap) / 100
-                : 0;
-
+          <div className="flex gap-1">
+            {(['all', 'in_supply_queue', 'enabled', 'pending', 'available'] as const).map((filter) => {
+              const count = filter === 'all' ? lifecycleItems.length : statusCounts[filter];
+              if (count === 0 && filter !== 'all') return null;
               return (
-                <div
-                  key={alloc.marketId}
-                  className="flex items-center gap-4 py-2 px-3 bg-bg-hover/30 hover:bg-bg-hover/50 cursor-pointer"
-                  onClick={() => setSelectedMarket(alloc.marketId)}
+                <button
+                  key={filter}
+                  onClick={() => setStatusFilter(filter)}
+                  className={`px-2 py-1 text-[10px] uppercase tracking-wider border transition-colors ${
+                    statusFilter === filter
+                      ? 'border-accent-primary text-accent-primary bg-accent-primary-muted'
+                      : 'border-border-subtle text-text-tertiary hover:text-text-secondary'
+                  }`}
                 >
-                  <div className="flex-1">
-                    <p className="text-sm text-text-primary">
-                      {market?.collateralToken.symbol ?? alloc.marketId.slice(0, 10)}
-                    </p>
-                    <p className="text-xs text-text-tertiary">
-                      Supply: {formatTokenAmount(alloc.supplyAssets, vault?.assetInfo.decimals ?? 18)} / Cap: {formatTokenAmount(alloc.supplyCap, vault?.assetInfo.decimals ?? 18)}
-                    </p>
-                  </div>
-                  <div className="w-20">
-                    <ProgressBar value={capUsed} className="h-1.5" />
-                    <p className="text-[10px] text-text-tertiary text-right mt-0.5 font-mono">{capUsed.toFixed(0)}%</p>
-                  </div>
-                </div>
+                  {filter === 'all' ? 'All' : STATUS_CONFIG[filter].label} ({count})
+                </button>
               );
             })}
           </div>
+        </CardHeader>
+
+        {filteredItems.length === 0 ? (
+          <p className="text-text-tertiary text-sm py-4 text-center">
+            {statusFilter === 'all'
+              ? 'No markets discovered. Run the market scanner first.'
+              : `No markets with status "${STATUS_CONFIG[statusFilter as MarketStatus].label}".`}
+          </p>
         ) : (
-          <p className="text-text-tertiary text-sm">No markets with caps.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[10px] text-text-tertiary uppercase border-b border-border-subtle">
+                  <th className="text-left py-2 px-2">Market</th>
+                  <th className="text-right py-2 px-2">LLTV</th>
+                  <th className="text-right py-2 px-2">Cap</th>
+                  <th className="text-right py-2 px-2">Supply</th>
+                  <th className="text-right py-2 px-2">Used</th>
+                  <th className="text-center py-2 px-2">Status</th>
+                  {canSubmit && <th className="text-right py-2 px-2">Action</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredItems.map((item) => {
+                  const StatusIcon = STATUS_CONFIG[item.status].icon;
+                  const isExpanded = expandedMarket === item.marketId;
+
+                  return (
+                    <MarketRow
+                      key={item.marketId}
+                      item={item}
+                      StatusIcon={StatusIcon}
+                      isExpanded={isExpanded}
+                      canSubmit={canSubmit}
+                      decimals={decimals}
+                      isMismatch={isMismatch}
+                      isPending={isPending}
+                      isConfirming={isConfirming}
+                      newCapValue={newCapValue}
+                      onToggleExpand={() => {
+                        setExpandedMarket(isExpanded ? null : item.marketId);
+                        setNewCapValue('');
+                      }}
+                      onCapValueChange={setNewCapValue}
+                      onSubmitCap={() => handleSubmitCap(item)}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 
-      {/* Submit New Cap (Curator only) */}
-      {(role.isCurator || role.isOwner) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Submit Cap Change</CardTitle>
-            <Badge variant="info">Timelocked</Badge>
-          </CardHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-text-tertiary">Market</label>
-              <select
-                value={selectedMarket ?? ''}
-                onChange={(e) => setSelectedMarket(e.target.value || null)}
-                className="w-full mt-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary"
-              >
-                <option value="">Select market...</option>
-                {markets && markets.length > 0 && (
-                  <optgroup label="Vault markets">
-                    {markets.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.collateralToken.symbol} / {m.loanToken.symbol} ({(Number(m.params.lltv) / 1e18 * 100).toFixed(1)}%)
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {availableNewMarkets.length > 0 && (
-                  <optgroup label="Add new market">
-                    {availableNewMarkets.map((m) => (
-                      <option key={m.marketId} value={m.marketId}>
-                        {m.collateralTokenSymbol || m.collateralToken.slice(0, 10)} / {m.loanTokenSymbol || m.loanToken.slice(0, 10)} ({formatPercent(Number(m.lltv) / 1e18)})
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-text-tertiary">New Supply Cap (in asset tokens)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={newCapValue}
-                onChange={(e) => setNewCapValue(e.target.value)}
-                placeholder="e.g., 1000000"
-                className="w-full mt-1 bg-bg-hover border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary"
-              />
-            </div>
-            <div className="text-xs text-warning bg-warning/10 p-2">
-              Cap increases are timelocked. After submitting, wait for the timelock duration before accepting.
-            </div>
-            <Button
-              onClick={handleSubmitCap}
-              disabled={!selectedMarket || !newCapValue || isMismatch}
-              loading={isPending || isConfirming}
-            >
-              Submit Cap
-            </Button>
-          </div>
-        </Card>
-      )}
+      {/* Lifecycle Legend */}
+      <div className="flex flex-wrap gap-4 text-[10px] text-text-tertiary">
+        <span className="flex items-center gap-1"><Circle size={10} /> Available — discoverable on-chain, not yet in vault</span>
+        <span className="flex items-center gap-1"><Clock size={10} className="text-warning" /> Pending — cap submitted, waiting for timelock</span>
+        <span className="flex items-center gap-1"><CheckCircle size={10} className="text-info" /> Enabled — cap accepted, not yet in supply queue</span>
+        <span className="flex items-center gap-1"><ArrowRight size={10} className="text-success" /> In Queue — actively receiving deposits</span>
+      </div>
     </div>
+  );
+}
+
+// ---- Market Row Sub-component ----
+
+function MarketRow({
+  item,
+  StatusIcon,
+  isExpanded,
+  canSubmit,
+  decimals,
+  isMismatch,
+  isPending,
+  isConfirming,
+  newCapValue,
+  onToggleExpand,
+  onCapValueChange,
+  onSubmitCap,
+}: {
+  item: MarketLifecycleItem;
+  StatusIcon: typeof Circle;
+  isExpanded: boolean;
+  canSubmit: boolean;
+  decimals: number;
+  isMismatch: boolean;
+  isPending: boolean;
+  isConfirming: boolean;
+  newCapValue: string;
+  onToggleExpand: () => void;
+  onCapValueChange: (v: string) => void;
+  onSubmitCap: () => void;
+}) {
+  const config = STATUS_CONFIG[item.status];
+
+  return (
+    <>
+      <tr
+        className="border-b border-border-subtle/50 hover:bg-bg-hover/30 cursor-pointer"
+        onClick={canSubmit ? onToggleExpand : undefined}
+      >
+        <td className="py-2.5 px-2">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-text-primary">{item.collateralSymbol}</span>
+            <span className="text-text-tertiary text-xs">/ {item.loanSymbol}</span>
+          </div>
+          <p className="text-[10px] text-text-tertiary font-mono mt-0.5">{item.marketId.slice(0, 10)}...</p>
+        </td>
+        <td className="text-right py-2.5 px-2 font-mono text-text-primary">
+          {formatPercent(item.lltv)}
+        </td>
+        <td className="text-right py-2.5 px-2 font-mono text-text-secondary">
+          {item.supplyCap > 0n ? formatTokenAmount(item.supplyCap, decimals) : '—'}
+        </td>
+        <td className="text-right py-2.5 px-2 font-mono text-text-primary">
+          {item.supplyAssets > 0n ? formatTokenAmount(item.supplyAssets, decimals) : '—'}
+        </td>
+        <td className="text-right py-2.5 px-2 w-24">
+          {item.supplyCap > 0n ? (
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-text-primary text-xs font-mono">{item.capUsedPct.toFixed(0)}%</span>
+              <ProgressBar value={item.capUsedPct} className="w-12 h-1.5" />
+            </div>
+          ) : (
+            <span className="text-text-tertiary text-xs">—</span>
+          )}
+        </td>
+        <td className="text-center py-2.5 px-2">
+          <Badge variant={config.variant}>
+            <StatusIcon size={10} className="mr-1 inline" />
+            {config.label}
+          </Badge>
+        </td>
+        {canSubmit && (
+          <td className="text-right py-2.5 px-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpand();
+              }}
+            >
+              {isExpanded ? 'Close' : item.status === 'available' ? 'Add' : 'Edit Cap'}
+            </Button>
+          </td>
+        )}
+      </tr>
+
+      {/* Expanded inline cap editor */}
+      {isExpanded && canSubmit && (
+        <tr>
+          <td colSpan={canSubmit ? 7 : 6} className="p-0">
+            <div className="bg-bg-hover/50 px-4 py-3 border-b border-border-subtle space-y-3">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="text-xs text-text-tertiary">
+                    {item.status === 'available' ? 'Initial Supply Cap' : 'New Supply Cap'} (in asset tokens)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newCapValue}
+                    onChange={(e) => onCapValueChange(e.target.value)}
+                    placeholder="e.g., 1000000"
+                    className="w-full mt-1 bg-bg-surface border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary font-mono"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSubmitCap();
+                  }}
+                  disabled={!newCapValue || isMismatch || isPending || isConfirming}
+                  loading={isPending || isConfirming}
+                >
+                  {item.status === 'available' ? 'Submit Cap (Add Market)' : 'Submit Cap Change'}
+                </Button>
+              </div>
+              {item.supplyCap > 0n && (
+                <p className="text-xs text-text-tertiary">
+                  Current cap: <span className="font-mono text-text-secondary">{formatTokenAmount(item.supplyCap, decimals)}</span>
+                </p>
+              )}
+              {item.status === 'available' && (
+                <p className="text-xs text-info bg-info/10 p-2">
+                  This market is not yet in the vault. Submitting a cap will register it.
+                </p>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
