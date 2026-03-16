@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState, useCallback, useRef } from 'react';
 import { marketKeys } from '../queryKeys';
 import { getChainConfig } from '../../config/chains';
 import {
@@ -25,10 +25,12 @@ import {
 
 export function useMarketScanner(chainId: number | undefined) {
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
-  const queryClient = useQueryClient();
 
   const chainConfig = chainId ? getChainConfig(chainId) : undefined;
   const isApiChain = chainConfig?.apiSupported ?? false;
+
+  // Ref to signal the next queryFn run should do a full scan
+  const fullScanRef = useRef(false);
 
   const query = useQuery({
     queryKey: marketKeys.discovered(chainId!),
@@ -41,9 +43,14 @@ export function useMarketScanner(chainId: number | undefined) {
         return apiResults.map((r: ApiMarketResult) => r.market);
       }
 
-      // RPC-only chain: run incremental scan (saves to IndexedDB),
+      // RPC-only chain: run scan (saves to IndexedDB),
       // then return enriched data from IndexedDB
-      await runIncrementalScan(chainId, setScanProgress);
+      if (fullScanRef.current) {
+        fullScanRef.current = false;
+        await runFullScan(chainId, setScanProgress);
+      } else {
+        await runIncrementalScan(chainId, setScanProgress);
+      }
 
       // Always return from IndexedDB — it has token symbols after enrichment
       return getMarketsByChain(chainId);
@@ -56,11 +63,16 @@ export function useMarketScanner(chainId: number | undefined) {
 
   const rescan = useCallback(async () => {
     if (!chainId) return;
-    setScanProgress(null);
-    await clearChainData(chainId);
-    await runFullScan(chainId, setScanProgress);
-    queryClient.invalidateQueries({ queryKey: marketKeys.discovered(chainId!) });
-  }, [chainId, queryClient]);
+    try {
+      setScanProgress(null);
+      await clearChainData(chainId);
+      fullScanRef.current = true;
+      // Refetch triggers queryFn which sees fullScanRef and runs a full scan
+      await query.refetch();
+    } catch (err) {
+      console.error('Rescan failed:', err);
+    }
+  }, [chainId, query]);
 
   return {
     ...query,
