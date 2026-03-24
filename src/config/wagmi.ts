@@ -16,7 +16,7 @@ export const sei: Chain = {
     },
   },
   blockExplorers: {
-    default: { name: 'SeiTrace', url: 'https://seitrace.com' },
+    default: { name: 'SeiScan', url: 'https://seiscan.io' },
   },
   contracts: {
     multicall3: {

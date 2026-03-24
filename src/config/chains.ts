@@ -20,7 +20,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     rpcUrls: [
       'https://sei-evm-rpc.publicnode.com',
     ],
-    blockExplorer: 'https://seitrace.com',
+    blockExplorer: 'https://seiscan.io',
     morphoBlue: '0xc9cdac20fceaaf616f7eb0bb6cd2c69dcfa9094c' as Address,
     vaultFactories: {
       v1: '0x8Dea49ec5bd5AeAc8bcf96B3E187F59354118291' as Address, // MetaMorpho Factory V1.1
