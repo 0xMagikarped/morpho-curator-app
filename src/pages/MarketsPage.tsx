@@ -50,11 +50,8 @@ export function MarketsPage() {
 
   useScannerState(selectedChainId);
 
-  // Filter out IDLE markets (collateral = 0x0, lltv = 0) — defense in depth
-  const displayableMarkets = useMemo(
-    () => markets?.filter((m) => !isIdleMarketRecord(m)),
-    [markets],
-  );
+  // Include all markets — idle markets (collateral = 0x0, lltv = 0) are tagged but shown
+  const displayableMarkets = markets;
 
   // Cmd+K shortcut
   useEffect(() => {
@@ -358,8 +355,12 @@ export function MarketsPage() {
                           </p>
                         </div>
                       </td>
-                      <td className="py-2.5 px-3 text-text-primary text-[13px]">
-                        {market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}
+                      <td className="py-2.5 px-3 text-[13px]">
+                        {isIdleMarketRecord(market) ? (
+                          <span className="text-text-tertiary italic">Idle</span>
+                        ) : (
+                          <span className="text-text-primary">{market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-1.5 text-xs font-mono text-text-secondary">
@@ -404,7 +405,11 @@ export function MarketsPage() {
                 >
                   <div className="flex-1 min-w-0">
                     <span className="text-[13px] text-text-primary font-medium">
-                      {market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}
+                      {isIdleMarketRecord(market) ? (
+                        <span className="text-text-tertiary italic">Idle</span>
+                      ) : (
+                        <>{market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}</>
+                      )}
                       {' / '}
                       {market.loanTokenSymbol ?? truncateAddress(market.loanToken)}
                     </span>
