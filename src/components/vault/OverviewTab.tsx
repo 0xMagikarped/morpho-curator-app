@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Address } from 'viem';
+import { useAccount } from 'wagmi';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { VaultOracleDashboard } from '../oracle/VaultOracleDashboard';
@@ -8,7 +9,7 @@ import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
 import { RegistryAlertBanner } from './RegistryAlertBanner';
 import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
-import { useVaultInfo, useVaultRole, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultRole, useVaultMarketsFromApi, useVaultAllocators } from '../../lib/hooks/useVault';
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
 import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
@@ -22,10 +23,12 @@ interface OverviewTabProps {
 
 export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
   const chainConfig = getChainConfig(chainId);
+  const { address: userAddress } = useAccount();
   const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
   const { data: markets } = useVaultMarketsFromApi(chainId, vaultAddress);
   const { data: sharePriceHistory } = useSharePriceHistory(chainId, vaultAddress);
+  const { data: allocators } = useVaultAllocators(chainId, vaultAddress);
 
   const oracleAddresses = useMemo(() => {
     if (!markets) return [];
@@ -211,6 +214,23 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
             </p>
           </div>
         </div>
+
+        {/* Allocators */}
+        {allocators && allocators.length > 0 && (
+          <div className="border-t border-border-subtle pt-3 mt-3">
+            <span className="text-xs text-text-tertiary">Allocators</span>
+            <div className="flex flex-wrap gap-2 mt-1.5">
+              {allocators.map((addr) => (
+                <span key={addr} className="inline-flex items-center gap-1 text-sm font-mono text-text-primary">
+                  {truncateAddress(addr)}
+                  {userAddress && addr.toLowerCase() === userAddress.toLowerCase() && (
+                    <Badge variant="success" className="text-[9px]">You</Badge>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Oracle Health Dashboard */}

@@ -288,6 +288,92 @@ export function useVaultRole(
 }
 
 // ============================================================
+// useVaultAllocators — discover allocator addresses
+// ============================================================
+
+const SET_IS_ALLOCATOR_SELECTOR = '0xb192a84a';
+
+/**
+ * Discover all current allocator addresses for a vault.
+ * Scans seitrace (SEI) or vault tx history for setIsAllocator calls,
+ * then verifies each address on-chain via isAllocator().
+ */
+export function useVaultAllocators(
+  chainId: number | undefined,
+  vaultAddress: Address | undefined,
+) {
+  return useQuery({
+    queryKey: [...vaultKeys.fullData(chainId!, vaultAddress!), 'allocators'],
+    queryFn: async (): Promise<Address[]> => {
+      if (!chainId || !vaultAddress) return [];
+
+      // Step 1: Discover candidate allocator addresses from tx history
+      const candidates = new Set<string>();
+
+      try {
+        // Use seitrace/blockscout API to find setIsAllocator calls
+        const explorerBase = chainId === 1329
+          ? 'https://seitrace.com/pacific-1/api/v2'
+          : chainId === 1
+            ? 'https://eth.blockscout.com/api/v2'
+            : chainId === 8453
+              ? 'https://base.blockscout.com/api/v2'
+              : null;
+
+        if (explorerBase) {
+          const url = `${explorerBase}/addresses/${vaultAddress}/transactions?filter=to`;
+          const resp = await fetch(url);
+          if (resp.ok) {
+            const data = await resp.json();
+            for (const tx of data.items ?? []) {
+              if (tx.method === SET_IS_ALLOCATOR_SELECTOR && tx.raw_input) {
+                // Decode: setIsAllocator(address allocator, bool isAllocator)
+                // Input: 0xb192a84a + 32 bytes address + 32 bytes bool
+                const input = tx.raw_input as string;
+                if (input.length >= 138) {
+                  const addrHex = '0x' + input.slice(34, 74);
+                  candidates.add(addrHex.toLowerCase());
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Explorer API failed — fall back to just known addresses
+      }
+
+      // Also add known public allocator if configured
+      const { getChainConfig } = await import('../../config/chains');
+      const chainConfig = getChainConfig(chainId);
+      if (chainConfig?.contracts?.publicAllocator) {
+        candidates.add(chainConfig.contracts.publicAllocator.toLowerCase());
+      }
+
+      if (candidates.size === 0) return [];
+
+      // Step 2: Verify each candidate on-chain via isAllocator()
+      const verified: Address[] = [];
+      const checks = await Promise.allSettled(
+        [...candidates].map(async (addr) => {
+          const isAlloc = await checkIsAllocator(chainId, vaultAddress, addr as Address);
+          return { addr: addr as Address, isAlloc };
+        }),
+      );
+
+      for (const r of checks) {
+        if (r.status === 'fulfilled' && r.value.isAlloc) {
+          verified.push(r.value.addr);
+        }
+      }
+
+      return verified;
+    },
+    enabled: !!chainId && !!vaultAddress,
+    staleTime: 5 * 60_000,
+  });
+}
+
+// ============================================================
 // useVaultPendingActions
 // ============================================================
 
