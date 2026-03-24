@@ -19,6 +19,7 @@ import {
   orderAllocations,
   type MarketAllocationArg,
 } from '../../hooks/morpho-sdk/useReallocate';
+import { PublicAllocatorPanel } from './PublicAllocatorPanel';
 
 interface ReallocateTabProps {
   chainId: number;
@@ -320,6 +321,23 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
           </div>
         )}
       </Card>
+
+      {/* Public Allocator Configuration */}
+      {vault?.version === 'v1' && markets && allocation && (
+        <PublicAllocatorPanel
+          chainId={chainId}
+          vaultAddress={vaultAddress}
+          isOwner={role.isOwner}
+          isCurator={role.isCurator}
+          assetSymbol={vault.assetInfo.symbol}
+          assetDecimals={vault.assetInfo.decimals}
+          markets={allocationEdits.map((e) => ({
+            marketId: e.marketId,
+            label: e.label,
+            currentSupply: e.currentAssets,
+          }))}
+        />
+      )}
     </div>
   );
 }

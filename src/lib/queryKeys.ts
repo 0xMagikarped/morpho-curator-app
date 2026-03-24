@@ -34,6 +34,8 @@ export const vaultKeys = {
     [...vaultKeys.detail(chainId, vaultAddress), 'adapter-preview', lower(adapterAddress)] as const,
   queues: (chainId: number, address: string) =>
     [...vaultKeys.detail(chainId, address), 'queues'] as const,
+  publicAllocator: (chainId: number, address: string) =>
+    [...vaultKeys.detail(chainId, address), 'public-allocator'] as const,
 };
 
 export const marketKeys = {

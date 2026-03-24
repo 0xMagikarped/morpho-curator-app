@@ -5,7 +5,8 @@ import { ArrowRightLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
-import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
+import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount } from '../../lib/utils/format';
 import { metaMorphoV1Abi } from '../../lib/contracts/abis';
@@ -23,6 +24,24 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
   const { data: markets, isLoading: marketsLoading } = useVaultMarketsFromApi(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
+  const { data: allChainMarkets } = useMarketScanner(chainId);
+
+  // Discover markets with caps that are NOT in vault queues (e.g. idle market after submitCap)
+  const existingMarketIds = useMemo(() => {
+    if (!allocation) return new Set<string>();
+    return new Set([...allocation.supplyQueue, ...allocation.withdrawQueue]);
+  }, [allocation]);
+
+  const discoveredMarketIds = useMemo(() => {
+    if (!allChainMarkets || !vault) return [];
+    const vaultAssetLower = vault.asset?.toLowerCase();
+    if (!vaultAssetLower) return [];
+    return allChainMarkets
+      .filter((m) => m.loanToken.toLowerCase() === vaultAssetLower && !existingMarketIds.has(m.marketId))
+      .map((m) => m.marketId);
+  }, [allChainMarkets, vault, existingMarketIds]);
+
+  const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
 
   const { writeContract, data: txHash, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
@@ -114,15 +133,51 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
 
   // Markets with non-zero cap not in supply queue (for add)
   const addableSupplyMarkets = useMemo(() => {
-    if (!allocation || !markets) return [];
     const inQueue = new Set(activeSupply.map((q) => q.marketId));
-    return markets
-      .filter((m) => {
+    const result: QueueMarketItem[] = [];
+
+    // 1) Markets already known from vault data (in queues or allocation)
+    if (allocation && markets) {
+      for (const m of markets) {
         const alloc = allocation.allocations.find((a) => a.marketId === m.id);
-        return alloc && alloc.supplyCap > 0n && !inQueue.has(m.id);
-      })
-      .map((m) => buildQueueItems([m.id])[0]);
-  }, [allocation, markets, activeSupply, buildQueueItems]);
+        if (alloc && alloc.supplyCap > 0n && !inQueue.has(m.id)) {
+          result.push(buildQueueItems([m.id])[0]);
+        }
+      }
+    }
+
+    // 2) Discovered markets with caps that are NOT in queues (e.g. idle market after submitCap)
+    if (discoveredStatuses && allChainMarkets) {
+      for (const ds of discoveredStatuses) {
+        if (inQueue.has(ds.marketId)) continue;
+        if (result.some((r) => r.marketId === ds.marketId)) continue;
+        if (ds.config.cap === 0n && !ds.config.enabled) continue;
+
+        // Build label from scanner data
+        const scannerMarket = allChainMarkets.find((m) => m.marketId === ds.marketId);
+        const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+        const isIdle = scannerMarket?.collateralToken.toLowerCase() === ZERO_ADDRESS && scannerMarket?.lltv === '0';
+        const collateralSymbol = isIdle ? 'IDLE' : (scannerMarket?.collateralTokenSymbol || ds.marketId.slice(0, 10));
+        const loanSymbol = scannerMarket?.loanTokenSymbol || vault?.assetInfo.symbol || '???';
+        const lltv = scannerMarket ? Number(scannerMarket.lltv) / 1e18 * 100 : 0;
+        const label = isIdle
+          ? `IDLE / ${loanSymbol}`
+          : `${collateralSymbol}/${loanSymbol} ${lltv.toFixed(lltv % 1 === 0 ? 0 : 1)}% LLTV`;
+
+        result.push({
+          marketId: ds.marketId,
+          label,
+          supplyAssets: 0n,
+          supplyCap: ds.config.cap,
+          availableLiquidity: 0n,
+          supplyAPY: 0,
+          utilization: 0,
+        });
+      }
+    }
+
+    return result;
+  }, [allocation, markets, activeSupply, buildQueueItems, discoveredStatuses, allChainMarkets, vault]);
 
   // ---- Edit handlers ----
 

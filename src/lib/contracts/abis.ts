@@ -923,6 +923,54 @@ export const oracleV2FactoryAbi = [
 // IRM (Adaptive Curve)
 // ============================================================
 
+// ============================================================
+// Public Allocator
+// ============================================================
+
+export const publicAllocatorAbi = [
+  // View
+  { inputs: [], name: 'MORPHO', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'vault', type: 'address' }], name: 'admin', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'vault', type: 'address' }], name: 'fee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'vault', type: 'address' }], name: 'accruedFee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  {
+    inputs: [{ name: 'vault', type: 'address' }, { name: 'id', type: 'bytes32' }],
+    name: 'flowCaps',
+    outputs: [{ name: 'maxIn', type: 'uint128' }, { name: 'maxOut', type: 'uint128' }],
+    stateMutability: 'view', type: 'function',
+  },
+  // Admin / Owner
+  {
+    inputs: [{ name: 'vault', type: 'address' }, { name: 'newAdmin', type: 'address' }],
+    name: 'setAdmin', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'vault', type: 'address' }, { name: 'newFee', type: 'uint256' }],
+    name: 'setFee', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'vault', type: 'address' },
+      {
+        name: 'config', type: 'tuple[]',
+        components: [
+          { name: 'id', type: 'bytes32' },
+          { name: 'caps', type: 'tuple', components: [{ name: 'maxIn', type: 'uint128' }, { name: 'maxOut', type: 'uint128' }] },
+        ],
+      },
+    ],
+    name: 'setFlowCaps', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'vault', type: 'address' }, { name: 'feeRecipient', type: 'address' }],
+    name: 'transferFee', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+] as const;
+
+// ============================================================
+// IRM (Adaptive Curve)
+// ============================================================
+
 export const irmAbi = [
   {
     name: 'borrowRateView', type: 'function', stateMutability: 'view',
