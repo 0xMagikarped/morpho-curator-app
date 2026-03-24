@@ -4,7 +4,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import { getPublicClient } from '../data/rpcClient';
-import { useAdapterMarketPositions, useV2AdapterOverview, type V2AdapterFull } from './useV2Adapters';
+import { useAdapterMarketPositions, type V2AdapterFull } from './useV2Adapters';
 import {
   adapterRiskId,
   collateralRiskId,

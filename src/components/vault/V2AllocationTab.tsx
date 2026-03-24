@@ -1,15 +1,14 @@
 import { useState, useMemo } from 'react';
-import { formatUnits, parseUnits, type Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { formatUnits, parseUnits, encodeFunctionData, encodeAbiParameters, type Address } from 'viem';
+import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
-import { Card, CardHeader, CardTitle } from '../ui/Card';
+import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { SectionHeader } from '../ui/SectionHeader';
 import { AddressDisplay } from '../ui/AddressDisplay';
-import { UtilizationBar } from '../risk/UtilizationBar';
 import { useVaultInfo, useVaultRole } from '../../lib/hooks/useVault';
-import { useV2AdapterOverview, type V2AdapterFull } from '../../lib/hooks/useV2Adapters';
+import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
 import { useV2AllocationData, type AllocationRow, type V2AllocationData } from '../../lib/hooks/useV2Allocation';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount, truncateAddress } from '../../lib/utils/format';
@@ -22,8 +21,6 @@ interface V2AllocationTabProps {
   chainId: number;
   vaultAddress: Address;
 }
-
-const MAX_UINT256 = 2n ** 256n - 1n;
 
 export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
@@ -368,23 +365,17 @@ function ReallocateDialog({
     // The `data` for market adapter encodes which market to target
     // This is a simplified version using the allocate/deallocate pattern
 
-    // For now, encode as individual allocate/deallocate calls through the vault
-    const encoder = new TextEncoder();
-
     for (const { row, targetRaw } of withdrawals) {
       if (!row.params) continue;
-      const withdrawAmount = row.allocation - targetRaw;
-      // deallocate(adapter, data, totalAllocated)
-      // data = abi.encode(MarketParams) for the target market
       const marketData = encodeMarketParams(row.params);
       calls.push(encodeDeallocate(data.adapterAddress, marketData, targetRaw));
     }
 
     for (const { row, targetRaw } of supplies) {
       if (!row.params) continue;
-      const supplyAmount = targetRaw - row.allocation;
+      const amount = targetRaw - row.allocation;
       const marketData = encodeMarketParams(row.params);
-      calls.push(encodeAllocate(data.adapterAddress, marketData, supplyAmount));
+      calls.push(encodeAllocate(data.adapterAddress, marketData, amount));
     }
 
     if (calls.length === 0) return;
@@ -507,8 +498,6 @@ function ReallocateDialog({
 // ============================================================
 // ABI encoding helpers for multicall
 // ============================================================
-
-import { encodeFunctionData, encodeAbiParameters } from 'viem';
 
 function encodeMarketParams(params: MarketParams): `0x${string}` {
   return encodeAbiParameters(
