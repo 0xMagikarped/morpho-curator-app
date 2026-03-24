@@ -383,24 +383,12 @@ export async function discoverMarketsFromVaults(
 }
 
 // ============================================================
-// IDLE Market Filter
+// IDLE Market Detection
 // ============================================================
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-/**
- * IDLE markets are internal Morpho Blue markets with no collateral, no oracle,
- * and 0% LLTV. They are used for tracking idle vault funds and should never
- * be displayed to users or stored in the market index.
- */
-function isIdleMarket(market: DiscoveredMarket): boolean {
-  return (
-    market.collateralToken.toLowerCase() === ZERO_ADDRESS &&
-    market.lltv === 0n
-  );
-}
-
-/** Filter for MarketRecord (lltv stored as string) */
+/** Detect idle markets (collateral = 0x0, LLTV = 0) for display tagging */
 export function isIdleMarketRecord(market: MarketRecord): boolean {
   return (
     market.collateralToken.toLowerCase() === ZERO_ADDRESS &&
@@ -501,11 +489,8 @@ export async function runIncrementalScan(
     }
   }
 
-  // Filter out IDLE markets before persisting
-  const realMarkets = allMarkets.filter((m) => !isIdleMarket(m));
-
-  // Persist
-  const records = toRecords(realMarkets);
+  // Persist all markets including idle (collateral=0x0, lltv=0)
+  const records = toRecords(allMarkets);
   if (records.length > 0) {
     await saveDiscoveredMarkets(records);
     await enrichTokensForMarkets(chainId, records);
