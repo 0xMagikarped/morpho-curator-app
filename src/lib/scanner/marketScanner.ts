@@ -424,16 +424,75 @@ function usesExplorerApi(chainId: number): boolean {
  */
 function getSeiSeedMarkets(): DiscoveredMarket[] {
   const chainId = 1329;
+  const PYUSD0 = '0x142cdc44890978B506e745bB3Bd11607B7f7faEf' as Address;
+  const IRM = '0x6eFA8e3Aa8279eB2fd46b6083A9E52dA72EA56c4' as Address;
+  const ZERO = '0x0000000000000000000000000000000000000000' as Address;
+
   return [
-    // PYUSD0 idle market (collateral=0x0, lltv=0)
+    // PYUSD0 / wETH (LLTV 86%)
+    {
+      id: '0x7d754479f40d06180fa1ee66ce1bf0cd97fc156c8f8458e27a18a95b9d1ad46a',
+      loanToken: PYUSD0,
+      collateralToken: '0x160345fC359604fC6e70E3c5fAcbdE5F7A9342d8' as Address,
+      oracle: '0xdca3f61f8c9a960fb0ef7b0a9b9c30bc735ce856' as Address,
+      irm: IRM,
+      lltv: 860000000000000000n,
+      discoveredAtBlock: 197913946,
+      chainId,
+    },
+    // PYUSD0 / wBTC (LLTV 86%)
+    {
+      id: '0xd2fa0b94b6f04615c9472bb25bcb755f5ad5a8f4c17fc04837a31046f0ba5c60',
+      loanToken: PYUSD0,
+      collateralToken: '0x0555E30da8f98308EdB960aa94C0Db47230d2B9c' as Address,
+      oracle: '0x83bd34b6e835694953c323a0f0f5267f3708b727' as Address,
+      irm: IRM,
+      lltv: 860000000000000000n,
+      discoveredAtBlock: 197917426,
+      chainId,
+    },
+    // PYUSD0 / sfrxUSD (LLTV 91.5%)
+    {
+      id: '0xc56578519e8fb30628d3b8d459193017e776ce8477c0bbf0f2c8de82bd8dccc9',
+      loanToken: PYUSD0,
+      collateralToken: '0x5bff88ca1442c2496f7e475e9e7786383bc070c0' as Address,
+      oracle: '0x6bd03632861bfef2c0a718216b23ede9a5c3b913' as Address,
+      irm: IRM,
+      lltv: 915000000000000000n,
+      discoveredAtBlock: 197920846,
+      chainId,
+    },
+    // PYUSD0 / IDLE (collateral=0x0, lltv=0)
     {
       id: '0xe3c959829d236e3838558318340129a737ae0fffa128d891d1d22728d081e419',
-      loanToken: '0x142cdc44890978B506e745bB3Bd11607B7f7faEf' as Address,
-      collateralToken: '0x0000000000000000000000000000000000000000' as Address,
-      oracle: '0x0000000000000000000000000000000000000000' as Address,
-      irm: '0x0000000000000000000000000000000000000000' as Address,
+      loanToken: PYUSD0,
+      collateralToken: ZERO,
+      oracle: ZERO,
+      irm: ZERO,
       lltv: 0n,
       discoveredAtBlock: 197922132,
+      chainId,
+    },
+    // PYUSD0 / wsrUSD (LLTV 91.5%)
+    {
+      id: '0xbb3ef4b802087585438dc6ee178e295f404d133996880db5e23405d1d73f1d27',
+      loanToken: PYUSD0,
+      collateralToken: '0x4809010926aec940b550D34a46A52739f996D75D' as Address,
+      oracle: '0xC2100520D7c5260735125A0DCC0Bd6095902cDA2' as Address,
+      irm: IRM,
+      lltv: 915000000000000000n,
+      discoveredAtBlock: 197929589,
+      chainId,
+    },
+    // PYUSD0 / USDY (LLTV 91.5%)
+    {
+      id: '0x583da8629bb612169bb4d5753d94d66bffa4390b4f16833a210b75944172f811',
+      loanToken: PYUSD0,
+      collateralToken: '0x54cd901491aef397084453f4372b93c33260e2a6' as Address,
+      oracle: '0xd0884f4638FCc0F7DbA6C78B2ea6493876933a7B' as Address,
+      irm: IRM,
+      lltv: 915000000000000000n,
+      discoveredAtBlock: 198336036,
       chainId,
     },
   ];
