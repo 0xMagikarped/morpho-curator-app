@@ -1,7 +1,15 @@
 import { http, fallback } from 'wagmi';
 import { mainnet, base } from 'wagmi/chains';
-import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+import { getDefaultConfig, getWalletConnectConnector } from '@rainbow-me/rainbowkit';
+import {
+  rabbyWallet,
+  phantomWallet,
+  rainbowWallet,
+  metaMaskWallet,
+  coinbaseWallet,
+} from '@rainbow-me/rainbowkit/wallets';
 import type { Chain } from 'wagmi/chains';
+import type { Wallet } from '@rainbow-me/rainbowkit';
 
 /**
  * SEI chain definition for wagmi (not included in wagmi/chains).
@@ -49,6 +57,26 @@ if (!walletConnectProjectId) {
   console.warn('[wagmi] VITE_WALLETCONNECT_PROJECT_ID is not set — WalletConnect will not work. Get one at https://cloud.walletconnect.com/');
 }
 
+/**
+ * Custom WalletConnect wallet that uses RainbowKit's built-in QR code + copy link UI
+ * instead of the Reown AppKit modal (whose dynamic chunks fail to load on Vercel).
+ *
+ * RainbowKit forces `showQrModal: true` for any wallet with id === "walletConnect",
+ * so we use a different id to keep RainbowKit's native QR rendering.
+ */
+const walletConnectNativeQr = (): Wallet => ({
+  id: 'walletConnect-qr',
+  name: 'WalletConnect',
+  iconUrl: 'https://explorer-api.walletconnect.com/v3/logo/lg/09a83110-5fc3-45e1-65ab-8f7df2d6a400?projectId=2f05ae7f1116030fde2d36508f472bfb',
+  iconBackground: '#3b99fc',
+  qrCode: {
+    getUri: (uri: string) => uri,
+  },
+  createConnector: getWalletConnectConnector({
+    projectId: walletConnectProjectId,
+  }),
+});
+
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: walletConnectProjectId,
@@ -58,6 +86,19 @@ export const config = getDefaultConfig({
     [mainnet.id]: fallback(ethTransports),
     [base.id]: fallback(baseTransports),
   },
+  wallets: [
+    {
+      groupName: 'Popular',
+      wallets: [
+        rabbyWallet,
+        metaMaskWallet,
+        coinbaseWallet,
+        phantomWallet,
+        rainbowWallet,
+        walletConnectNativeQr,
+      ],
+    },
+  ],
 });
 
 declare module 'wagmi' {
