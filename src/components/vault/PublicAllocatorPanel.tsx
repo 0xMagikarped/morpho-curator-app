@@ -69,9 +69,22 @@ export function PublicAllocatorPanel({
     return <div className="h-12 animate-shimmer bg-bg-hover" />;
   }
 
-  // PA not available on this chain
-  if (!paConfig || !paConfig.paAddress) {
-    return null; // Silent — don't show the panel if PA is not deployed
+  // No PA address configured for this chain at all
+  if (!paConfig?.paAddress) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Zap size={14} className="text-text-tertiary" />
+            <CardTitle>Public Allocator</CardTitle>
+          </div>
+          <Badge>Not Deployed</Badge>
+        </CardHeader>
+        <p className="text-text-tertiary text-xs">
+          Public Allocator is not deployed on this chain. It can be deployed permissionlessly — the constructor only requires the Morpho Blue address.
+        </p>
+      </Card>
+    );
   }
 
   const handleApplyFlowCaps = () => {

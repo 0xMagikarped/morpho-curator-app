@@ -79,27 +79,40 @@ export function usePublicAllocatorConfig(
         return null;
       }
 
-      // Read PA config
-      const [admin, fee, accruedFee] = await Promise.all([
-        client.readContract({
-          address: paAddress,
-          abi: publicAllocatorAbi,
-          functionName: 'admin',
-          args: [vaultAddress],
-        }) as Promise<Address>,
-        client.readContract({
-          address: paAddress,
-          abi: publicAllocatorAbi,
-          functionName: 'fee',
-          args: [vaultAddress],
-        }) as Promise<bigint>,
-        client.readContract({
-          address: paAddress,
-          abi: publicAllocatorAbi,
-          functionName: 'accruedFee',
-          args: [vaultAddress],
-        }) as Promise<bigint>,
-      ]);
+      // Read PA config — wrap in try/catch so we still show the panel on partial failure
+      let admin: Address = ZERO;
+      let fee = 0n;
+      let accruedFee = 0n;
+      try {
+        const results = await Promise.all([
+          client.readContract({
+            address: paAddress,
+            abi: publicAllocatorAbi,
+            functionName: 'admin',
+            args: [vaultAddress],
+          }),
+          client.readContract({
+            address: paAddress,
+            abi: publicAllocatorAbi,
+            functionName: 'fee',
+            args: [vaultAddress],
+          }),
+          client.readContract({
+            address: paAddress,
+            abi: publicAllocatorAbi,
+            functionName: 'accruedFee',
+            args: [vaultAddress],
+          }),
+        ]);
+        admin = results[0] as Address;
+        fee = results[1] as bigint;
+        accruedFee = results[2] as bigint;
+      } catch (err) {
+        console.warn('[usePublicAllocatorConfig] PA config read failed (contract may not be PA):', err);
+        // PA address in chain config might not actually be the Public Allocator
+        // Return a config showing it's not a valid PA
+        return { isEnabled: false, paAddress, admin: ZERO, fee: 0n, accruedFee: 0n, flowCaps: [] };
+      }
 
       // Read flow caps per market
       const flowCaps: MarketFlowCap[] = await Promise.all(
