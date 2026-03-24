@@ -67,6 +67,7 @@ interface SeitraceTransaction {
   hash: string;
   method: string;
   block: number;
+  raw_input: string;
 }
 
 interface SeitracePage {
@@ -92,7 +93,10 @@ async function discoverMarketsViaSeitrace(
   const morphoBlue = chainConfig.morphoBlue;
   const baseUrl = `https://seitrace.com/pacific-1/api/v2/addresses/${morphoBlue}/transactions?filter=to`;
 
-  const createMarketTxHashes: string[] = [];
+  // Collect createMarket tx input data directly from the seitrace list response.
+  // SEI public RPCs prune historical transactions, so eth_getTransactionByHash
+  // returns null for older txs. The seitrace API includes raw_input in the list.
+  const createMarketTxs: { raw_input: string; block: number }[] = [];
   let nextParams = '';
   const MAX_PAGES = 30; // Safety limit
 
@@ -109,8 +113,8 @@ async function discoverMarketsViaSeitrace(
       const items = data.items ?? [];
 
       for (const tx of items) {
-        if (tx.method === CREATE_MARKET_SELECTOR) {
-          createMarketTxHashes.push(tx.hash);
+        if (tx.method === CREATE_MARKET_SELECTOR && tx.raw_input) {
+          createMarketTxs.push({ raw_input: tx.raw_input, block: tx.block });
         }
       }
 
@@ -118,7 +122,7 @@ async function discoverMarketsViaSeitrace(
         fromBlock: 0,
         toBlock: 0,
         currentBlock: 0,
-        marketsFound: createMarketTxHashes.length,
+        marketsFound: createMarketTxs.length,
         isComplete: false,
       });
 
@@ -134,48 +138,39 @@ async function discoverMarketsViaSeitrace(
     }
   }
 
-  if (createMarketTxHashes.length === 0) return [];
+  if (createMarketTxs.length === 0) return [];
 
-  // Fetch tx input data and decode market params
-  const client = getPublicClient(chainId);
+  // Decode market params directly from seitrace raw_input (no RPC needed)
   const markets: DiscoveredMarket[] = [];
 
-  // Process in batches of 5 to avoid overwhelming the RPC
-  for (let i = 0; i < createMarketTxHashes.length; i += 5) {
-    const batch = createMarketTxHashes.slice(i, i + 5);
-    const results = await Promise.allSettled(
-      batch.map(async (txHash) => {
-        const tx = await client.getTransaction({ hash: txHash as `0x${string}` });
-        if (!tx.input || tx.input.length < 10) return null;
+  for (const txData of createMarketTxs) {
+    try {
+      const input = txData.raw_input;
+      if (input.length < 10) continue;
 
-        // Strip 4-byte selector, decode (address, address, address, address, uint256)
-        const paramsData = (`0x${tx.input.slice(10)}`) as `0x${string}`;
-        const [loanToken, collateralToken, oracle, irm, lltv] =
-          decodeAbiParameters(marketParamsTypes, paramsData);
+      // Strip 4-byte selector, decode (address, address, address, address, uint256)
+      const paramsData = (`0x${input.slice(10)}`) as `0x${string}`;
+      const [loanToken, collateralToken, oracle, irm, lltv] =
+        decodeAbiParameters(marketParamsTypes, paramsData);
 
-        // Compute market ID = keccak256(abi.encode(params))
-        const encoded = encodeAbiParameters(marketParamsTypes, [
-          loanToken, collateralToken, oracle, irm, lltv,
-        ]);
-        const marketId = keccak256(encoded);
+      // Compute market ID = keccak256(abi.encode(params))
+      const encoded = encodeAbiParameters(marketParamsTypes, [
+        loanToken, collateralToken, oracle, irm, lltv,
+      ]);
+      const marketId = keccak256(encoded);
 
-        return {
-          id: marketId,
-          loanToken: loanToken as Address,
-          collateralToken: collateralToken as Address,
-          oracle: oracle as Address,
-          irm: irm as Address,
-          lltv,
-          discoveredAtBlock: Number(tx.blockNumber),
-          chainId,
-        } satisfies DiscoveredMarket;
-      }),
-    );
-
-    for (const r of results) {
-      if (r.status === 'fulfilled' && r.value) {
-        markets.push(r.value);
-      }
+      markets.push({
+        id: marketId,
+        loanToken: loanToken as Address,
+        collateralToken: collateralToken as Address,
+        oracle: oracle as Address,
+        irm: irm as Address,
+        lltv,
+        discoveredAtBlock: txData.block,
+        chainId,
+      });
+    } catch (err) {
+      console.warn('Failed to decode createMarket tx:', err);
     }
   }
 
