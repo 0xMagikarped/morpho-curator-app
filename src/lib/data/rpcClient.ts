@@ -647,15 +647,21 @@ export async function fetchAdapterMarketPositions(
         }),
       ]);
 
-      // Market params from Morpho Blue
-      const rawParams = await safeRead<readonly [Address, Address, Address, Address, bigint]>(client, {
+      // Market params from Morpho Blue (returns a struct/tuple object)
+      const rawParams = await safeRead<{
+        loanToken: Address;
+        collateralToken: Address;
+        oracle: Address;
+        irm: Address;
+        lltv: bigint;
+      }>(client, {
         address: morphoBlueAddress,
         abi: morphoBlueAbi,
         functionName: 'idToMarketParams',
         args: [marketId],
       });
 
-      // Market state from Morpho Blue
+      // Market state from Morpho Blue (returns multiple named outputs as tuple)
       const rawState = await safeRead<readonly [bigint, bigint, bigint, bigint, bigint, bigint]>(client, {
         address: morphoBlueAddress,
         abi: morphoBlueAbi,
@@ -664,11 +670,11 @@ export async function fetchAdapterMarketPositions(
       });
 
       const params: MarketParams | null = rawParams ? {
-        loanToken: rawParams[0],
-        collateralToken: rawParams[1],
-        oracle: rawParams[2],
-        irm: rawParams[3],
-        lltv: rawParams[4],
+        loanToken: rawParams.loanToken,
+        collateralToken: rawParams.collateralToken,
+        oracle: rawParams.oracle,
+        irm: rawParams.irm,
+        lltv: rawParams.lltv,
       } : null;
 
       const marketState: MarketState | null = rawState ? {
@@ -707,6 +713,13 @@ export async function fetchAdapterMarketPositions(
       };
     }),
   );
+
+  // Log any rejected market position fetches for debugging
+  positions.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.warn(`[fetchAdapterMarketPositions] Market ${validIds[i]} failed:`, r.reason);
+    }
+  });
 
   return positions
     .filter((r): r is PromiseFulfilledResult<AdapterMarketPosition> => r.status === 'fulfilled')
