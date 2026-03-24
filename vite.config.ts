@@ -18,6 +18,12 @@ export default defineConfig({
     // Required for some wagmi dependencies
     'process.env': {},
   },
+  optimizeDeps: {
+    include: [
+      // @wagmi/connectors dynamically imports this — Vite needs it pre-bundled
+      '@walletconnect/ethereum-provider',
+    ],
+  },
   build: {
     sourcemap: true,
     rollupOptions: {

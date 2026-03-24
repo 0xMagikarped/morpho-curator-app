@@ -2,6 +2,7 @@
  * Hook for V2 Allocation Tab: combines adapter market positions with 3-level caps.
  * Discovers ALL markets with caps (not just active positions) via API + RPC fallback.
  */
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import { getPublicClient } from '../data/rpcClient';
@@ -169,14 +170,33 @@ export function useV2AllocationData(
     ? mergePositionsWithDiscoveredMarkets(positions, discovered)
     : positions;
 
-  const { data: capMap, isLoading: capsLoading } = useMarketCaps(
+  // Build cap map from API-provided caps (preferred — avoids risk ID computation)
+  const apiCapMap = useMemo(() => {
+    if (!discovered) return undefined;
+    const map = new Map<string, CapPair>();
+    for (const dm of discovered) {
+      if (dm.apiAbsoluteCap !== undefined || dm.apiRelativeCap !== undefined) {
+        map.set(dm.marketId, {
+          absoluteCap: dm.apiAbsoluteCap ?? 0n,
+          relativeCap: dm.apiRelativeCap ?? 0n,
+        });
+      }
+    }
+    return map.size > 0 ? map : undefined;
+  }, [discovered]);
+
+  // Only fall back to RPC cap reads when API caps are not available
+  const { data: rpcCapMap, isLoading: capsLoading } = useMarketCaps(
     chainId,
     vaultAddress,
     adapter?.address,
-    mergedPositions,
+    !apiCapMap ? mergedPositions : undefined, // skip RPC when API caps exist
   );
 
-  const isLoading = posLoading || discLoading || capsLoading;
+  // Prefer API caps, fall back to RPC caps
+  const capMap = apiCapMap ?? rpcCapMap;
+
+  const isLoading = posLoading || discLoading || (!apiCapMap && capsLoading);
 
   // Build allocation data
   const data: V2AllocationData | null = (() => {

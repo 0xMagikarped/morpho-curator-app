@@ -44,9 +44,14 @@ const baseTransports = [
   http('https://rpc.ankr.com/base'),
 ];
 
+const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '';
+if (!walletConnectProjectId) {
+  console.warn('[wagmi] VITE_WALLETCONNECT_PROJECT_ID is not set — WalletConnect will not work. Get one at https://cloud.walletconnect.com/');
+}
+
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
-  projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
+  projectId: walletConnectProjectId,
   chains: [sei, mainnet, base],
   transports: {
     [sei.id]: fallback(seiTransports),
