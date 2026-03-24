@@ -9,6 +9,7 @@ import '@rainbow-me/rainbowkit/styles.css';
 import { config } from './config/wagmi';
 import { AppLayout } from './components/layout/AppLayout';
 import { PageLoader } from './components/ui/PageLoader';
+import { WalletConnectCopyLink } from './components/ui/WalletConnectCopyLink';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 
 // Lazy-loaded page components — each becomes its own chunk
@@ -91,6 +92,7 @@ function App() {
       <WagmiProvider config={config}>
         <QueryClientProvider client={queryClient}>
           <RainbowKitProvider theme={lightTheme({ accentColor: '#00C060', accentColorForeground: '#FFFFFF', borderRadius: 'none' })}>
+            <WalletConnectCopyLink />
             <BrowserRouter>
               <Routes>
                 <Route element={<AppLayout />}>
