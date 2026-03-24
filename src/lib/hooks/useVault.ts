@@ -345,8 +345,8 @@ export function useVaultAllocators(
       // Also add known public allocator if configured
       const { getChainConfig } = await import('../../config/chains');
       const chainConfig = getChainConfig(chainId);
-      if (chainConfig?.contracts?.publicAllocator) {
-        candidates.add(chainConfig.contracts.publicAllocator.toLowerCase());
+      if (chainConfig?.periphery?.publicAllocator) {
+        candidates.add(chainConfig.periphery.publicAllocator.toLowerCase());
       }
 
       if (candidates.size === 0) return [];
