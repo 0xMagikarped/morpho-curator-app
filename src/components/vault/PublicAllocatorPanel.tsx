@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { formatEther, parseEther, formatUnits, parseUnits, isAddress } from 'viem';
 import type { Address } from 'viem';
-import { ChevronDown, ChevronRight, Zap, Shield, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Zap, Shield } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -50,9 +50,6 @@ export function PublicAllocatorPanel({
   const isEditing = Object.keys(editingCaps).length > 0;
   const canConfigure = isOwner || isCurator;
   const ZERO = '0x0000000000000000000000000000000000000000';
-
-  // Determine if PA admin matches connected wallet (admin can also configure)
-  const isAdmin = paConfig?.admin && paConfig.admin !== ZERO;
 
   const hasChangedCaps = useMemo(() => {
     if (!paConfig || !isEditing) return false;
@@ -114,16 +111,6 @@ export function PublicAllocatorPanel({
       caps[fc.marketId] = { maxIn, maxOut };
     }
     setEditingCaps(caps);
-  };
-
-  const startEditCap = (marketId: string, currentMaxIn: bigint, currentMaxOut: bigint) => {
-    setEditingCaps((prev) => ({
-      ...prev,
-      [marketId]: {
-        maxIn: formatUnits(currentMaxIn, assetDecimals),
-        maxOut: formatUnits(currentMaxOut, assetDecimals),
-      },
-    }));
   };
 
   return (
