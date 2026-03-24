@@ -13,6 +13,7 @@ import type {
   TokenInfo,
   VaultVersion,
   VaultInfoV2,
+  AdapterMarketPosition,
 } from '../../types';
 
 const sei = defineChain({
@@ -464,6 +465,11 @@ const adapterAbi = [
   { inputs: [], name: 'name', outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'VAULT', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'MORPHO', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  // Market V1 Adapter per-market reads
+  { inputs: [], name: 'marketIdsLength', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'index', type: 'uint256' }], name: 'marketIds', outputs: [{ type: 'bytes32' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'expectedSupplyAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'supplyShares', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
 ] as const;
 
 export interface V2AdapterData {
@@ -532,6 +538,124 @@ export async function fetchV2Adapters(chainId: number, vaultAddress: Address): P
   );
 
   return results;
+}
+
+/**
+ * Read per-market positions from a Market V1 adapter.
+ * Reads marketIdsLength → marketIds(i) → expectedSupplyAssets + market params + state.
+ */
+export async function fetchAdapterMarketPositions(
+  chainId: number,
+  adapterAddress: Address,
+  morphoBlueAddress: Address,
+): Promise<AdapterMarketPosition[]> {
+  const client = getPublicClient(chainId);
+
+  const count = await safeRead<bigint>(client, {
+    address: adapterAddress,
+    abi: adapterAbi,
+    functionName: 'marketIdsLength',
+  });
+
+  if (!count || count === 0n) return [];
+
+  // Read all market IDs
+  const marketIds = await Promise.all(
+    Array.from({ length: Number(count) }, (_, i) =>
+      safeRead<`0x${string}`>(client, {
+        address: adapterAddress,
+        abi: adapterAbi,
+        functionName: 'marketIds',
+        args: [BigInt(i)],
+      }),
+    ),
+  );
+
+  const validIds = marketIds.filter((id): id is `0x${string}` => id !== null);
+
+  // For each market, read adapter position + Morpho Blue params + state + tokens
+  const positions = await Promise.allSettled(
+    validIds.map(async (marketId): Promise<AdapterMarketPosition> => {
+      // Adapter position reads
+      const [expectedAssets, shares] = await Promise.all([
+        safeRead<bigint>(client, {
+          address: adapterAddress,
+          abi: adapterAbi,
+          functionName: 'expectedSupplyAssets',
+          args: [marketId],
+        }),
+        safeRead<bigint>(client, {
+          address: adapterAddress,
+          abi: adapterAbi,
+          functionName: 'supplyShares',
+          args: [marketId],
+        }),
+      ]);
+
+      // Market params from Morpho Blue
+      const rawParams = await safeRead<readonly [Address, Address, Address, Address, bigint]>(client, {
+        address: morphoBlueAddress,
+        abi: morphoBlueAbi,
+        functionName: 'idToMarketParams',
+        args: [marketId],
+      });
+
+      // Market state from Morpho Blue
+      const rawState = await safeRead<readonly [bigint, bigint, bigint, bigint, bigint, bigint]>(client, {
+        address: morphoBlueAddress,
+        abi: morphoBlueAbi,
+        functionName: 'market',
+        args: [marketId],
+      });
+
+      const params: MarketParams | null = rawParams ? {
+        loanToken: rawParams[0],
+        collateralToken: rawParams[1],
+        oracle: rawParams[2],
+        irm: rawParams[3],
+        lltv: rawParams[4],
+      } : null;
+
+      const marketState: MarketState | null = rawState ? {
+        totalSupplyAssets: rawState[0],
+        totalSupplyShares: rawState[1],
+        totalBorrowAssets: rawState[2],
+        totalBorrowShares: rawState[3],
+        lastUpdate: rawState[4],
+        fee: rawState[5],
+      } : null;
+
+      // Compute supply assets — prefer expectedSupplyAssets, fallback to share conversion
+      let supplyAssets = expectedAssets ?? 0n;
+      if (!expectedAssets && shares && shares > 0n && marketState && marketState.totalSupplyShares > 0n) {
+        supplyAssets = (shares * marketState.totalSupplyAssets) / marketState.totalSupplyShares;
+      }
+
+      // Token info (best effort)
+      let loanToken: TokenInfo | null = null;
+      let collateralToken: TokenInfo | null = null;
+      if (params) {
+        [loanToken, collateralToken] = await Promise.all([
+          fetchTokenInfo(chainId, params.loanToken).catch(() => null),
+          fetchTokenInfo(chainId, params.collateralToken).catch(() => null),
+        ]);
+      }
+
+      return {
+        marketId: marketId as MarketId,
+        supplyAssets,
+        supplyShares: shares ?? 0n,
+        params,
+        marketState,
+        loanToken,
+        collateralToken,
+      };
+    }),
+  );
+
+  return positions
+    .filter((r): r is PromiseFulfilledResult<AdapterMarketPosition> => r.status === 'fulfilled')
+    .map((r) => r.value);
 }
 
 export async function fetchMarketCap(

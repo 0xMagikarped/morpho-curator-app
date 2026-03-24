@@ -4,7 +4,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import { getPublicClient } from '../data/rpcClient';
-import { fetchV2Adapters, type V2AdapterData } from '../data/rpcClient';
+import { fetchV2Adapters, fetchAdapterMarketPositions, type V2AdapterData } from '../data/rpcClient';
 import {
   fetchLiquidityAdapter,
   fetchAdapterCaps,
@@ -149,5 +149,27 @@ export function useAdapterPreview(
     queryFn: () => fetchAdapterPreview(chainId!, vaultAddress!, adapterAddress!, vaultAsset!),
     enabled: enabled && !!chainId && !!vaultAddress && !!adapterAddress && !!vaultAsset,
     staleTime: 60_000,
+  });
+}
+
+// ============================================================
+// useAdapterMarketPositions — decode per-market positions for
+// Market V1 adapters on V2 vaults.
+// ============================================================
+
+import type { AdapterMarketPosition } from '../../types';
+
+export function useAdapterMarketPositions(
+  chainId: number | undefined,
+  adapterAddress: Address | undefined,
+  morphoBlueAddress: Address | undefined | null,
+  adapterType: 'market-v1' | 'vault-v1' | 'unknown',
+) {
+  return useQuery<AdapterMarketPosition[]>({
+    queryKey: [...vaultKeys.adapters(chainId!, adapterAddress!), 'market-positions'],
+    queryFn: () => fetchAdapterMarketPositions(chainId!, adapterAddress!, morphoBlueAddress!),
+    enabled: !!chainId && !!adapterAddress && !!morphoBlueAddress && adapterType === 'market-v1',
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }

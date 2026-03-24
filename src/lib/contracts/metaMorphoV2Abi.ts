@@ -299,4 +299,9 @@ export const v1MarketAdapterAbi = [
   { inputs: [], name: 'realAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'asset', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  // Per-market position reads
+  { inputs: [], name: 'marketIdsLength', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'index', type: 'uint256' }], name: 'marketIds', outputs: [{ type: 'bytes32' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'expectedSupplyAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'supplyShares', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
 ] as const;

@@ -1,11 +1,14 @@
-// viem types used transitively via V2AdapterFull
+import { useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
 import { ProgressBar } from '../../ui/ProgressBar';
 import { AddressDisplay } from '../../ui/AddressDisplay';
-import { formatTokenAmount, formatWadPercent } from '../../../lib/utils/format';
-import type { V2AdapterFull } from '../../../lib/hooks/useV2Adapters';
+import { UtilizationBar } from '../../risk/UtilizationBar';
+import { formatTokenAmount, formatPercent, formatWadPercent } from '../../../lib/utils/format';
+import { useAdapterMarketPositions, type V2AdapterFull } from '../../../lib/hooks/useV2Adapters';
+import type { AdapterMarketPosition } from '../../../types';
 
 interface AdapterCardProps {
   adapter: V2AdapterFull;
@@ -40,6 +43,15 @@ export function AdapterCard({
   onRemove,
   onSkim,
 }: AdapterCardProps) {
+  const [marketsExpanded, setMarketsExpanded] = useState(false);
+
+  const { data: positions, isLoading: positionsLoading } = useAdapterMarketPositions(
+    chainId,
+    adapter.address,
+    adapter.morphoBlue,
+    adapter.type,
+  );
+
   const typeBadge = adapter.type === 'vault-v1'
     ? <Badge variant="info">V1 Vault Adapter</Badge>
     : adapter.type === 'market-v1'
@@ -129,6 +141,54 @@ export function AdapterCard({
         </div>
       )}
 
+      {/* Market Breakdown (market-v1 adapters only) */}
+      {adapter.type === 'market-v1' && (
+        <div className="mb-3">
+          <button
+            onClick={() => setMarketsExpanded(!marketsExpanded)}
+            className="flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+            aria-label={marketsExpanded ? 'Collapse market breakdown' : 'Expand market breakdown'}
+          >
+            {marketsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <span className="font-medium">Markets</span>
+            {positions && <Badge>{positions.length}</Badge>}
+          </button>
+          {marketsExpanded && (
+            <div className="mt-2 space-y-1.5">
+              {positionsLoading ? (
+                <div className="h-8 bg-bg-hover animate-shimmer" />
+              ) : positions?.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="text-[10px] text-text-tertiary uppercase border-b border-border-subtle">
+                        <th className="text-left py-1 px-1.5">Collateral</th>
+                        <th className="text-right py-1 px-1.5">LLTV</th>
+                        <th className="text-right py-1 px-1.5">Allocated</th>
+                        <th className="text-right py-1 px-1.5">Util</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {positions.map((pos) => (
+                        <MarketPositionRow
+                          key={pos.marketId}
+                          position={pos}
+                          decimals={decimals}
+                          assetSymbol={assetSymbol}
+                          adapterTotal={adapter.realAssets}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-text-tertiary text-[10px]">No markets found</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap gap-1.5 pt-2 border-t border-border-subtle">
         {canAllocate && (
@@ -167,5 +227,42 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       <span className="text-[10px] text-text-tertiary uppercase">{label}</span>
       <p className="font-mono text-xs text-text-primary">{value}</p>
     </div>
+  );
+}
+
+function MarketPositionRow({ position, decimals, assetSymbol, adapterTotal }: {
+  position: AdapterMarketPosition;
+  decimals: number;
+  assetSymbol: string;
+  adapterTotal: bigint;
+}) {
+  const pctOfAdapter = adapterTotal > 0n
+    ? Number((position.supplyAssets * 10000n) / adapterTotal) / 100
+    : 0;
+
+  const utilization = position.marketState && position.marketState.totalSupplyAssets > 0n
+    ? Number((position.marketState.totalBorrowAssets * 10000n) / position.marketState.totalSupplyAssets) / 100
+    : 0;
+
+  const collateralSymbol = position.collateralToken?.symbol ?? '???';
+  const lltv = position.params ? Number(position.params.lltv) / 1e18 : 0;
+
+  return (
+    <tr className="border-b border-border-subtle/50 hover:bg-bg-hover/30">
+      <td className="py-1.5 px-1.5">
+        <span className="text-text-primary font-medium">{collateralSymbol}</span>
+        <span className="text-text-tertiary"> / {assetSymbol}</span>
+      </td>
+      <td className="text-right py-1.5 px-1.5 font-mono text-text-primary">
+        {formatPercent(lltv)}
+      </td>
+      <td className="text-right py-1.5 px-1.5">
+        <span className="font-mono text-text-primary">{formatTokenAmount(position.supplyAssets, decimals)}</span>
+        <span className="text-text-tertiary ml-1">({pctOfAdapter.toFixed(0)}%)</span>
+      </td>
+      <td className="text-right py-1.5 px-1.5 w-16">
+        <UtilizationBar utilization={utilization} compact />
+      </td>
+    </tr>
   );
 }

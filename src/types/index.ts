@@ -231,6 +231,17 @@ export interface GateConfig {
   sendAssets: Address;
 }
 
+/** Per-market position data for a Market V1 adapter on a V2 vault */
+export interface AdapterMarketPosition {
+  marketId: MarketId;
+  supplyAssets: bigint;
+  supplyShares: bigint;
+  params: MarketParams | null;
+  marketState: MarketState | null;
+  loanToken: TokenInfo | null;
+  collateralToken: TokenInfo | null;
+}
+
 // ============================================================
 // Pending Actions
 // ============================================================
