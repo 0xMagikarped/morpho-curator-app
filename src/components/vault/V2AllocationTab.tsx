@@ -43,6 +43,7 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
     marketAdapter ?? undefined,
     assetSymbol,
     decimals,
+    vault?.asset,
   );
 
   const [showMarketId, setShowMarketId] = useState(false);

@@ -1,38 +1,41 @@
 /**
  * V2 three-level cap computation: adapter → collateral → market.
  * Each level has its own risk ID computed from relevant parameters.
+ *
+ * Risk IDs use the idData encoding from the V2 vault contract:
+ *   - Adapter: abi.encode("this", adapterAddress)
+ *   - Collateral: abi.encode("collateralToken", collateralToken)
+ *   - Market: abi.encode("this/marketParams", adapterAddress, MarketParams)
+ * The on-chain ID is keccak256(idData).
  */
-import { keccak256, encodeAbiParameters, type Address, type PublicClient } from 'viem';
+import { type Address, type PublicClient } from 'viem';
 import { metaMorphoV2Abi } from '../contracts/metaMorphoV2Abi';
+import {
+  adapterIdData,
+  collateralIdData,
+  marketIdData,
+  capId,
+} from './adapterCapUtils';
+import type { MarketParams } from '../../types';
 
 // ============================================================
 // Risk ID Computation
 // ============================================================
 
-/** Adapter-level risk ID */
+/** Adapter-level risk ID: keccak256(abi.encode("this", adapter)) */
 export function adapterRiskId(adapterAddress: Address): `0x${string}` {
-  return keccak256(
-    encodeAbiParameters(
-      [{ type: 'address' }],
-      [adapterAddress],
-    ),
-  );
+  return capId(adapterIdData(adapterAddress));
 }
 
-/** Collateral-level risk ID */
+/** Collateral-level risk ID: keccak256(abi.encode("collateralToken", token)) */
 export function collateralRiskId(
-  adapterAddress: Address,
+  _adapterAddress: Address,
   collateralToken: Address,
 ): `0x${string}` {
-  return keccak256(
-    encodeAbiParameters(
-      [{ type: 'address' }, { type: 'address' }],
-      [adapterAddress, collateralToken],
-    ),
-  );
+  return capId(collateralIdData(collateralToken));
 }
 
-/** Market-level risk ID (full market params) */
+/** Market-level risk ID: keccak256(abi.encode("this/marketParams", adapter, MarketParams)) */
 export function marketRiskId(
   adapterAddress: Address,
   loanToken: Address,
@@ -41,19 +44,8 @@ export function marketRiskId(
   irm: Address,
   lltv: bigint,
 ): `0x${string}` {
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'uint256' },
-      ],
-      [adapterAddress, loanToken, collateralToken, oracle, irm, lltv],
-    ),
-  );
+  const params: MarketParams = { loanToken, collateralToken, oracle, irm, lltv };
+  return capId(marketIdData(adapterAddress, params));
 }
 
 // ============================================================

@@ -1,5 +1,6 @@
 /**
  * Hook for V2 Allocation Tab: combines adapter market positions with 3-level caps.
+ * Discovers ALL markets with caps (not just active positions) via API + RPC fallback.
  */
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
@@ -13,6 +14,10 @@ import {
   effectiveCap,
   type CapPair,
 } from '../v2/capComputation';
+import {
+  discoverAllCappedMarkets,
+  mergePositionsWithDiscoveredMarkets,
+} from '../data/v2MarketDiscovery';
 import { vaultKeys } from '../queryKeys';
 import type { AdapterMarketPosition, MarketParams } from '../../types';
 
@@ -51,6 +56,25 @@ export interface V2AllocationData {
 }
 
 // ============================================================
+// Hook: discover all capped markets for the adapter
+// ============================================================
+
+function useDiscoveredMarkets(
+  chainId: number | undefined,
+  vaultAddress: Address | undefined,
+  adapterAddress: Address | undefined,
+  loanTokenAddress: Address | undefined,
+) {
+  return useQuery({
+    queryKey: [...vaultKeys.adapters(chainId!, vaultAddress!), 'discovered-markets', adapterAddress],
+    queryFn: () => discoverAllCappedMarkets(chainId!, vaultAddress!, adapterAddress!, loanTokenAddress!),
+    enabled: !!chainId && !!vaultAddress && !!adapterAddress && !!loanTokenAddress,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  });
+}
+
+// ============================================================
 // Hook: read caps for all markets in the adapter
 // ============================================================
 
@@ -61,7 +85,7 @@ function useMarketCaps(
   positions: AdapterMarketPosition[] | undefined,
 ) {
   return useQuery({
-    queryKey: [...vaultKeys.adapters(chainId!, vaultAddress!), 'allocation-caps', adapterAddress],
+    queryKey: [...vaultKeys.adapters(chainId!, vaultAddress!), 'allocation-caps', adapterAddress, positions?.length],
     queryFn: async (): Promise<Map<string, CapPair>> => {
       if (!chainId || !vaultAddress || !adapterAddress || !positions) {
         return new Map();
@@ -122,7 +146,9 @@ export function useV2AllocationData(
   adapter: V2AdapterFull | undefined,
   assetSymbol: string,
   assetDecimals: number,
+  loanTokenAddress: Address | undefined,
 ) {
+  // Active positions from adapter (markets with supply > 0)
   const { data: positions, isLoading: posLoading } = useAdapterMarketPositions(
     chainId,
     adapter?.address,
@@ -130,18 +156,31 @@ export function useV2AllocationData(
     adapter?.type ?? 'unknown',
   );
 
+  // ALL capped markets (including 0-allocation ones)
+  const { data: discovered, isLoading: discLoading } = useDiscoveredMarkets(
+    chainId,
+    vaultAddress,
+    adapter?.address,
+    loanTokenAddress,
+  );
+
+  // Merge positions + discovered markets
+  const mergedPositions = positions && discovered
+    ? mergePositionsWithDiscoveredMarkets(positions, discovered)
+    : positions;
+
   const { data: capMap, isLoading: capsLoading } = useMarketCaps(
     chainId,
     vaultAddress,
     adapter?.address,
-    positions,
+    mergedPositions,
   );
 
-  const isLoading = posLoading || capsLoading;
+  const isLoading = posLoading || discLoading || capsLoading;
 
   // Build allocation data
   const data: V2AllocationData | null = (() => {
-    if (!adapter || !positions || !totalAssets) return null;
+    if (!adapter || !mergedPositions || !totalAssets) return null;
 
     const adapterTotal = adapter.realAssets;
     const idle = totalAssets > adapterTotal ? totalAssets - adapterTotal : 0n;
@@ -156,7 +195,7 @@ export function useV2AllocationData(
     });
 
     // Market rows
-    for (const pos of positions) {
+    for (const pos of mergedPositions) {
       const lltv = pos.params ? Number(pos.params.lltv) / 1e18 : 0;
 
       const share = pos.marketState && pos.marketState.totalSupplyAssets > 0n
