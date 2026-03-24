@@ -215,22 +215,42 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
           </div>
         </div>
 
-        {/* Allocators */}
-        {allocators && allocators.length > 0 && (
-          <div className="border-t border-border-subtle pt-3 mt-3">
+        {/* Allocators + Public Allocator Status */}
+        <div className="border-t border-border-subtle pt-3 mt-3">
+          <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs text-text-tertiary">Allocators</span>
-            <div className="flex flex-wrap gap-2 mt-1.5">
-              {allocators.map((addr) => (
-                <span key={addr} className="inline-flex items-center gap-1 text-sm font-mono text-text-primary">
-                  {truncateAddress(addr)}
-                  {userAddress && addr.toLowerCase() === userAddress.toLowerCase() && (
-                    <Badge variant="success" className="text-[9px]">You</Badge>
-                  )}
+            {(() => {
+              const paAddr = chainConfig?.periphery?.publicAllocator;
+              const paEnabled = paAddr && allocators?.some(
+                (a) => a.toLowerCase() === paAddr.toLowerCase(),
+              );
+              return (
+                <span className={`inline-flex items-center gap-1 text-[10px] ${paEnabled ? 'text-success' : 'text-text-tertiary'}`}>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${paEnabled ? 'bg-success' : 'bg-text-tertiary/40'}`} />
+                  Public Allocator {paEnabled ? 'Enabled' : paAddr ? 'Disabled' : 'N/A'}
                 </span>
-              ))}
-            </div>
+              );
+            })()}
           </div>
-        )}
+          {allocators && allocators.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {allocators.map((addr) => {
+                const isPa = chainConfig?.periphery?.publicAllocator?.toLowerCase() === addr.toLowerCase();
+                return (
+                  <span key={addr} className="inline-flex items-center gap-1 text-sm font-mono text-text-primary">
+                    {truncateAddress(addr)}
+                    {isPa && <Badge variant="info" className="text-[9px]">PA</Badge>}
+                    {userAddress && addr.toLowerCase() === userAddress.toLowerCase() && (
+                      <Badge variant="success" className="text-[9px]">You</Badge>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-text-tertiary">None</p>
+          )}
+        </div>
       </Card>
 
       {/* Oracle Health Dashboard */}
