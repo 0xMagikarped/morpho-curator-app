@@ -21,7 +21,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       'https://sei-evm-rpc.publicnode.com',
     ],
     blockExplorer: 'https://seiscan.io',
-    morphoBlue: '0xc9cdac20fceaaf616f7eb0bb6cd2c69dcfa9094c' as Address,
+    morphoBlue: '0xc9cDAc20FCeAAF616f7EB0bb6Cd2c69dcfa9094c' as Address,
     vaultFactories: {
       v1: '0x8Dea49ec5bd5AeAc8bcf96B3E187F59354118291' as Address, // MetaMorpho Factory V1.1
     },
@@ -80,7 +80,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     name: 'Ethereum',
     rpcUrls: ['https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com'],
     blockExplorer: 'https://etherscan.io',
-    morphoBlue: '0xBBBBBbbBBb9cc5e90e3b3Af64bdAF62C37EEFFCb' as Address,
+    morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
     vaultFactories: {
       v1: '0x1897A8997241C1cD4bD0698647e4EB7213535c24' as Address,
       v2: '0xA1D94F746dEfa1928926b84fB2596c06926C0405' as Address,
@@ -143,7 +143,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     name: 'Base',
     rpcUrls: ['https://mainnet.base.org', 'https://base.llamarpc.com'],
     blockExplorer: 'https://basescan.org',
-    morphoBlue: '0xBBBBBbbBBb9cc5e90e3b3Af64bdAF62C37EEFFCb' as Address,
+    morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
     vaultFactories: {
       v1: '0xFf62A7c278C62eD665133147129245053Bbf5918' as Address,
       v2: '0x4501125508079A99ebBebCE205DeC9593C2b5857' as Address,

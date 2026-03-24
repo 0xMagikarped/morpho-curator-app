@@ -261,7 +261,7 @@ export async function fetchVaultFromApi(
       name: vault.name,
       symbol: vault.symbol,
       asset: vault.asset.address as Address,
-      morphoBlue: '0xBBBBBbbBBb9cc5e90e3b3Af64bdAF62C37EEFFCb' as Address,
+      morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
       allocators: [] as Address[],
       owner: s.owner as Address,
       curator: s.curator as Address,
