@@ -274,6 +274,24 @@ async function safeRead<T>(
   }
 }
 
+/**
+ * Lightweight vault preview — just name + version. Used for the "Add Vault" dialog.
+ */
+export async function fetchVaultPreview(
+  chainId: number,
+  vaultAddress: Address,
+): Promise<{ name: string; version: VaultVersion }> {
+  const client = getPublicClient(chainId);
+  const version = await detectVaultVersion(client, chainId, vaultAddress);
+  const name = await safeRead<string>(client, {
+    address: vaultAddress,
+    abi: [{ inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' }],
+    functionName: 'name',
+  });
+  if (!name) throw new Error('Could not read vault name — is this a valid vault address?');
+  return { name, version };
+}
+
 export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address) {
   const client = getPublicClient(chainId);
   const version = await detectVaultVersion(client, chainId, vaultAddress);
