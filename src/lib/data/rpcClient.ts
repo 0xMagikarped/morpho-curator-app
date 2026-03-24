@@ -485,9 +485,13 @@ export interface V2AdapterData {
 
 /**
  * Fetch all adapters for a V2 vault, including their realAssets and type.
+ * Uses factory-based detection first (canonical), then falls back to probe-based.
  */
 export async function fetchV2Adapters(chainId: number, vaultAddress: Address): Promise<V2AdapterData[]> {
   const client = getPublicClient(chainId);
+  const chainConfig = getChainConfig(chainId);
+  const marketFactory = chainConfig?.periphery.morphoMarketV1AdapterV2Factory;
+  const vaultFactory = chainConfig?.periphery.morphoVaultV1AdapterFactory;
 
   // Read adaptersLength
   const length = await safeRead<bigint>(client, {
@@ -510,31 +514,64 @@ export async function fetchV2Adapters(chainId: number, vaultAddress: Address): P
     ),
   );
 
-  // For each adapter, read realAssets + probe type (vault adapter vs market adapter)
-  const results = await Promise.all(
-    adapterAddresses
-      .filter((addr): addr is Address => addr !== null)
-      .map(async (addr) => {
-        const [realAssets, name, underlyingVault, morpho] = await Promise.all([
-          safeRead<bigint>(client, { address: addr, abi: adapterAbi, functionName: 'realAssets' }),
-          safeRead<string>(client, { address: addr, abi: adapterAbi, functionName: 'name' }),
-          safeRead<Address>(client, { address: addr, abi: adapterAbi, functionName: 'VAULT' }),
-          safeRead<Address>(client, { address: addr, abi: adapterAbi, functionName: 'MORPHO' }),
-        ]);
+  const validAddresses = adapterAddresses.filter((addr): addr is Address => addr !== null);
 
-        let type: V2AdapterData['type'] = 'unknown';
+  // Batch factory checks for all adapters at once (if factories exist)
+  const factoryCheckAbi = [
+    { inputs: [{ name: 'adapter', type: 'address' }], name: 'isMorphoMarketV1AdapterV2', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+    { inputs: [{ name: 'adapter', type: 'address' }], name: 'isMorphoVaultV1Adapter', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
+  ] as const;
+
+  const factoryResults = await Promise.all(
+    validAddresses.map(async (addr) => {
+      const [isMarket, isVault] = await Promise.all([
+        marketFactory
+          ? safeRead<boolean>(client, { address: marketFactory, abi: factoryCheckAbi, functionName: 'isMorphoMarketV1AdapterV2', args: [addr] })
+          : null,
+        vaultFactory
+          ? safeRead<boolean>(client, { address: vaultFactory, abi: factoryCheckAbi, functionName: 'isMorphoVaultV1Adapter', args: [addr] })
+          : null,
+      ]);
+      return { address: addr, isMarket: isMarket === true, isVault: isVault === true };
+    }),
+  );
+
+  // For each adapter, read realAssets + type-specific data
+  const results = await Promise.all(
+    factoryResults.map(async ({ address: addr, isMarket, isVault }) => {
+      // Determine type from factory first, then probe as fallback
+      let type: V2AdapterData['type'] = 'unknown';
+      if (isMarket) type = 'market-v1';
+      else if (isVault) type = 'vault-v1';
+
+      const [realAssets, name, underlyingVault, morpho] = await Promise.all([
+        safeRead<bigint>(client, { address: addr, abi: adapterAbi, functionName: 'realAssets' }),
+        safeRead<string>(client, { address: addr, abi: adapterAbi, functionName: 'name' }),
+        safeRead<Address>(client, { address: addr, abi: adapterAbi, functionName: 'VAULT' }),
+        safeRead<Address>(client, { address: addr, abi: adapterAbi, functionName: 'MORPHO' }),
+      ]);
+
+      // Probe-based fallback if factory didn't identify it
+      if (type === 'unknown') {
         if (underlyingVault) type = 'vault-v1';
         else if (morpho) type = 'market-v1';
+      }
 
-        return {
-          address: addr,
-          realAssets: realAssets ?? 0n,
-          name,
-          underlyingVault: underlyingVault ?? null,
-          morphoBlue: morpho ?? null,
-          type,
-        };
-      }),
+      // If factory confirmed market-v1 but MORPHO() probe failed, use chain's Morpho Blue address
+      let morphoBlue = morpho ?? null;
+      if (type === 'market-v1' && !morphoBlue && chainConfig) {
+        morphoBlue = chainConfig.morphoBlue;
+      }
+
+      return {
+        address: addr,
+        realAssets: realAssets ?? 0n,
+        name,
+        underlyingVault: underlyingVault ?? null,
+        morphoBlue,
+        type,
+      };
+    }),
   );
 
   return results;

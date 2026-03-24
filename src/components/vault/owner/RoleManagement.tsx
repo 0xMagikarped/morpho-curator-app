@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { isAddress } from 'viem';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
+import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
 import { truncateAddress } from '../../../lib/utils/format';
 import { metaMorphoV1Abi } from '../../../lib/contracts/abis';
@@ -58,6 +59,12 @@ export function RoleManagement({
           functionName="submitGuardian"
           onSuccess={onSuccess}
           hint="Subject to timelock delay"
+        />
+        <div className="border-t border-border-subtle" />
+        <SetAllocator
+          chainId={chainId}
+          vaultAddress={vaultAddress}
+          onSuccess={onSuccess}
         />
         <div className="border-t border-border-subtle" />
         <TransferOwnership
@@ -144,6 +151,116 @@ function RoleField({
         </Button>
       </div>
       {hint && <p className="text-[10px] text-text-tertiary mt-1">{hint}</p>}
+      {error && <p className="text-[10px] text-danger mt-1">{error}</p>}
+      {txError && <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>}
+    </div>
+  );
+}
+
+function SetAllocator({
+  chainId,
+  vaultAddress,
+  onSuccess,
+}: {
+  chainId: number;
+  vaultAddress: Address;
+  onSuccess: () => void;
+}) {
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const { writeContract, data: hash, isPending, error: txError, reset } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  // Check if the entered address is currently an allocator
+  const checkAddress = isAddress(value) ? (value as Address) : undefined;
+  const { data: isCurrentlyAllocator, refetch: refetchCheck } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV1Abi,
+    functionName: 'isAllocator',
+    args: checkAddress ? [checkAddress] : undefined,
+    chainId,
+    query: { enabled: !!checkAddress },
+  });
+
+  useEffect(() => {
+    if (isSuccess) {
+      setValue('');
+      setError(null);
+      reset();
+      refetchCheck();
+      onSuccess();
+    }
+  }, [isSuccess, onSuccess, reset, refetchCheck]);
+
+  const handleGrant = () => {
+    setError(null);
+    if (!isAddress(value)) {
+      setError('Invalid address');
+      return;
+    }
+    writeContract({
+      address: vaultAddress,
+      abi: metaMorphoV1Abi,
+      functionName: 'setIsAllocator',
+      args: [value as Address, true],
+      chainId,
+    });
+  };
+
+  const handleRevoke = () => {
+    setError(null);
+    if (!isAddress(value)) {
+      setError('Invalid address');
+      return;
+    }
+    writeContract({
+      address: vaultAddress,
+      abi: metaMorphoV1Abi,
+      functionName: 'setIsAllocator',
+      args: [value as Address, false],
+      chainId,
+    });
+  };
+
+  const isBusy = isPending || isConfirming;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs text-text-secondary font-medium">Set Allocator</span>
+        {checkAddress && isCurrentlyAllocator !== undefined && (
+          <Badge variant={isCurrentlyAllocator ? 'success' : 'default'}>
+            {isCurrentlyAllocator ? 'Active' : 'Not allocator'}
+          </Badge>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="0x... allocator address"
+          className="flex-1 bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary min-w-0 focus:outline-none focus:border-border-focus"
+        />
+        <Button
+          size="sm"
+          onClick={handleGrant}
+          disabled={!value || isBusy}
+          loading={isBusy}
+        >
+          {isPending ? 'Confirm...' : isConfirming ? 'Confirming...' : 'Grant'}
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          onClick={handleRevoke}
+          disabled={!value || isBusy}
+          loading={isBusy}
+        >
+          Revoke
+        </Button>
+      </div>
+      <p className="text-[10px] text-text-tertiary mt-1">Grant or revoke allocator role (can reallocate between markets)</p>
       {error && <p className="text-[10px] text-danger mt-1">{error}</p>}
       {txError && <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>}
     </div>
