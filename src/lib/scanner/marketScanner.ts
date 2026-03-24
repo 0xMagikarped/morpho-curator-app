@@ -418,6 +418,28 @@ function usesExplorerApi(chainId: number): boolean {
 }
 
 /**
+ * Hardcoded seed markets for SEI.
+ * SEI public RPCs prune historical transactions, and seitrace pagination
+ * can be unreliable. These seeds ensure known markets are always present.
+ */
+function getSeiSeedMarkets(): DiscoveredMarket[] {
+  const chainId = 1329;
+  return [
+    // PYUSD0 idle market (collateral=0x0, lltv=0)
+    {
+      id: '0xe3c959829d236e3838558318340129a737ae0fffa128d891d1d22728d081e419',
+      loanToken: '0x142cdc44890978B506e745bB3Bd11607B7f7faEf' as Address,
+      collateralToken: '0x0000000000000000000000000000000000000000' as Address,
+      oracle: '0x0000000000000000000000000000000000000000' as Address,
+      irm: '0x0000000000000000000000000000000000000000' as Address,
+      lltv: 0n,
+      discoveredAtBlock: 197922132,
+      chainId,
+    },
+  ];
+}
+
+/**
  * Run an incremental scan to discover markets on a chain.
  *
  * Strategy per chain:
@@ -433,13 +455,25 @@ export async function runIncrementalScan(
 
   const allMarkets: DiscoveredMarket[] = [];
 
+  // Step 0: Inject hardcoded seed markets (always present, avoids RPC/API fragility)
+  if (chainId === 1329) {
+    const seeds = getSeiSeedMarkets();
+    allMarkets.push(...seeds);
+  }
+
   // Step 1: Vault-based discovery (reliable, works on all RPCs)
   const knownVaultAddrs = getKnownVaultAddresses(chainId);
   if (knownVaultAddrs.length > 0) {
+    const existingSeedIds = new Set(allMarkets.map((m) => m.id));
     const vaultMarkets = await discoverMarketsFromVaults(
       chainId, knownVaultAddrs, onProgress,
     );
-    allMarkets.push(...vaultMarkets);
+    for (const m of vaultMarkets) {
+      if (!existingSeedIds.has(m.id)) {
+        allMarkets.push(m);
+        existingSeedIds.add(m.id);
+      }
+    }
   }
 
   if (usesExplorerApi(chainId)) {
