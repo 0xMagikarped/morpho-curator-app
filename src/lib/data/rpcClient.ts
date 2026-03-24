@@ -83,7 +83,7 @@ export async function fetchTokenInfo(
 ): Promise<TokenInfo> {
   const ZERO = '0x0000000000000000000000000000000000000000' as Address;
   if (!address || address === ZERO) {
-    throw new Error(`Cannot fetch token info for zero address`);
+    return { address: ZERO, name: 'None', symbol: 'IDLE', decimals: 18 };
   }
 
   const client = getPublicClient(chainId);
