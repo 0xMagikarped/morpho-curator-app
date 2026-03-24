@@ -171,9 +171,9 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     if (allChainMarkets && vaultAssetLower) {
       for (const m of allChainMarkets) {
         if (m.loanToken.toLowerCase() !== vaultAssetLower) continue;
-        if (m.collateralToken.toLowerCase() === ZERO_ADDRESS && (m.lltv === '0' || m.lltv === '0n')) continue;
         if (existingMarketIds.has(m.marketId)) continue;
 
+        const isIdle = m.collateralToken.toLowerCase() === ZERO_ADDRESS && (m.lltv === '0' || m.lltv === '0n');
         const lltv = Number(m.lltv) / 1e18;
 
         // Check on-chain state for this discovered market
@@ -194,12 +194,15 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
           }
         }
 
+        const collateralLabel = isIdle ? 'IDLE' : (m.collateralTokenSymbol || m.collateralToken.slice(0, 10));
+        const loanLabel = m.loanTokenSymbol || m.loanToken.slice(0, 10);
+
         items.push({
           marketId: m.marketId,
           status,
-          label: `${m.collateralTokenSymbol || m.collateralToken.slice(0, 10)} / ${m.loanTokenSymbol || m.loanToken.slice(0, 10)}`,
-          collateralSymbol: m.collateralTokenSymbol || m.collateralToken.slice(0, 10),
-          loanSymbol: m.loanTokenSymbol || m.loanToken.slice(0, 10),
+          label: `${collateralLabel} / ${loanLabel}`,
+          collateralSymbol: collateralLabel,
+          loanSymbol: loanLabel,
           lltv,
           supplyCap,
           supplyAssets: 0n,
