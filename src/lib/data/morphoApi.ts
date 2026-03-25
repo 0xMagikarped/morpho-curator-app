@@ -264,6 +264,7 @@ export async function fetchVaultFromApi(
       morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
       allocators: [] as Address[],
       owner: s.owner as Address,
+      pendingOwner: '0x0000000000000000000000000000000000000000' as Address,
       curator: s.curator as Address,
       timelock: BigInt(s.timelock),
       fee: feeWad,

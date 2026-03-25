@@ -499,6 +499,13 @@ export const metaMorphoV1Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  {
+    inputs: [],
+    name: 'pendingOwner',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
   // ---- Write Functions (Guardian) ----
   {
     inputs: [],
@@ -735,6 +742,14 @@ export const metaMorphoV2Abi = [
   {
     inputs: [{ name: 'newOwner', type: 'address' }],
     name: 'transferOwnership', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'acceptOwnership', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'pendingOwner', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function',
   },
   // Multicall (V2 returns void; V1 returns bytes[] — void ABI works for sendTransaction on both)
   {

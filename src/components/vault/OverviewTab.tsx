@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useAccount } from 'wagmi';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
 import { VaultOracleDashboard } from '../oracle/VaultOracleDashboard';
 import { RiskAlertBanner } from '../risk/RiskAlertBanner';
 import { SharePriceChart } from '../risk/SharePriceChart';
@@ -14,6 +16,7 @@ import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
 import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 import { getEmergencyRole } from '../../types';
+import { metaMorphoV1Abi, metaMorphoV2Abi } from '../../lib/contracts/abis';
 import type { RiskAlert } from '../../lib/risk/riskTypes';
 
 interface OverviewTabProps {
@@ -29,6 +32,14 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
   const { data: markets } = useVaultMarketsFromApi(chainId, vaultAddress);
   const { data: sharePriceHistory } = useSharePriceHistory(chainId, vaultAddress);
   const { data: allocators } = useVaultAllocators(chainId, vaultAddress);
+
+  // Live RPC read for pendingOwner (Ownable2Step) — works for both V1 and V2
+  const { data: pendingOwner, refetch: refetchPendingOwner } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV1Abi,
+    functionName: 'pendingOwner',
+    chainId,
+  });
 
   const oracleAddresses = useMemo(() => {
     if (!markets) return [];
@@ -182,6 +193,17 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
             explorerUrl={chainConfig?.blockExplorer}
             isConnected={role.isOwner}
           />
+          {pendingOwner && !isZeroAddr(pendingOwner) && (
+            <PendingOwnerItem
+              pendingOwner={pendingOwner}
+              explorerUrl={chainConfig?.blockExplorer}
+              chainId={chainId}
+              vaultAddress={vaultAddress}
+              vaultVersion={vault.version}
+              userAddress={userAddress}
+              onAccepted={refetchPendingOwner}
+            />
+          )}
           <RoleItem
             label="Curator"
             address={vault.curator}
@@ -345,6 +367,83 @@ function RoleItem({
         )}
       </div>
       {isConnected && <Badge variant="success">You</Badge>}
+    </div>
+  );
+}
+
+function PendingOwnerItem({
+  pendingOwner,
+  explorerUrl,
+  chainId,
+  vaultAddress,
+  vaultVersion,
+  userAddress,
+  onAccepted,
+}: {
+  pendingOwner: string;
+  explorerUrl?: string;
+  chainId: number;
+  vaultAddress: Address;
+  vaultVersion: 'v1' | 'v2';
+  userAddress?: Address;
+  onAccepted: () => void;
+}) {
+  const isPendingOwner = userAddress && pendingOwner.toLowerCase() === userAddress.toLowerCase();
+  const queryClient = useQueryClient();
+  const abi = vaultVersion === 'v2' ? metaMorphoV2Abi : metaMorphoV1Abi;
+  const { writeContract, data: hash, isPending, error: txError } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  useEffect(() => {
+    if (isSuccess) {
+      queryClient.invalidateQueries({ queryKey: ['vault-full-data', chainId, vaultAddress] });
+      onAccepted();
+    }
+  }, [isSuccess, queryClient, chainId, vaultAddress, onAccepted]);
+
+  const handleAccept = () => {
+    writeContract({
+      address: vaultAddress,
+      abi,
+      functionName: 'acceptOwnership',
+      chainId,
+    });
+  };
+
+  const isBusy = isPending || isConfirming;
+
+  return (
+    <div className="flex items-center justify-between py-1">
+      <div>
+        <span className="text-xs text-text-tertiary flex items-center gap-1.5">
+          Pending Owner
+          <Badge variant="warning" className="text-[9px]">Awaiting acceptance</Badge>
+        </span>
+        <a
+          href={explorerUrl ? `${explorerUrl}/address/${pendingOwner}` : '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-sm font-mono text-text-primary hover:text-info mt-0.5"
+        >
+          {truncateAddress(pendingOwner)}
+        </a>
+      </div>
+      <div className="flex items-center gap-2">
+        {isPendingOwner && <Badge variant="success">You</Badge>}
+        {isPendingOwner && (
+          <Button
+            size="sm"
+            onClick={handleAccept}
+            disabled={isBusy}
+            loading={isBusy}
+          >
+            {isPending ? 'Confirm...' : isConfirming ? 'Confirming...' : 'Accept Ownership'}
+          </Button>
+        )}
+      </div>
+      {txError && (
+        <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>
+      )}
     </div>
   );
 }

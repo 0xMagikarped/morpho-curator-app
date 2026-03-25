@@ -181,6 +181,7 @@ const vaultV2FactoryAbi = [
 const vaultV2Abi = [
   { inputs: [], name: 'curator', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'owner', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'pendingOwner', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'adaptersLength', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: '', type: 'uint256' }], name: 'adapters', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: '', type: 'address' }], name: 'isAdapter', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
@@ -306,7 +307,7 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
 /** Fetch V1 MetaMorpho vault info */
 async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddress: Address, ZERO: Address) {
   const [
-    name, symbol, asset, morpho, owner, curator, timelock, fee,
+    name, symbol, asset, morpho, owner, pendingOwner, curator, timelock, fee,
     totalAssets, totalSupply, lastTotalAssets, feeRecipient, guardian,
   ] = await Promise.all([
     safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' }),
@@ -314,6 +315,7 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'MORPHO' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'pendingOwner' }),
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' }),
     safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' }),
     safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'fee' }),
@@ -339,6 +341,7 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
     asset,
     morphoBlue: morpho ?? getChainConfig(chainId)?.morphoBlue ?? ZERO,
     owner: owner ?? ZERO,
+    pendingOwner: pendingOwner ?? ZERO,
     curator: curator ?? ZERO,
     allocators: [] as Address[],
     timelock: timelock ?? 0n,
@@ -355,7 +358,7 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
 /** Fetch V2 vault info — completely different interface from V1 */
 async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddress: Address, ZERO: Address) {
   const [
-    name, symbol, asset, owner, curator,
+    name, symbol, asset, owner, pendingOwner, curator,
     totalAssets, totalSupply,
     performanceFee, managementFee,
     performanceFeeRecipient, managementFeeRecipient,
@@ -366,6 +369,7 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
     safeRead<string>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'symbol' }),
     safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'asset' }),
     safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'owner' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'pendingOwner' }),
     safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'curator' }),
     safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'totalAssets' }),
     safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'totalSupply' }),
@@ -395,6 +399,7 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
     asset,
     morphoBlue: getChainConfig(chainId)?.morphoBlue ?? ZERO,
     owner: owner ?? ZERO,
+    pendingOwner: pendingOwner ?? ZERO,
     curator: curator ?? ZERO,
     allocators: [] as Address[],
     // V2 has per-function timelocks, no single timelock value

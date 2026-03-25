@@ -85,6 +85,7 @@ interface VaultInfoBase {
   asset: Address;
   morphoBlue: Address;
   owner: Address;
+  pendingOwner: Address;
   curator: Address;
   allocators: Address[];
   timelock: bigint;
