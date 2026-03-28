@@ -120,7 +120,7 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-4 gap-x-3 gap-y-2">
+      <div className="grid gap-x-3 gap-y-2" style={{ gridTemplateColumns: '3fr 2fr 2fr 3fr' }}>
         <div className="min-w-0">
           <p className="text-[10px] text-text-tertiary uppercase tracking-wide">TVL</p>
           <p className="text-sm font-mono font-medium text-text-primary truncate" title={`${formatTokenAmount(vault.totalAssets, vault.assetInfo.decimals)} ${vault.assetInfo.symbol}`}>
