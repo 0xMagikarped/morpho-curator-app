@@ -33,6 +33,24 @@ export function formatTokenAmount(
 }
 
 /**
+ * Format a bigint token amount compactly for tight layouts (e.g., "258.3K", "3.5M").
+ * Falls back to standard formatting for small values.
+ */
+export function formatTokenAmountCompact(
+  value: bigint,
+  decimals: number,
+): string {
+  const formatted = formatUnits(value, decimals);
+  const num = parseFloat(formatted);
+  if (num === 0) return '0';
+  if (num < 0.01) return '<0.01';
+  if (num < 1_000) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (num < 1_000_000) return `${(num / 1_000).toFixed(1)}K`;
+  if (num < 1_000_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
+  return `${(num / 1_000_000_000).toFixed(2)}B`;
+}
+
+/**
  * Format a USD value with $ prefix and appropriate suffix (K, M, B).
  */
 export function formatUsd(value: number): string {

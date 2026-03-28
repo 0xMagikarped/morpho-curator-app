@@ -7,7 +7,7 @@ import { RoleBadge } from '../ui/RoleBadge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { Button } from '../ui/Button';
 import { useVaultInfo, useVaultAllocation, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
-import { formatTokenAmount, formatWadPercent, formatDuration, formatCountdown } from '../../lib/utils/format';
+import { formatTokenAmount, formatTokenAmountCompact, formatWadPercent, formatDuration, formatCountdown } from '../../lib/utils/format';
 import { truncateAddress } from '../../lib/utils/format';
 import type { Address } from 'viem';
 
@@ -120,25 +120,25 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-4 gap-4">
-        <div>
+      <div className="grid grid-cols-4 gap-x-3 gap-y-2">
+        <div className="min-w-0">
           <p className="text-[10px] text-text-tertiary uppercase tracking-wide">TVL</p>
-          <p className="text-sm font-mono font-medium text-text-primary">
-            {formatTokenAmount(vault.totalAssets, vault.assetInfo.decimals)} {vault.assetInfo.symbol}
+          <p className="text-sm font-mono font-medium text-text-primary truncate" title={`${formatTokenAmount(vault.totalAssets, vault.assetInfo.decimals)} ${vault.assetInfo.symbol}`}>
+            {formatTokenAmountCompact(vault.totalAssets, vault.assetInfo.decimals)} {vault.assetInfo.symbol}
           </p>
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Fee</p>
-          <p className="text-sm font-mono font-medium text-text-primary">{formatWadPercent(vault.fee)}</p>
+          <p className="text-sm font-mono font-medium text-text-primary truncate">{formatWadPercent(vault.fee)}</p>
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Timelock</p>
-          <p className="text-sm font-mono font-medium text-text-primary">{formatDuration(vault.timelock)}</p>
+          <p className="text-sm font-mono font-medium text-text-primary truncate">{formatDuration(vault.timelock)}</p>
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Idle</p>
-          <p className="text-sm font-mono font-medium text-text-primary">
-            {formatTokenAmount(idleAssets, vault.assetInfo.decimals)} ({idlePct.toFixed(1)}%)
+          <p className="text-sm font-mono font-medium text-text-primary truncate" title={`${formatTokenAmount(idleAssets, vault.assetInfo.decimals)} (${idlePct.toFixed(1)}%)`}>
+            {formatTokenAmountCompact(idleAssets, vault.assetInfo.decimals)} ({idlePct.toFixed(1)}%)
           </p>
         </div>
       </div>
