@@ -22,92 +22,118 @@ export interface MarketVaultAllocation {
 }
 
 // ============================================================
-// GraphQL query for API-supported chains
+// GraphQL query — fetch all vaults on chain, filter client-side
 // ============================================================
 
-const MARKET_VAULTS_QUERY = `
-  query GetVaultsByMarket($marketUniqueKey: String!, $chainId: Int!) {
-    marketByUniqueKey(uniqueKey: $marketUniqueKey, chainId: $chainId) {
-      uniqueKey
-      vaultAllocations {
-        vault {
-          address
-          name
-          symbol
-          state {
-            totalAssets
-            curator
+const VAULTS_BY_CHAIN_QUERY = `
+  query GetVaultsByChain($chainId: Int!, $first: Int!, $skip: Int!) {
+    vaults(
+      where: { chainId_in: [$chainId] }
+      first: $first
+      skip: $skip
+      orderBy: TotalAssetsUsd
+      orderDirection: Desc
+    ) {
+      items {
+        address
+        name
+        symbol
+        asset { symbol decimals }
+        state {
+          totalAssets
+          curator
+          allocation {
+            market {
+              uniqueKey
+            }
+            supplyAssets
+            supplyCap
           }
-          asset { symbol decimals }
         }
-        supplyAssets
-        supplyCap
       }
     }
   }
 `;
 
-interface ApiVaultAllocation {
-  vault: {
-    address: string;
-    name: string;
-    symbol: string;
-    state: {
-      totalAssets: string;
-      curator: string;
-    };
-    asset: { symbol: string; decimals: number };
-  };
+interface ApiAllocationItem {
+  market: { uniqueKey: string };
   supplyAssets: string;
   supplyCap: string;
 }
 
-interface ApiMarketVaultsResponse {
-  marketByUniqueKey: {
-    uniqueKey: string;
-    vaultAllocations: ApiVaultAllocation[];
-  } | null;
+interface ApiVaultItem {
+  address: string;
+  name: string;
+  symbol: string;
+  asset: { symbol: string; decimals: number };
+  state: {
+    totalAssets: string;
+    curator: string | { address: string } | null;
+    allocation: ApiAllocationItem[];
+  };
+}
+
+function resolveCurator(curator: string | { address: string } | null): Address {
+  if (!curator) return '0x0000000000000000000000000000000000000000' as Address;
+  if (typeof curator === 'string') return curator as Address;
+  return (curator.address ?? '0x0000000000000000000000000000000000000000') as Address;
 }
 
 async function fetchMarketVaultsFromApi(
   chainId: number,
   marketId: MarketId,
 ): Promise<MarketVaultAllocation[]> {
-  const res = await fetch('https://api.morpho.org/graphql', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query: MARKET_VAULTS_QUERY,
-      variables: { marketUniqueKey: marketId, chainId },
-    }),
-  });
+  const allVaults: MarketVaultAllocation[] = [];
+  let skip = 0;
+  const pageSize = 100;
 
-  if (!res.ok) {
-    throw new Error(`Morpho API returned ${res.status}`);
+  while (true) {
+    const res = await fetch('https://api.morpho.org/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: VAULTS_BY_CHAIN_QUERY,
+        variables: { chainId, first: pageSize, skip },
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Morpho API returned ${res.status}`);
+    const json = await res.json();
+    if (json.errors?.length) throw new Error(`Morpho API error: ${json.errors[0].message}`);
+
+    const items: ApiVaultItem[] = json.data?.vaults?.items ?? [];
+    if (items.length === 0) break;
+
+    for (const vault of items) {
+      const allocation = vault.state.allocation?.find(
+        (a) => a.market.uniqueKey.toLowerCase() === marketId.toLowerCase(),
+      );
+      if (allocation && (BigInt(allocation.supplyAssets) > 0n || BigInt(allocation.supplyCap) > 0n)) {
+        allVaults.push({
+          vaultAddress: vault.address as Address,
+          vaultName: vault.name,
+          vaultSymbol: vault.symbol,
+          curator: resolveCurator(vault.state.curator),
+          supplyAssets: BigInt(allocation.supplyAssets),
+          supplyCap: BigInt(allocation.supplyCap),
+          vaultTotalAssets: BigInt(vault.state.totalAssets),
+          assetSymbol: vault.asset.symbol,
+          assetDecimals: vault.asset.decimals,
+        });
+      }
+    }
+
+    if (items.length < pageSize) break;
+    skip += pageSize;
+
+    // Safety cap to prevent infinite loops
+    if (skip >= 1000) break;
   }
 
-  const json = await res.json();
-  if (json.errors?.length) {
-    throw new Error(`Morpho API error: ${json.errors[0].message}`);
-  }
-
-  const data = json.data as ApiMarketVaultsResponse;
-  const market = data.marketByUniqueKey;
-  if (!market?.vaultAllocations) return [];
-
-  return market.vaultAllocations
-    .filter((a) => BigInt(a.supplyAssets) > 0n || BigInt(a.supplyCap) > 0n)
-    .map((a) => ({
-      vaultAddress: a.vault.address as Address,
-      vaultName: a.vault.name,
-      vaultSymbol: a.vault.symbol,
-      curator: a.vault.state.curator as Address,
-      supplyAssets: BigInt(a.supplyAssets),
-      supplyCap: BigInt(a.supplyCap),
-      vaultTotalAssets: BigInt(a.vault.state.totalAssets),
-      assetSymbol: a.vault.asset.symbol,
-      assetDecimals: a.vault.asset.decimals,
-    }));
+  // Sort by supply descending
+  allVaults.sort((a, b) => (b.supplyAssets > a.supplyAssets ? 1 : -1));
+  console.log('[useMarketVaults] Found', allVaults.length, 'vaults for market', marketId);
+  return allVaults;
 }
 
 // ============================================================
@@ -118,7 +144,6 @@ export function useMarketVaults(chainId: number, marketId: MarketId) {
   return useQuery({
     queryKey: marketKeys.curators(chainId, marketId),
     queryFn: async () => {
-      // Try the API for supported chains
       if (isApiSupportedChain(chainId)) {
         try {
           return await fetchMarketVaultsFromApi(chainId, marketId);
@@ -127,12 +152,10 @@ export function useMarketVaults(chainId: number, marketId: MarketId) {
         }
       }
 
-      // Fallback: no data from API (unsupported chain or API error)
-      // The tracked vaults fallback is handled by the component using
-      // individual vault hooks (see useTrackedVaultMarketMatch below)
       return null; // signals "use fallback"
     },
-    staleTime: 60_000,
+    staleTime: 120_000,
+    refetchInterval: 300_000,
   });
 }
 

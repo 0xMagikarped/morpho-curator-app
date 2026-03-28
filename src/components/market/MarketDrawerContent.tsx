@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Check } from 'lucide-react';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
@@ -351,49 +351,21 @@ function TrackedVaultsResolver({
   vaultAddresses: `0x${string}`[];
   isApiChain: boolean;
 }) {
-  // Use individual hooks per vault — each one checks if it allocates to this market
-  // We render VaultMatchChecker for each, which collects results
-  const [matches, setMatches] = useState<MarketVaultAllocation[]>([]);
-  const [loadingCount, setLoadingCount] = useState(vaultAddresses.length);
+  const [results, setResults] = useState<Map<string, MarketVaultAllocation | null>>(new Map());
 
-  const handleResult = (alloc: MarketVaultAllocation | null, loading: boolean) => {
-    if (!loading) {
-      setLoadingCount((c) => Math.max(0, c - 1));
-      if (alloc) {
-        setMatches((prev) => {
-          if (prev.some((m) => m.vaultAddress.toLowerCase() === alloc.vaultAddress.toLowerCase())) {
-            return prev;
-          }
-          return [...prev, alloc];
-        });
-      }
-    }
-  };
+  const handleResult = useCallback((address: string, alloc: MarketVaultAllocation | null) => {
+    setResults((prev) => {
+      const next = new Map(prev);
+      next.set(address.toLowerCase(), alloc);
+      return next;
+    });
+  }, []);
 
-  if (loadingCount > 0) {
-    return (
-      <div className="space-y-2">
-        {Array.from({ length: 3 }, (_, i) => (
-          <div key={i} className="h-24 bg-bg-hover animate-shimmer" />
-        ))}
-        {/* Render matchers in the background */}
-        {vaultAddresses.map((addr) => (
-          <VaultMatchChecker
-            key={addr}
-            chainId={chainId}
-            vaultAddress={addr}
-            marketId={marketId}
-            onResult={handleResult}
-          />
-        ))}
-      </div>
-    );
-  }
+  const allLoaded = results.size >= vaultAddresses.length;
+  const matches = Array.from(results.values()).filter((v): v is MarketVaultAllocation => v !== null);
 
   return (
-    <>
-      <CuratorTabContent vaults={matches} isApiChain={isApiChain} />
-      {/* Keep matchers mounted */}
+    <div>
       {vaultAddresses.map((addr) => (
         <VaultMatchChecker
           key={addr}
@@ -403,7 +375,16 @@ function TrackedVaultsResolver({
           onResult={handleResult}
         />
       ))}
-    </>
+      {!allLoaded ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="h-24 bg-bg-hover animate-shimmer" />
+          ))}
+        </div>
+      ) : (
+        <CuratorTabContent vaults={matches} isApiChain={isApiChain} />
+      )}
+    </div>
   );
 }
 
@@ -416,17 +397,15 @@ function VaultMatchChecker({
   chainId: number;
   vaultAddress: `0x${string}`;
   marketId: MarketId;
-  onResult: (alloc: MarketVaultAllocation | null, loading: boolean) => void;
+  onResult: (address: string, alloc: MarketVaultAllocation | null) => void;
 }) {
   const { data, isLoading } = useTrackedVaultMarketMatch(chainId, vaultAddress, marketId);
-  const reported = useRef(false);
 
   useEffect(() => {
-    if (!isLoading && !reported.current) {
-      reported.current = true;
-      onResult(data ?? null, false);
+    if (!isLoading) {
+      onResult(vaultAddress, data ?? null);
     }
-  }, [isLoading, data, onResult]);
+  }, [isLoading, data, vaultAddress, onResult]);
 
   return null;
 }
