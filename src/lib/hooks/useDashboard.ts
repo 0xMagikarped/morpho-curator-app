@@ -23,6 +23,8 @@ export interface VaultSummary {
   chainId: number;
   name: string;
   symbol: string;
+  assetSymbol: string;
+  assetDecimals: number;
   version: VaultVersion;
   tvl: bigint;
   fee: bigint;
@@ -146,32 +148,39 @@ async function enrichVaultSummary(
 ): Promise<VaultSummary> {
   // Use Morpho GraphQL API for supported chains (Ethereum, Base)
   if (isApiSupportedChain(chainId)) {
-    const apiData = await fetchVaultFromApi(chainId, vaultAddress);
-    const info = apiData.info;
+    try {
+      const apiData = await fetchVaultFromApi(chainId, vaultAddress);
+      const info = apiData.info;
 
-    let role: VaultSummary['role'] = 'none';
-    if (walletAddress) {
-      const lowerWallet = walletAddress.toLowerCase();
-      if (info.owner.toLowerCase() === lowerWallet) role = 'owner';
-      else if (info.curator.toLowerCase() === lowerWallet) role = 'curator';
-      // Note: isAllocator requires an RPC call — skip for dashboard summary on API chains
+      let role: VaultSummary['role'] = 'none';
+      if (walletAddress) {
+        const lowerWallet = walletAddress.toLowerCase();
+        if (info.owner.toLowerCase() === lowerWallet) role = 'owner';
+        else if (info.curator.toLowerCase() === lowerWallet) role = 'curator';
+        // Note: isAllocator requires an RPC call — skip for dashboard summary on API chains
+      }
+
+      return {
+        address: vaultAddress,
+        chainId,
+        name: info.name,
+        symbol: info.symbol,
+        assetSymbol: info.assetInfo.symbol,
+        assetDecimals: info.assetInfo.decimals,
+        version: info.version,
+        tvl: info.totalAssets,
+        fee: info.fee,
+        timelock: info.timelock,
+        sharePrice: info.totalSupply > 0n
+          ? (info.totalAssets * (10n ** 18n)) / info.totalSupply
+          : 10n ** 18n,
+        role,
+        supplyQueueLength: apiData.allocation.supplyQueue.length,
+      };
+    } catch (apiError) {
+      console.warn(`[enrichVaultSummary] API failed for ${vaultAddress} on chain ${chainId}, falling back to RPC:`, apiError);
+      // Fall through to RPC fallback below
     }
-
-    return {
-      address: vaultAddress,
-      chainId,
-      name: info.name,
-      symbol: info.symbol,
-      version: info.version,
-      tvl: info.totalAssets,
-      fee: info.fee,
-      timelock: info.timelock,
-      sharePrice: info.totalSupply > 0n
-        ? (info.totalAssets * (10n ** 18n)) / info.totalSupply
-        : 10n ** 18n,
-      role,
-      supplyQueueLength: apiData.allocation.supplyQueue.length,
-    };
   }
 
   // Fallback: RPC for unsupported chains (SEI)
@@ -183,8 +192,12 @@ async function enrichVaultSummary(
   });
 
   const ONE_SHARE = 10n ** 18n;
+  const erc20Abi = [
+    { type: 'function', name: 'decimals', inputs: [], outputs: [{ type: 'uint8' }], stateMutability: 'view' },
+    { type: 'function', name: 'symbol', inputs: [], outputs: [{ type: 'string' }], stateMutability: 'view' },
+  ] as const;
 
-  const [vaultName, symbol, totalAssets, fee, timelock, sharePrice, sqLen, owner, curator] = await Promise.all([
+  const [vaultName, symbol, totalAssets, fee, timelock, sharePrice, sqLen, owner, curator, assetAddress] = await Promise.all([
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' }).catch(() => name),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' }).catch(() => '???'),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalAssets' }).catch(() => 0n),
@@ -194,7 +207,20 @@ async function enrichVaultSummary(
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'supplyQueueLength' }).catch(() => 0n),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' }).catch(() => '0x0'),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' }).catch(() => '0x0'),
+    client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }).catch(() => null),
   ]);
+
+  // Fetch asset decimals and symbol from the underlying ERC20
+  let assetDecimals = 18;
+  let assetSymbol = '???';
+  if (assetAddress) {
+    const [dec, sym] = await Promise.all([
+      client.readContract({ address: assetAddress as Address, abi: erc20Abi, functionName: 'decimals' }).catch(() => 18),
+      client.readContract({ address: assetAddress as Address, abi: erc20Abi, functionName: 'symbol' }).catch(() => '???'),
+    ]);
+    assetDecimals = Number(dec);
+    assetSymbol = sym as string;
+  }
 
   let role: VaultSummary['role'] = 'none';
   if (walletAddress) {
@@ -219,6 +245,8 @@ async function enrichVaultSummary(
     chainId,
     name: vaultName as string,
     symbol: symbol as string,
+    assetSymbol,
+    assetDecimals,
     version,
     tvl: totalAssets as bigint,
     fee: fee as bigint,
