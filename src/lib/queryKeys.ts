@@ -50,6 +50,8 @@ export const marketKeys = {
     [...marketKeys.lists(), 'discovered', chainId] as const,
   scanner: (chainId: number) =>
     [...marketKeys.all, 'scanner', chainId] as const,
+  curators: (chainId: number, marketId: string) =>
+    [...marketKeys.detail(chainId, marketId), 'curators'] as const,
 };
 
 export const oracleKeys = {

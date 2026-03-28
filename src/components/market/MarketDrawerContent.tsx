@@ -4,16 +4,21 @@ import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { OracleRiskCard } from '../oracle/OracleRiskCard';
 import { useEnrichedMarketState } from '../../lib/hooks/useMarketScanner';
+import { useMarketVaults, useTrackedVaultMarketMatch, type MarketVaultAllocation } from '../../lib/hooks/useMarketVaults';
+import { useAppStore } from '../../store/appStore';
+import { isApiSupportedChain } from '../../lib/data/morphoApi';
 import { truncateAddress, formatTokenAmount, formatWadPercent, formatPercent } from '../../lib/utils/format';
 import { cn } from '../../lib/utils/cn';
 import type { MarketRecord } from '../../lib/indexer/indexedDB';
+import type { MarketId } from '../../types';
 
-type Tab = 'overview' | 'risk' | 'notes';
+type Tab = 'overview' | 'risk' | 'notes' | 'curator';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'risk', label: 'Risk' },
   { id: 'notes', label: 'Notes' },
+  { id: 'curator', label: 'Curator' },
 ];
 
 interface MarketDrawerContentProps {
@@ -57,6 +62,9 @@ export function MarketDrawerContent({ chainId, market }: MarketDrawerContentProp
       )}
       {activeTab === 'notes' && (
         <NotesTab marketId={market.marketId} />
+      )}
+      {activeTab === 'curator' && (
+        <CuratorTab chainId={chainId} marketId={market.marketId as MarketId} />
       )}
     </div>
   );
@@ -273,6 +281,251 @@ function NotesTab({ marketId }: { marketId: string }) {
         className="w-full h-40 bg-bg-hover border border-border-subtle p-2 text-sm text-text-primary placeholder-text-tertiary resize-none outline-none focus:border-border-focus font-mono"
       />
       <p className="text-[10px] text-text-tertiary text-right">{notes.length} characters</p>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Curator Tab
+// ────────────────────────────────────────────────────────────
+
+function CuratorTab({ chainId, marketId }: { chainId: number; marketId: MarketId }) {
+  const { data: apiVaults, isLoading: apiLoading } = useMarketVaults(chainId, marketId);
+  const isApiChain = isApiSupportedChain(chainId);
+
+  // For non-API chains (or API failure), fall back to tracked vaults
+  const useFallback = apiVaults === null;
+
+  if (apiLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="h-24 bg-bg-hover animate-shimmer" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!useFallback && apiVaults) {
+    return <CuratorTabContent vaults={apiVaults} isApiChain={isApiChain} />;
+  }
+
+  // Fallback: use tracked vaults
+  return <TrackedVaultsFallback chainId={chainId} marketId={marketId} isApiChain={isApiChain} />;
+}
+
+function TrackedVaultsFallback({
+  chainId,
+  marketId,
+  isApiChain,
+}: {
+  chainId: number;
+  marketId: MarketId;
+  isApiChain: boolean;
+}) {
+  const trackedVaults = useAppStore((s) => s.trackedVaults);
+  const chainVaults = trackedVaults.filter((v) => v.chainId === chainId);
+
+  if (chainVaults.length === 0) {
+    return <CuratorEmptyState isApiChain={isApiChain} />;
+  }
+
+  return (
+    <TrackedVaultsResolver
+      chainId={chainId}
+      marketId={marketId}
+      vaultAddresses={chainVaults.map((v) => v.address)}
+      isApiChain={isApiChain}
+    />
+  );
+}
+
+function TrackedVaultsResolver({
+  chainId,
+  marketId,
+  vaultAddresses,
+  isApiChain,
+}: {
+  chainId: number;
+  marketId: MarketId;
+  vaultAddresses: `0x${string}`[];
+  isApiChain: boolean;
+}) {
+  // Use individual hooks per vault — each one checks if it allocates to this market
+  // We render VaultMatchChecker for each, which collects results
+  const [matches, setMatches] = useState<MarketVaultAllocation[]>([]);
+  const [loadingCount, setLoadingCount] = useState(vaultAddresses.length);
+
+  const handleResult = (alloc: MarketVaultAllocation | null, loading: boolean) => {
+    if (!loading) {
+      setLoadingCount((c) => Math.max(0, c - 1));
+      if (alloc) {
+        setMatches((prev) => {
+          if (prev.some((m) => m.vaultAddress.toLowerCase() === alloc.vaultAddress.toLowerCase())) {
+            return prev;
+          }
+          return [...prev, alloc];
+        });
+      }
+    }
+  };
+
+  if (loadingCount > 0) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="h-24 bg-bg-hover animate-shimmer" />
+        ))}
+        {/* Render matchers in the background */}
+        {vaultAddresses.map((addr) => (
+          <VaultMatchChecker
+            key={addr}
+            chainId={chainId}
+            vaultAddress={addr}
+            marketId={marketId}
+            onResult={handleResult}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <CuratorTabContent vaults={matches} isApiChain={isApiChain} />
+      {/* Keep matchers mounted */}
+      {vaultAddresses.map((addr) => (
+        <VaultMatchChecker
+          key={addr}
+          chainId={chainId}
+          vaultAddress={addr}
+          marketId={marketId}
+          onResult={handleResult}
+        />
+      ))}
+    </>
+  );
+}
+
+function VaultMatchChecker({
+  chainId,
+  vaultAddress,
+  marketId,
+  onResult,
+}: {
+  chainId: number;
+  vaultAddress: `0x${string}`;
+  marketId: MarketId;
+  onResult: (alloc: MarketVaultAllocation | null, loading: boolean) => void;
+}) {
+  const { data, isLoading } = useTrackedVaultMarketMatch(chainId, vaultAddress, marketId);
+  const reported = useRef(false);
+
+  useEffect(() => {
+    if (!isLoading && !reported.current) {
+      reported.current = true;
+      onResult(data ?? null, false);
+    }
+  }, [isLoading, data, onResult]);
+
+  return null;
+}
+
+function CuratorTabContent({
+  vaults,
+  isApiChain,
+}: {
+  vaults: MarketVaultAllocation[];
+  isApiChain: boolean;
+}) {
+  if (vaults.length === 0) {
+    return <CuratorEmptyState isApiChain={isApiChain} />;
+  }
+
+  const totalSupply = vaults.reduce((sum, v) => sum + v.supplyAssets, 0n);
+  // Use first vault's decimals/symbol for summary (all should share same asset)
+  const { assetDecimals, assetSymbol } = vaults[0];
+
+  return (
+    <div className="space-y-3">
+      <span className="text-[10px] text-text-tertiary uppercase tracking-wider">
+        Vaults Allocating to This Market
+      </span>
+
+      <div className="space-y-2">
+        {vaults.map((vault) => {
+          const capUsage =
+            vault.supplyCap > 0n
+              ? Number((vault.supplyAssets * 10000n) / vault.supplyCap) / 100
+              : 0;
+
+          return (
+            <div
+              key={vault.vaultAddress}
+              className="border border-border-subtle p-3 space-y-2"
+            >
+              <div>
+                <p className="text-sm text-text-primary font-medium">{vault.vaultName}</p>
+                <p className="text-[10px] font-mono text-text-tertiary">
+                  {truncateAddress(vault.vaultAddress)}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <DataPair
+                  label="Curator"
+                  value={truncateAddress(vault.curator)}
+                  mono
+                />
+                <DataPair
+                  label="Supply"
+                  value={`${formatTokenAmount(vault.supplyAssets, vault.assetDecimals)} ${vault.assetSymbol}`}
+                  mono
+                />
+                <DataPair
+                  label="Cap"
+                  value={
+                    vault.supplyCap > 0n
+                      ? `${formatTokenAmount(vault.supplyCap, vault.assetDecimals)} ${vault.assetSymbol}`
+                      : 'Unlimited'
+                  }
+                  mono
+                />
+                <DataPair
+                  label="Allocation %"
+                  value={vault.supplyCap > 0n ? `${capUsage.toFixed(1)}%` : 'N/A'}
+                  mono
+                />
+              </div>
+
+              {vault.supplyCap > 0n && (
+                <ProgressBar value={capUsage} height="sm" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Summary */}
+      <div className="border-t border-border-subtle pt-3 mt-3 space-y-1">
+        <DataPair label="Total Vaults" value={vaults.length.toString()} />
+        <DataPair
+          label="Total Supplied via Vaults"
+          value={`${formatTokenAmount(totalSupply, assetDecimals)} ${assetSymbol}`}
+          mono
+        />
+      </div>
+    </div>
+  );
+}
+
+function CuratorEmptyState({ isApiChain }: { isApiChain: boolean }) {
+  return (
+    <div className="text-text-tertiary text-xs text-center py-6 space-y-1">
+      <p>No vaults found allocating to this market.</p>
+      {!isApiChain && (
+        <p>Only tracked vaults are shown on this chain.</p>
+      )}
     </div>
   );
 }
