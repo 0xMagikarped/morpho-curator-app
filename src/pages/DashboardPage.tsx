@@ -30,35 +30,51 @@ export function DashboardPage() {
   const [newVaultAddress, setNewVaultAddress] = useState('');
   const [newVaultChainId, setNewVaultChainId] = useState(getSupportedChainIds()[0]);
 
+  // Filter out vaults with TVL < $1,000
+  const significantVaults = useMemo(() => {
+    if (!vaultSummaries) return [];
+    return vaultSummaries.filter((v) => {
+      const tvlUsd = Number(formatUnits(v.tvl, v.assetDecimals));
+      return tvlUsd >= 1_000;
+    });
+  }, [vaultSummaries]);
+
+  // Set of significant vault addresses (for filtering vault cards)
+  const significantVaultKeys = useMemo(() => {
+    return new Set(significantVaults.map((v) => `${v.chainId}-${v.address.toLowerCase()}`));
+  }, [significantVaults]);
+
+  const filteredTrackedVaults = useMemo(() => {
+    // While summaries are loading, show all tracked vaults
+    if (!vaultSummaries) return trackedVaults;
+    return trackedVaults.filter((v) =>
+      significantVaultKeys.has(`${v.chainId}-${v.address.toLowerCase()}`),
+    );
+  }, [trackedVaults, vaultSummaries, significantVaultKeys]);
+
   // Compute aggregate stats
   const stats = useMemo(() => {
-    if (!vaultSummaries || vaultSummaries.length === 0) {
+    if (significantVaults.length === 0) {
       return { tvl: 0, vaultCount: 0, marketCount: 0, pendingCount: 0 };
     }
-    // Approximate TVL in USD — for tokens with 6 decimals (USDC/USDT) or 18 decimals (ETH-like)
     let tvlUsd = 0;
-    for (const v of vaultSummaries) {
-      // Heuristic: if TVL raw is > 1e15, it's likely 18-decimal (ETH scale)
-      // Otherwise assume 6-decimal (USDC scale)
-      const tvlFloat = v.tvl > 10n ** 15n
-        ? Number(formatUnits(v.tvl, 18))
-        : Number(formatUnits(v.tvl, 6));
-      tvlUsd += tvlFloat;
+    for (const v of significantVaults) {
+      tvlUsd += Number(formatUnits(v.tvl, v.assetDecimals));
     }
     return {
       tvl: tvlUsd,
-      vaultCount: vaultSummaries.length,
-      marketCount: vaultSummaries.reduce((s, v) => s + v.supplyQueueLength, 0),
+      vaultCount: significantVaults.length,
+      marketCount: significantVaults.reduce((s, v) => s + v.supplyQueueLength, 0),
       pendingCount: pendingActionsList?.length ?? 0,
     };
-  }, [vaultSummaries, pendingActionsList]);
+  }, [significantVaults, pendingActionsList]);
 
   // Build risk alerts from vault data
   const riskAlerts = useMemo<RiskAlert[]>(() => {
-    if (!vaultSummaries) return [];
+    if (significantVaults.length === 0) return [];
     const now = Date.now();
     const out: RiskAlert[] = [];
-    for (const v of vaultSummaries) {
+    for (const v of significantVaults) {
       // Flag vaults with high idle ratio (>50% idle)
       if (v.tvl > 0n && v.supplyQueueLength === 0) {
         out.push({
@@ -73,22 +89,17 @@ export function DashboardPage() {
       }
     }
     return out;
-  }, [vaultSummaries]);
+  }, [significantVaults]);
 
   // Allocation segments for the bar
   const allocationSegments = useMemo(() => {
-    if (!vaultSummaries || vaultSummaries.length === 0) return [];
-    const total = vaultSummaries.reduce((s, v) => {
-      const f = v.tvl > 10n ** 15n
-        ? Number(formatUnits(v.tvl, 18))
-        : Number(formatUnits(v.tvl, 6));
-      return s + f;
+    if (significantVaults.length === 0) return [];
+    const total = significantVaults.reduce((s, v) => {
+      return s + Number(formatUnits(v.tvl, v.assetDecimals));
     }, 0);
     if (total === 0) return [];
-    return vaultSummaries.map((v) => {
-      const value = v.tvl > 10n ** 15n
-        ? Number(formatUnits(v.tvl, 18))
-        : Number(formatUnits(v.tvl, 6));
+    return significantVaults.map((v) => {
+      const value = Number(formatUnits(v.tvl, v.assetDecimals));
       return {
         name: v.name,
         value,
@@ -96,7 +107,7 @@ export function DashboardPage() {
         formattedValue: formatUsd(value),
       };
     });
-  }, [vaultSummaries]);
+  }, [significantVaults]);
 
   // Placeholder activity events (real implementation would fetch from indexer)
   const activityEvents: ActivityEvent[] = [];
@@ -277,7 +288,7 @@ export function DashboardPage() {
                 <Card className="!p-3">
                   <CardHeader className="!mb-2">
                     <CardTitle>Capital Allocation</CardTitle>
-                    <Badge>{trackedVaults.length} vault{trackedVaults.length !== 1 ? 's' : ''}</Badge>
+                    <Badge>{filteredTrackedVaults.length} vault{filteredTrackedVaults.length !== 1 ? 's' : ''}</Badge>
                   </CardHeader>
                   <AllocationBar segments={allocationSegments} />
                 </Card>
@@ -285,7 +296,7 @@ export function DashboardPage() {
 
               {/* Vault Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {trackedVaults.map((v) => (
+                {filteredTrackedVaults.map((v) => (
                   <VaultCard
                     key={`${v.chainId}-${v.address}`}
                     chainId={v.chainId}
