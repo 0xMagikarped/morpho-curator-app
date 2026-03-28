@@ -3,7 +3,6 @@ import type { Address } from 'viem';
 import type { MarketId } from '../../types';
 import { isApiSupportedChain } from '../data/morphoApi';
 import { marketKeys } from '../queryKeys';
-import { useAppStore } from '../../store/appStore';
 import { useVaultAllocation, useVaultInfo } from './useVault';
 
 // ============================================================
@@ -116,8 +115,6 @@ async function fetchMarketVaultsFromApi(
 // ============================================================
 
 export function useMarketVaults(chainId: number, marketId: MarketId) {
-  const trackedVaults = useAppStore((s) => s.trackedVaults);
-
   return useQuery({
     queryKey: marketKeys.curators(chainId, marketId),
     queryFn: async () => {
