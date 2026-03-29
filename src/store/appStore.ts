@@ -18,6 +18,7 @@ interface AppState {
   addTrackedVault: (vault: TrackedVault) => void;
   removeTrackedVault: (address: Address, chainId: number) => void;
   trackAll: (vaults: TrackedVault[]) => void;
+  dismissDiscovered: (vaults: Array<{ address: string; chainId: number }>) => void;
   isDismissed: (address: string, chainId: number) => boolean;
   syncFromEdgeConfig: (wallet: string) => Promise<void>;
   persistToEdgeConfig: (wallet: string) => Promise<void>;
@@ -90,6 +91,15 @@ export const useAppStore = create<AppState>()(
           const newKeys = new Set(newOnes.map(vaultKey));
           const dismissedVaults = state.dismissedVaults.filter((k) => !newKeys.has(k));
           return { trackedVaults: [...state.trackedVaults, ...newOnes], dismissedVaults };
+        }),
+
+      dismissDiscovered: (vaults) =>
+        set((state) => {
+          const keys = vaults.map(vaultKey);
+          const existing = new Set(state.dismissedVaults);
+          const newKeys = keys.filter((k) => !existing.has(k));
+          if (newKeys.length === 0) return state;
+          return { dismissedVaults: [...state.dismissedVaults, ...newKeys] };
         }),
 
       isDismissed: (address, chainId) => {
