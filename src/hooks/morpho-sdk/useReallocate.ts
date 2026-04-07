@@ -34,6 +34,11 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
     useWaitForTransactionReceipt({ hash });
 
   const reallocate = (allocations: MarketAllocationArg[]) => {
+    // Explicit gas limit needed for Safe wallet simulation on SEI and other L1/L2 chains.
+    // Without it, Safe's Tenderly simulation may use gas=0 and fail with "intrinsic gas too low".
+    // reallocate() does multiple SSTORE ops per market — budget ~150K per market + base.
+    const gasEstimate = BigInt(200_000 + allocations.length * 150_000);
+
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
@@ -45,6 +50,7 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
         })),
       ],
       chainId,
+      gas: gasEstimate,
     });
   };
 
