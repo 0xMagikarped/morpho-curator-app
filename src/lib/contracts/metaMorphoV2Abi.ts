@@ -239,6 +239,16 @@ export const metaMorphoV2Abi = [
     type: 'function',
   },
   {
+    inputs: [
+      { name: 'addr', type: 'address' },
+      { name: 'isSentinel', type: 'bool' },
+    ],
+    name: 'setIsSentinel',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
     inputs: [{ name: 'newCurator', type: 'address' }],
     name: 'setCurator',
     outputs: [],
@@ -265,6 +275,60 @@ export const metaMorphoV2Abi = [
   {
     inputs: [{ name: 'newFeeRecipient', type: 'address' }],
     name: 'setFeeRecipient',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+
+  // === Post-deploy config (owner-only) ===
+  {
+    inputs: [{ name: 'newName', type: 'string' }],
+    name: 'setName',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newSymbol', type: 'string' }],
+    name: 'setSymbol',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFeeRecipient', type: 'address' }],
+    name: 'setPerformanceFeeRecipient',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFee', type: 'uint256' }],
+    name: 'setPerformanceFee',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFeeRecipient', type: 'address' }],
+    name: 'setManagementFeeRecipient',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFee', type: 'uint256' }],
+    name: 'setManagementFee',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'selector', type: 'bytes4' },
+      { name: 'newTimelock', type: 'uint256' },
+    ],
+    name: 'increaseTimelock',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
