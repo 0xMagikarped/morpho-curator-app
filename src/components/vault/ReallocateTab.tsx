@@ -17,7 +17,6 @@ import {
 } from '../../hooks/morpho-sdk/useReallocationSimulation';
 import {
   useReallocate,
-  orderAllocations,
   type MarketAllocationArg,
 } from '../../hooks/morpho-sdk/useReallocate';
 import { PublicAllocatorPanel } from './PublicAllocatorPanel';
@@ -222,10 +221,25 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     });
   }, [allocationEdits, idleAutoMode, idleMarketId, totalAllocated]);
 
-  // Auto-select catcher: largest target allocation
-  const effectiveCatcher = catcherMarketId ?? (allocationEditsWithIdle.length > 0
-    ? allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]!).marketId
-    : null);
+  // Auto-select catcher: must be a SUPPLY market (target > current) so MAX_UINT256
+  // absorbs dust correctly. Prefer IDLE, then the supply entry with the largest target.
+  // NEVER pick a withdrawal market — MAX_UINT256 would reverse its direction and revert.
+  const effectiveCatcher = catcherMarketId ?? (() => {
+    if (allocationEditsWithIdle.length === 0) return null;
+    // Prefer IDLE as catcher if it's receiving funds (target >= current)
+    const idle = allocationEditsWithIdle.find((e) => e.isIdle && e.targetAssets >= e.currentAssets);
+    if (idle) return idle.marketId;
+    // Otherwise pick the supply market with the largest target
+    const supplyMarkets = allocationEditsWithIdle.filter((e) => e.targetAssets > e.currentAssets);
+    if (supplyMarkets.length > 0) {
+      return supplyMarkets.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, supplyMarkets[0]!).marketId;
+    }
+    // Fallback: IDLE even if decreasing (it's the safest catcher)
+    const idleAny = allocationEditsWithIdle.find((e) => e.isIdle);
+    if (idleAny) return idleAny.marketId;
+    // Last resort: largest target
+    return allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]!).marketId;
+  })();
 
   // Balance check
   const totalWithdrawn = allocationEditsWithIdle.reduce(
@@ -286,28 +300,29 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const handleExecute = () => {
     if (!isBalanced || !hasChanges || !markets) return;
 
-    const allocations: MarketAllocationArg[] = allocationEditsWithIdle
-      .filter((e) => e.targetAssets !== e.currentAssets)
-      .map((e) => {
-        const market = markets.find((m) => m.id === e.marketId);
-        if (!market) throw new Error(`Market not found: ${e.marketId}`);
-        return {
+    // Build allocations for all changed markets EXCEPT the catcher
+    // (the catcher will be appended last with MAX_UINT256)
+    const changedAllocations: MarketAllocationArg[] = [];
+    let catcherParams: MarketAllocationArg | null = null;
+
+    for (const e of allocationEditsWithIdle) {
+      const market = markets.find((m) => m.id === e.marketId);
+      if (!market) continue;
+
+      const isCatcher = e.marketId === effectiveCatcher;
+
+      if (isCatcher) {
+        // Save catcher separately — will be appended with MAX_UINT256
+        catcherParams = { marketParams: market.params, assets: e.targetAssets };
+      } else if (e.targetAssets !== e.currentAssets) {
+        changedAllocations.push({
           marketParams: market.params,
           assets: e.targetAssets,
-        };
-      });
+        });
+      }
+    }
 
-    const catcherIdx = allocations.findIndex((a) => {
-      const matchEdit = allocationEditsWithIdle.find(
-        (e) => e.marketId === effectiveCatcher,
-      );
-      if (!matchEdit) return false;
-      const market = markets.find((m) => m.id === matchEdit.marketId);
-      return market && a.marketParams.loanToken === market.params.loanToken
-        && a.marketParams.collateralToken === market.params.collateralToken
-        && a.marketParams.oracle === market.params.oracle;
-    });
-
+    // Build current assets map for ordering
     const currentAssetsMap = new Map<string, bigint>();
     for (const e of allocationEditsWithIdle) {
       const market = markets.find((m) => m.id === e.marketId);
@@ -317,13 +332,24 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       }
     }
 
-    const ordered = orderAllocations(
-      allocations,
-      currentAssetsMap,
-      catcherIdx >= 0 ? catcherIdx : allocations.length - 1,
-    );
+    // Sort: withdrawals first (target < current), then supplies
+    changedAllocations.sort((a, b) => {
+      const aKey = `${a.marketParams.loanToken}-${a.marketParams.collateralToken}-${a.marketParams.oracle}-${a.marketParams.irm}-${a.marketParams.lltv}`;
+      const bKey = `${b.marketParams.loanToken}-${b.marketParams.collateralToken}-${b.marketParams.oracle}-${b.marketParams.irm}-${b.marketParams.lltv}`;
+      const aDelta = a.assets - (currentAssetsMap.get(aKey) ?? 0n);
+      const bDelta = b.assets - (currentAssetsMap.get(bKey) ?? 0n);
+      if (aDelta < 0n && bDelta >= 0n) return -1;
+      if (aDelta >= 0n && bDelta < 0n) return 1;
+      return 0;
+    });
 
-    reallocate(ordered);
+    // Append catcher last with MAX_UINT256 to absorb rounding dust
+    const MAX_UINT256 = 2n ** 256n - 1n;
+    if (catcherParams) {
+      changedAllocations.push({ ...catcherParams, assets: MAX_UINT256 });
+    }
+
+    reallocate(changedAllocations);
   };
 
   // Loading
