@@ -1,9 +1,10 @@
-import { useWaitForTransactionReceipt } from "wagmi";
+import { useState } from "react";
+import { useWaitForTransactionReceipt, useAccount } from "wagmi";
 import { useGuardedWriteContract } from "../useGuardedWriteContract";
 import type { Address } from "viem";
+import { createPublicClient, http, BaseError, ContractFunctionRevertedError } from "viem";
 import { metaMorphoV1Abi } from "../../lib/contracts/abis";
-
-const MAX_UINT256 = 2n ** 256n - 1n;
+import { getChainConfig } from "../../config/chains";
 
 export interface MarketAllocationArg {
   marketParams: {
@@ -19,94 +20,99 @@ export interface MarketAllocationArg {
 /**
  * Hook to execute a vault reallocation via the MetaMorpho V1 `reallocate()` function.
  *
- * CRITICAL: The last allocation entry should use MAX_UINT256 as the "max catcher"
- * to absorb rounding dust and prevent reverts.
+ * Includes a pre-flight simulation via RPC to surface the real revert reason
+ * instead of relying on wallet (Rabby/MetaMask) simulation which may fail
+ * with misleading errors on non-mainnet chains like SEI.
  */
 export function useReallocate(vaultAddress: Address, chainId: number) {
   const {
     writeContract,
     data: hash,
     isPending,
-    error,
+    error: writeError,
     reset,
   } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } =
     useWaitForTransactionReceipt({ hash });
+  const { address: userAddress } = useAccount();
+  const [simulationError, setSimulationError] = useState<Error | null>(null);
 
-  const reallocate = (allocations: MarketAllocationArg[]) => {
-    // Explicit gas limit needed for Safe wallet simulation on SEI and other L1/L2 chains.
-    // Without it, Safe's Tenderly simulation may use gas=0 and fail with "intrinsic gas too low".
-    // reallocate() does multiple SSTORE ops per market — budget ~150K per market + base.
+  const reallocate = async (allocations: MarketAllocationArg[]) => {
+    setSimulationError(null);
+
+    // Log the exact allocations for debugging
+    console.log("[reallocate] Vault:", vaultAddress, "Chain:", chainId);
+    console.log("[reallocate] Caller:", userAddress);
+    console.log("[reallocate] Allocations:");
+    for (const a of allocations) {
+      const isMax = a.assets === 2n ** 256n - 1n;
+      console.log(
+        `  loan=${a.marketParams.loanToken} collateral=${a.marketParams.collateralToken}`,
+        `\n  oracle=${a.marketParams.oracle} irm=${a.marketParams.irm} lltv=${a.marketParams.lltv}`,
+        `\n  assets=${isMax ? "MAX_UINT256 (catcher)" : a.assets.toString()}`,
+      );
+    }
+
+    const args = [
+      allocations.map((a) => ({
+        marketParams: a.marketParams,
+        assets: a.assets,
+      })),
+    ] as const;
+
+    // Pre-flight: simulate the call via RPC to get the real revert reason
+    // This bypasses Rabby/wallet simulation which may fail on SEI with misleading errors
+    if (userAddress) {
+      try {
+        const chainConfig = getChainConfig(chainId);
+        const rpcUrl = chainConfig?.rpcUrls[0] ?? "https://sei-evm-rpc.publicnode.com";
+        const client = createPublicClient({ transport: http(rpcUrl) });
+
+        await client.simulateContract({
+          address: vaultAddress,
+          abi: metaMorphoV1Abi,
+          functionName: "reallocate",
+          args,
+          account: userAddress,
+        });
+        console.log("[reallocate] Pre-flight simulation: SUCCESS");
+      } catch (simErr) {
+        // Extract meaningful revert reason
+        let reason = "Unknown revert";
+        if (simErr instanceof BaseError) {
+          const revertErr = simErr.walk((e) => e instanceof ContractFunctionRevertedError);
+          if (revertErr instanceof ContractFunctionRevertedError) {
+            reason = revertErr.data?.errorName ?? revertErr.shortMessage ?? reason;
+          } else {
+            reason = simErr.shortMessage ?? simErr.message;
+          }
+        } else if (simErr instanceof Error) {
+          reason = simErr.message;
+        }
+
+        console.error("[reallocate] Pre-flight simulation FAILED:", reason);
+        console.error("[reallocate] Full error:", simErr);
+
+        setSimulationError(new Error(`Reallocation would revert: ${reason}`));
+        return; // Don't submit a tx that will revert
+      }
+    }
+
+    // Explicit gas limit for wallet simulation compatibility on SEI
     const gasEstimate = BigInt(200_000 + allocations.length * 150_000);
 
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: "reallocate",
-      args: [
-        allocations.map((a) => ({
-          marketParams: a.marketParams,
-          assets: a.assets,
-        })),
-      ],
+      args,
       chainId,
       gas: gasEstimate,
     });
   };
 
+  // Combine errors: simulation error takes priority
+  const error = simulationError ?? writeError;
+
   return { reallocate, hash, isPending, isConfirming, isSuccess, error, reset };
-}
-
-/**
- * Build the allocations array for `reallocate()` with a max-catcher on the last entry.
- *
- * The catcher market absorbs rounding dust — its `assets` is set to type(uint256).max.
- * The last entry in `targets` is used as the catcher.
- * Reorder your targets so the catcher market (e.g. idle or largest) is last before calling.
- */
-export function buildReallocateArgs(
-  targets: MarketAllocationArg[],
-): MarketAllocationArg[] {
-  return targets.map((t, i) => {
-    if (i === targets.length - 1) {
-      return { ...t, assets: MAX_UINT256 };
-    }
-    return t;
-  });
-}
-
-/**
- * Reorder allocations so withdrawals come first, supplies second,
- * and the catcher (MAX_UINT256) is last.
- */
-export function orderAllocations(
-  allocations: MarketAllocationArg[],
-  currentAssets: Map<string, bigint>,
-  catcherIndex: number,
-): MarketAllocationArg[] {
-  const result = [...allocations];
-
-  // Move catcher to end
-  const [catcher] = result.splice(catcherIndex, 1);
-
-  // Sort: withdrawals (target < current) first, then supplies
-  result.sort((a, b) => {
-    const aKey = `${a.marketParams.loanToken}-${a.marketParams.collateralToken}-${a.marketParams.oracle}-${a.marketParams.irm}-${a.marketParams.lltv}`;
-    const bKey = `${b.marketParams.loanToken}-${b.marketParams.collateralToken}-${b.marketParams.oracle}-${b.marketParams.irm}-${b.marketParams.lltv}`;
-    const aCurrent = currentAssets.get(aKey) ?? 0n;
-    const bCurrent = currentAssets.get(bKey) ?? 0n;
-    const aDelta = a.assets - aCurrent;
-    const bDelta = b.assets - bCurrent;
-    // Withdrawals (negative delta) first
-    if (aDelta < 0n && bDelta >= 0n) return -1;
-    if (aDelta >= 0n && bDelta < 0n) return 1;
-    return 0;
-  });
-
-  // Append catcher with MAX_UINT256
-  if (catcher) {
-    result.push({ ...catcher, assets: MAX_UINT256 });
-  }
-
-  return result;
 }
