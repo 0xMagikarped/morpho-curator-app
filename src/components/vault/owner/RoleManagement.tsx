@@ -116,6 +116,10 @@ function RoleField({
       setError('Invalid address');
       return;
     }
+    if (value.toLowerCase() === current.toLowerCase()) {
+      setError('Already set to this address');
+      return;
+    }
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
@@ -203,6 +207,10 @@ function SetAllocator({
       setError('Invalid address');
       return;
     }
+    if (isCurrentlyAllocator) {
+      setError('Address is already an allocator');
+      return;
+    }
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
@@ -216,6 +224,10 @@ function SetAllocator({
     setError(null);
     if (!isAddress(value)) {
       setError('Invalid address');
+      return;
+    }
+    if (isCurrentlyAllocator === false) {
+      setError('Address is not an allocator');
       return;
     }
     writeContract({
@@ -250,8 +262,9 @@ function SetAllocator({
         <Button
           size="sm"
           onClick={handleGrant}
-          disabled={!value || isBusy}
+          disabled={!value || isBusy || isCurrentlyAllocator === true}
           loading={isBusy}
+          title={isCurrentlyAllocator ? 'Already an allocator' : undefined}
         >
           {isPending ? 'Confirm...' : isConfirming ? 'Confirming...' : 'Grant'}
         </Button>
@@ -259,8 +272,9 @@ function SetAllocator({
           size="sm"
           variant="danger"
           onClick={handleRevoke}
-          disabled={!value || isBusy}
+          disabled={!value || isBusy || isCurrentlyAllocator === false}
           loading={isBusy}
+          title={isCurrentlyAllocator === false ? 'Not an allocator' : undefined}
         >
           Revoke
         </Button>
