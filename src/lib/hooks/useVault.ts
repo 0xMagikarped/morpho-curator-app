@@ -307,26 +307,36 @@ export function useVaultRole(
 // ============================================================
 
 const SET_IS_ALLOCATOR_SELECTOR = '0xb192a84a';
+const SET_IS_ALLOCATOR_EVENT = '0x74dc60cbc81a9472d04ad1d20e151d369c41104d655ed3f2f3091166a502cd8d';
 
 /**
  * Discover all current allocator addresses for a vault.
- * Scans seitrace (SEI) or vault tx history for setIsAllocator calls,
- * then verifies each address on-chain via isAllocator().
+ *
+ * Strategy (multi-source, verify on-chain):
+ * 1. Scan explorer event logs for SetIsAllocator events (works for Safe/multicall)
+ * 2. Scan explorer tx history for direct setIsAllocator calls (fallback)
+ * 3. Add known addresses: Public Allocator, connected wallet
+ * 4. Verify ALL candidates on-chain via isAllocator()
  */
 export function useVaultAllocators(
   chainId: number | undefined,
   vaultAddress: Address | undefined,
 ) {
+  const { address: userAddress } = useAccount();
+
   return useQuery({
-    queryKey: [...vaultKeys.fullData(chainId!, vaultAddress!), 'allocators'],
+    queryKey: [...vaultKeys.fullData(chainId!, vaultAddress!), 'allocators', userAddress],
     queryFn: async (): Promise<Address[]> => {
       if (!chainId || !vaultAddress) return [];
 
-      // Step 1: Discover candidate allocator addresses from tx history
       const candidates = new Set<string>();
 
+      const { getChainConfig } = await import('../../config/chains');
+      const chainConfig = getChainConfig(chainId);
+
+      // Source 1: Explorer event logs (SetIsAllocator events)
+      // This catches allocators set via Safe multisig, multicall, or direct calls
       try {
-        // Use seitrace/blockscout API to find setIsAllocator calls
         const explorerBase = chainId === 1329
           ? 'https://seitrace.com/pacific-1/api/v2'
           : chainId === 1
@@ -336,37 +346,49 @@ export function useVaultAllocators(
               : null;
 
         if (explorerBase) {
-          const url = `${explorerBase}/addresses/${vaultAddress}/transactions?filter=to`;
-          const resp = await fetch(url);
-          if (resp.ok) {
-            const data = await resp.json();
-            for (const tx of data.items ?? []) {
-              if (tx.method === SET_IS_ALLOCATOR_SELECTOR && tx.raw_input) {
-                // Decode: setIsAllocator(address allocator, bool isAllocator)
-                // Input: 0xb192a84a + 32 bytes address + 32 bytes bool
-                const input = tx.raw_input as string;
-                if (input.length >= 138) {
-                  const addrHex = '0x' + input.slice(34, 74);
-                  candidates.add(addrHex.toLowerCase());
-                }
+          const logsUrl = `${explorerBase}/addresses/${vaultAddress}/logs?topic0=${SET_IS_ALLOCATOR_EVENT}`;
+          const logsResp = await fetch(logsUrl).catch(() => null);
+          if (logsResp?.ok) {
+            const logsData = await logsResp.json();
+            for (const log of logsData.items ?? []) {
+              // SetIsAllocator(address indexed allocator, bool isAllocator)
+              // topic[1] = allocator address (padded to 32 bytes)
+              if (log.topics?.[1]) {
+                const addr = '0x' + log.topics[1].slice(26);
+                candidates.add(addr.toLowerCase());
+              }
+            }
+          }
+
+          // Source 2: Direct transaction calls (catches EOA-direct calls)
+          const txUrl = `${explorerBase}/addresses/${vaultAddress}/transactions?filter=to`;
+          const txResp = await fetch(txUrl).catch(() => null);
+          if (txResp?.ok) {
+            const txData = await txResp.json();
+            for (const tx of txData.items ?? []) {
+              const input = (tx.raw_input ?? tx.input ?? '') as string;
+              if (input.startsWith(SET_IS_ALLOCATOR_SELECTOR) && input.length >= 138) {
+                const addrHex = '0x' + input.slice(34, 74);
+                candidates.add(addrHex.toLowerCase());
               }
             }
           }
         }
       } catch {
-        // Explorer API failed — fall back to just known addresses
+        // Explorer APIs failed — continue with known addresses
       }
 
-      // Also add known public allocator if configured
-      const { getChainConfig } = await import('../../config/chains');
-      const chainConfig = getChainConfig(chainId);
+      // Source 3: Known addresses
       if (chainConfig?.periphery?.publicAllocator) {
         candidates.add(chainConfig.periphery.publicAllocator.toLowerCase());
+      }
+      if (userAddress) {
+        candidates.add(userAddress.toLowerCase());
       }
 
       if (candidates.size === 0) return [];
 
-      // Step 2: Verify each candidate on-chain via isAllocator()
+      // Step 2: Verify ALL candidates on-chain via isAllocator()
       const verified: Address[] = [];
       const checks = await Promise.allSettled(
         [...candidates].map(async (addr) => {
