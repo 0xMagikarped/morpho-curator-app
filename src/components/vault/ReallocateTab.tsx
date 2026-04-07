@@ -199,7 +199,11 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   }, [allocation, markets, edits, idleMarketId]);
 
   // Auto-compute IDLE target when in auto mode
-  const totalVaultAssets = vault?.totalAssets ?? 0n;
+  // Use sum of current allocations (not totalAssets) to avoid rounding mismatch
+  // between ERC-4626 totalAssets() and the sum of per-market supplyAssets
+  const totalAllocated = useMemo(() => {
+    return allocationEdits.reduce((sum, e) => sum + e.currentAssets, 0n);
+  }, [allocationEdits]);
 
   const allocationEditsWithIdle = useMemo(() => {
     if (!idleAutoMode || !idleMarketId) return allocationEdits;
@@ -208,7 +212,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       .filter((e) => !e.isIdle)
       .reduce((sum, e) => sum + e.targetAssets, 0n);
 
-    const idleTarget = totalVaultAssets > nonIdleSum ? totalVaultAssets - nonIdleSum : 0n;
+    const idleTarget = totalAllocated > nonIdleSum ? totalAllocated - nonIdleSum : 0n;
 
     return allocationEdits.map((e) => {
       if (e.isIdle) {
@@ -216,7 +220,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       }
       return e;
     });
-  }, [allocationEdits, idleAutoMode, idleMarketId, totalVaultAssets]);
+  }, [allocationEdits, idleAutoMode, idleMarketId, totalAllocated]);
 
   // Auto-select catcher: largest target allocation
   const effectiveCatcher = catcherMarketId ?? (allocationEditsWithIdle.length > 0
