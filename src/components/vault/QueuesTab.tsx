@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { ArrowRightLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -43,7 +44,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
 
   const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
 
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const [editingSupply, setEditingSupply] = useState(false);

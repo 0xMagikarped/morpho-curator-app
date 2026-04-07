@@ -85,22 +85,24 @@ export function AddMarketWizard({
   // Auto-advance from deploy to select once adapter is deployed
   useEffect(() => {
     if (deployHook.step === 'done' && deployHook.deployedAdapter && wizardStep === 'deploy') {
-      setAdapterAddress(deployHook.deployedAdapter);
-      setWizardStep('select');
+      queueMicrotask(() => {
+        setAdapterAddress(deployHook.deployedAdapter);
+        setWizardStep('select');
+      });
     }
   }, [deployHook.step, deployHook.deployedAdapter, wizardStep]);
 
   // Auto-advance from caps to allocate
   useEffect(() => {
     if (capsHook.step === 'done' && wizardStep === 'caps') {
-      setWizardStep('allocate');
+      queueMicrotask(() => setWizardStep('allocate'));
     }
   }, [capsHook.step, wizardStep]);
 
   // Auto-advance from allocate to done
   useEffect(() => {
     if (allocateHook.step === 'done' && wizardStep === 'allocate') {
-      setWizardStep('done');
+      queueMicrotask(() => setWizardStep('done'));
     }
   }, [allocateHook.step, wizardStep]);
 

@@ -30,7 +30,7 @@ export function QueueList({
   editing,
   mode,
   decimals,
-  assetSymbol: _assetSymbol,
+  assetSymbol: _assetSymbol, // eslint-disable-line @typescript-eslint/no-unused-vars
   onMove,
   onRemove,
   removableMarkets,
@@ -73,7 +73,7 @@ export function QueueList({
 
         return (
           <div
-            key={`${item.marketId}-${i}`}
+            key={item.marketId}
             className="grid grid-cols-12 gap-2 items-center px-2 py-2 bg-bg-hover/30 hover:bg-bg-hover/60 text-xs"
           >
             {/* Position */}

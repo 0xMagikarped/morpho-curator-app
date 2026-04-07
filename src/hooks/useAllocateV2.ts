@@ -5,7 +5,8 @@
  * deallocate(adapter, data, totalAllocated) — third arg is the NEW total, not amount to remove
  */
 import { useState, useCallback } from 'react';
-import { useWriteContract, usePublicClient } from 'wagmi';
+import { usePublicClient } from 'wagmi';
+import { useGuardedWriteContract } from './useGuardedWriteContract';
 import type { Address } from 'viem';
 import { metaMorphoV2Abi } from '../lib/contracts/metaMorphoV2Abi';
 import { encodeAllocateData } from '../lib/v2/adapterCapUtils';
@@ -15,7 +16,7 @@ export type AllocateStep = 'idle' | 'pending' | 'confirming' | 'done' | 'error';
 
 export function useAllocateV2(vaultAddress: Address, chainId: number) {
   const publicClient = usePublicClient({ chainId });
-  const { writeContractAsync } = useWriteContract();
+  const { writeContractAsync } = useGuardedWriteContract();
 
   const [step, setStep] = useState<AllocateStep>('idle');
   const [error, setError] = useState<Error | null>(null);

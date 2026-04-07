@@ -11,8 +11,8 @@ import { V2AdaptersTab } from '../components/vault/V2AdaptersTab';
 import { V2SecurityTab } from '../components/vault/V2SecurityTab';
 import { V2AllocationTab } from '../components/vault/V2AllocationTab';
 import { QueuesTab } from '../components/vault/QueuesTab';
-import { useAccount } from 'wagmi';
 import { useVaultInfo, useVaultRole } from '../lib/hooks/useVault';
+import { isApiSupportedChain } from '../lib/data/morphoApi';
 import { useAppStore } from '../store/appStore';
 import { cn } from '../lib/utils/cn';
 import { getEmergencyRoleLabel } from '../types';
@@ -56,13 +56,11 @@ export function VaultPage() {
   const chainId = chainIdStr ? parseInt(chainIdStr) : undefined;
   const vaultAddress = address as Address | undefined;
 
-  const { address: walletAddress } = useAccount();
-  const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
+  const { data: vault, isLoading, error, dataSource } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
   const trackedVaults = useAppStore((s) => s.trackedVaults);
   const addTrackedVault = useAppStore((s) => s.addTrackedVault);
   const removeTrackedVault = useAppStore((s) => s.removeTrackedVault);
-  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
 
   if (!chainId || !vaultAddress) {
     return (
@@ -106,7 +104,6 @@ export function VaultPage() {
         version: vault.version,
       });
     }
-    if (walletAddress) persistToEdgeConfig(walletAddress);
   };
 
   return (
@@ -128,6 +125,9 @@ export function VaultPage() {
             <div className="flex gap-1.5">
               <Badge variant="info">{chainId}</Badge>
               <Badge>{vault.version.toUpperCase()}</Badge>
+              {dataSource === 'rpc' && isApiSupportedChain(chainId) && (
+                <Badge variant="warning" title="API unavailable — data loaded via RPC fallback">RPC</Badge>
+              )}
               {role.isOwner && <Badge variant="purple">Owner</Badge>}
               {role.isCurator && <Badge variant="purple">Curator</Badge>}
               {role.isAllocator && <Badge variant="purple">Allocator</Badge>}

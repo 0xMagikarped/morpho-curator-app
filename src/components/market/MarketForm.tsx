@@ -62,36 +62,55 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
   }, [chainConfig]);
 
   // Fetch ERC-20 metadata
-  const fetchTokenMeta = async (
-    address: string,
-    setter: (m: TokenMeta | null) => void,
-    setLoading: (b: boolean) => void,
-  ) => {
-    if (!isAddress(address) || !client) {
-      setter(null);
-      return;
-    }
-    setLoading(true);
-    try {
-      const [name, symbol, decimals] = await Promise.all([
-        client.readContract({ address: address as Address, abi: erc20Abi, functionName: 'name' }),
-        client.readContract({ address: address as Address, abi: erc20Abi, functionName: 'symbol' }),
-        client.readContract({ address: address as Address, abi: erc20Abi, functionName: 'decimals' }),
-      ]);
-      setter({ name: name as string, symbol: symbol as string, decimals: Number(decimals) });
-    } catch {
-      setter(null);
-    }
-    setLoading(false);
-  };
-
   useEffect(() => {
+    const fetchTokenMeta = async (
+      address: string,
+      setter: (m: TokenMeta | null) => void,
+      setLoading: (b: boolean) => void,
+    ) => {
+      if (!isAddress(address) || !client) {
+        setter(null);
+        return;
+      }
+      setLoading(true);
+      try {
+        const [name, symbol, decimals] = await Promise.all([
+          client.readContract({ address: address as Address, abi: erc20Abi, functionName: 'name' }),
+          client.readContract({ address: address as Address, abi: erc20Abi, functionName: 'symbol' }),
+          client.readContract({ address: address as Address, abi: erc20Abi, functionName: 'decimals' }),
+        ]);
+        setter({ name: name as string, symbol: symbol as string, decimals: Number(decimals) });
+      } catch {
+        setter(null);
+      }
+      setLoading(false);
+    };
+
     const timer = setTimeout(() => fetchTokenMeta(loanToken, setLoanMeta, setLoadingLoan), 500);
     return () => clearTimeout(timer);
   }, [loanToken, client]);
 
   useEffect(() => {
-    const timer = setTimeout(() => fetchTokenMeta(collateralToken, setCollatMeta, setLoadingCollat), 500);
+    const fetchCollatMeta = async () => {
+      if (!isAddress(collateralToken) || !client) {
+        setCollatMeta(null);
+        return;
+      }
+      setLoadingCollat(true);
+      try {
+        const [name, symbol, decimals] = await Promise.all([
+          client.readContract({ address: collateralToken as Address, abi: erc20Abi, functionName: 'name' }),
+          client.readContract({ address: collateralToken as Address, abi: erc20Abi, functionName: 'symbol' }),
+          client.readContract({ address: collateralToken as Address, abi: erc20Abi, functionName: 'decimals' }),
+        ]);
+        setCollatMeta({ name: name as string, symbol: symbol as string, decimals: Number(decimals) });
+      } catch {
+        setCollatMeta(null);
+      }
+      setLoadingCollat(false);
+    };
+
+    const timer = setTimeout(() => fetchCollatMeta(), 500);
     return () => clearTimeout(timer);
   }, [collateralToken, client]);
 

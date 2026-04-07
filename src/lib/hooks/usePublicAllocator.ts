@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import type { Address } from 'viem';
 import { getPublicClient } from '../data/rpcClient';
 import { publicAllocatorAbi } from '../contracts/abis';
@@ -151,7 +152,7 @@ export function usePublicAllocatorActions(
   const paAddress = chainConfig?.periphery?.publicAllocator as Address | undefined;
   const { address: userAddress } = useAccount();
 
-  const { writeContract, data: txHash, isPending, reset } = useWriteContract();
+  const { writeContract, data: txHash, isPending, reset } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const enablePA = () => {

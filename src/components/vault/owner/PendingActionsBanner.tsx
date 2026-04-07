@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Clock } from 'lucide-react';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import type { Address } from 'viem';
 import { Card } from '../../ui/Card';
 import { Button } from '../../ui/Button';
@@ -19,7 +20,7 @@ interface PendingActionsBannerProps {
 
 export function PendingActionsBanner({ chainId, vaultAddress, pending, isOwner, onSuccess }: PendingActionsBannerProps) {
   const [nowSeconds, setNowSeconds] = useState(() => BigInt(Math.floor(Date.now() / 1000)));
-  const { writeContract, data: hash, isPending } = useWriteContract();
+  const { writeContract, data: hash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   useEffect(() => {

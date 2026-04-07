@@ -135,11 +135,12 @@ async function classifyByIntrospection(
 ): Promise<{ type: OracleType; label: string; feeds: Address[]; feedInfo: OracleFeedInfo } | null> {
   try {
     const ZERO = '0x0000000000000000000000000000000000000000' as Address;
-    const read = (fn: string) =>
+    type IntrospectionFn = (typeof oracleIntrospectionAbi)[number]['name'];
+    const read = (fn: IntrospectionFn) =>
       client.readContract({
         address: oracleAddress,
         abi: oracleIntrospectionAbi,
-        functionName: fn as any,
+        functionName: fn,
       }).catch(() => null);
 
     const [baseFeed1, baseFeed2, quoteFeed1, quoteFeed2, baseVault, quoteVault, scaleFactor] =

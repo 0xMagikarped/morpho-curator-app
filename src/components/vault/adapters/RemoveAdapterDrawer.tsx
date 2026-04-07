@@ -1,6 +1,7 @@
 import type { Address } from 'viem';
 import { encodeFunctionData } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -27,7 +28,7 @@ export function RemoveAdapterDrawer({
   decimals,
   assetSymbol,
 }: RemoveAdapterDrawerProps) {
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   if (!adapter) return null;

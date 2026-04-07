@@ -1,4 +1,5 @@
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from './useGuardedWriteContract';
 import { encodeFunctionData, toFunctionSelector } from 'viem';
 import { vaultV2RegistryAbi } from '../lib/contracts/vaultV2RegistryAbi';
 import { getChainConfig } from '../config/chains';
@@ -6,7 +7,7 @@ import { getChainConfig } from '../config/chains';
 const SET_REGISTRY_SELECTOR = toFunctionSelector('setAdapterRegistry(address)');
 
 export function useSetRegistry(vaultAddress: `0x${string}`, chainId: number) {
-  const { writeContract, data: hash, isPending, error, reset } = useWriteContract();
+  const { writeContract, data: hash, isPending, error, reset } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
   const chainConfig = getChainConfig(chainId);
   const registryAddress = chainConfig?.periphery.v2AdapterRegistry;
@@ -42,7 +43,7 @@ export function useSetRegistry(vaultAddress: `0x${string}`, chainId: number) {
 }
 
 export function useAbdicateRegistry(vaultAddress: `0x${string}`, chainId: number) {
-  const { writeContract, data: hash, isPending, error, reset } = useWriteContract();
+  const { writeContract, data: hash, isPending, error, reset } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   const abdicate = () => {

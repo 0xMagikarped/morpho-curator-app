@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
-import { createPublicClient, custom, type TransactionReceipt, type Hash } from 'viem';
+import { createPublicClient, custom, type TransactionReceipt, type Hash, type EIP1193Provider } from 'viem';
 import { mainnet, base } from 'viem/chains';
 import { CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
@@ -33,7 +33,7 @@ interface DeployStepProps {
 
 type DeployStatus = 'idle' | 'deploying' | 'complete' | 'failed';
 
-const VIEM_CHAINS: Record<number, any> = { 1: mainnet, 8453: base, 1329: sei };
+const VIEM_CHAINS: Record<number, typeof mainnet | typeof base | typeof sei> = { 1: mainnet, 8453: base, 1329: sei };
 
 function getExplorerTxUrl(chainId: number | null, txHash: string): string | null {
   if (!chainId) return null;
@@ -53,7 +53,10 @@ async function waitForReceipt(
 ): Promise<TransactionReceipt> {
   const startTime = Date.now();
 
-  const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : null;
+  const ethereum: EIP1193Provider | undefined =
+    typeof window !== 'undefined'
+      ? (window as Window & { ethereum?: EIP1193Provider }).ethereum
+      : undefined;
   if (ethereum) {
     console.log('[Deploy] Polling receipt via wallet provider...');
     try {
@@ -90,7 +93,6 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
   const addTrackedVault = useAppStore((s) => s.addTrackedVault);
-  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
 
   const [status, setStatus] = useState<DeployStatus>('idle');
   const [steps, setSteps] = useState<TransactionStep[]>([]);
@@ -290,7 +292,6 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
               version: state.version,
             };
             addTrackedVault(vault);
-            if (address) persistToEdgeConfig(address);
           }
         }
 
@@ -311,7 +312,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
     }
 
     setStatus('complete');
-  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, persistToEdgeConfig, isV2, chainConfig]);
+  }, [walletClient, address, steps, currentStepIdx, vaultAddress, state, addTrackedVault, isV2, chainConfig]);
 
   const handleRetry = () => {
     if (currentStepIdx === 0) {

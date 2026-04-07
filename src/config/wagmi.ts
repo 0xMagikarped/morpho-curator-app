@@ -10,6 +10,7 @@ import {
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets';
 import type { Chain } from 'wagmi/chains';
+import { env } from './env';
 
 /**
  * SEI chain definition for wagmi (not included in wagmi/chains).
@@ -35,31 +36,26 @@ export const sei: Chain = {
 
 // Build transport lists — env-configured RPCs (e.g. Infura) get priority
 const seiTransports = [
-  ...(import.meta.env.VITE_SEI_RPC_URL ? [http(import.meta.env.VITE_SEI_RPC_URL)] : []),
+  ...(env.seiRpcUrl ? [http(env.seiRpcUrl)] : []),
   http('https://sei-evm-rpc.publicnode.com'),
   http('https://evm-rpc.sei-apis.com'),
 ];
 const ethTransports = [
-  ...(import.meta.env.VITE_ETH_RPC_URL ? [http(import.meta.env.VITE_ETH_RPC_URL)] : []),
+  ...(env.ethRpcUrl ? [http(env.ethRpcUrl)] : []),
   http('https://ethereum-rpc.publicnode.com'),
   http('https://eth.public-rpc.com'),
   http('https://rpc.ankr.com/eth'),
 ];
 const baseTransports = [
-  ...(import.meta.env.VITE_BASE_RPC_URL ? [http(import.meta.env.VITE_BASE_RPC_URL)] : []),
+  ...(env.baseRpcUrl ? [http(env.baseRpcUrl)] : []),
   http('https://mainnet.base.org'),
   http('https://base-rpc.publicnode.com'),
   http('https://rpc.ankr.com/base'),
 ];
 
-const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '';
-if (!walletConnectProjectId) {
-  console.warn('[wagmi] VITE_WALLETCONNECT_PROJECT_ID is not set — WalletConnect will not work. Get one at https://cloud.walletconnect.com/');
-}
-
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
-  projectId: walletConnectProjectId,
+  projectId: env.walletConnectProjectId,
   chains: [sei, mainnet, base],
   transports: {
     [sei.id]: fallback(seiTransports),

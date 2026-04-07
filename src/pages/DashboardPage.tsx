@@ -23,8 +23,9 @@ export function DashboardPage() {
   const { address } = useAccount();
   const trackedVaults = useAppStore((s) => s.trackedVaults);
   const addTrackedVault = useAppStore((s) => s.addTrackedVault);
-  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
-  const { data: vaultSummaries, isLoading: vaultsLoading } = useDashboardVaults();
+  const { data: dashboardData, isLoading: vaultsLoading } = useDashboardVaults();
+  const vaultSummaries = dashboardData?.vaults;
+  const failedVaults = dashboardData?.failedVaults;
   const { data: pendingActionsList } = useDashboardPendingActions();
   const [showAddVault, setShowAddVault] = useState(false);
   const [newVaultAddress, setNewVaultAddress] = useState('');
@@ -55,7 +56,7 @@ export function DashboardPage() {
   // Compute aggregate stats
   const stats = useMemo(() => {
     if (significantVaults.length === 0) {
-      return { tvl: 0, vaultCount: 0, marketCount: 0, pendingCount: 0 };
+      return { tvl: 0, vaultCount: trackedVaults.length, marketCount: 0, pendingCount: 0 };
     }
     let tvlUsd = 0;
     for (const v of significantVaults) {
@@ -63,11 +64,11 @@ export function DashboardPage() {
     }
     return {
       tvl: tvlUsd,
-      vaultCount: significantVaults.length,
+      vaultCount: trackedVaults.length,
       marketCount: significantVaults.reduce((s, v) => s + v.supplyQueueLength, 0),
       pendingCount: pendingActionsList?.length ?? 0,
     };
-  }, [significantVaults, pendingActionsList]);
+  }, [significantVaults, pendingActionsList, trackedVaults.length]);
 
   // Build risk alerts from vault data
   const riskAlerts = useMemo<RiskAlert[]>(() => {
@@ -121,7 +122,6 @@ export function DashboardPage() {
       version: 'v1' as const,
     };
     addTrackedVault(vault);
-    if (address) persistToEdgeConfig(address);
     setNewVaultAddress('');
     setShowAddVault(false);
   };
@@ -136,7 +136,6 @@ export function DashboardPage() {
       version: 'v1' as const,
     };
     addTrackedVault(tracked);
-    if (address) persistToEdgeConfig(address);
   };
 
   const isLoadingStats = vaultsLoading && trackedVaults.length > 0;
@@ -202,6 +201,15 @@ export function DashboardPage() {
 
       {/* ── RISK ALERTS ── */}
       <RiskAlertBanner alerts={riskAlerts} />
+
+      {/* ── FAILED VAULTS WARNING ── */}
+      {failedVaults && failedVaults.length > 0 && (
+        <Card className="border-warning/30 bg-warning/5">
+          <p className="text-xs text-warning px-4 py-2">
+            {failedVaults.length} vault(s) failed to load — they may be on an unreachable chain or have invalid addresses.
+          </p>
+        </Card>
+      )}
 
       {/* ── ADD VAULT FORM ── */}
       {showAddVault && (

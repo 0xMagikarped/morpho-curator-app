@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Copy, ExternalLink, Check } from 'lucide-react';
 import { cn } from '../../lib/utils/cn';
+import { truncateAddress } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
 interface AddressDisplayProps {
@@ -8,11 +9,6 @@ interface AddressDisplayProps {
   chainId?: number;
   className?: string;
   truncate?: boolean;
-}
-
-function truncateAddress(addr: string): string {
-  if (addr.length <= 13) return addr;
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
 export function AddressDisplay({ address, chainId, className, truncate = true }: AddressDisplayProps) {

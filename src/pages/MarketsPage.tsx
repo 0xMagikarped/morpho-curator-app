@@ -122,7 +122,7 @@ export function MarketsPage() {
     });
 
     return result;
-  }, [markets, selectedTokens, sortKey, sortDir]);
+  }, [displayableMarkets, selectedTokens, sortKey, sortDir]);
 
   const toggleSort = useCallback((key: SortKey) => {
     setSortKey((prev) => {

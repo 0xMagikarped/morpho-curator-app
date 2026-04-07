@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -24,7 +25,7 @@ export function GuardianTab({ chainId, vaultAddress }: GuardianTabProps) {
     ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
     : undefined;
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
 
   const [nowSeconds, setNowSeconds] = useState(() => BigInt(Math.floor(Date.now() / 1000)));

@@ -5,16 +5,6 @@ import type { SharePriceRecord } from './riskTypes';
 // Schema
 // ============================================================
 
-interface TrackedVaultRecord {
-  address: `0x${string}`;
-  chainId: number;
-  name: string;
-  symbol: string;
-  asset: `0x${string}`;
-  addedAt: number;
-  source: 'scan' | 'graphql' | 'manual';
-}
-
 interface RiskDBSchema extends DBSchema {
   sharePriceHistory: {
     key: string;
@@ -25,7 +15,7 @@ interface RiskDBSchema extends DBSchema {
   };
   trackedVaults: {
     key: string;
-    value: TrackedVaultRecord;
+    value: Record<string, unknown>;
     indexes: {
       'by-chain': number;
     };
@@ -69,7 +59,9 @@ export async function saveSharePriceRecord(record: SharePriceRecord): Promise<vo
   const now = Date.now();
   if (now - lastPruneTime > 60 * 60 * 1000) {
     lastPruneTime = now;
-    pruneOldRecords().catch(() => {});
+    pruneOldRecords().catch((err) => {
+      console.error('[riskDB] Failed to prune old records:', err);
+    });
   }
 }
 
@@ -128,32 +120,3 @@ export async function getSharePriceHistory(
   return all.slice(0, limit);
 }
 
-// ============================================================
-// Tracked Vaults
-// ============================================================
-
-function trackedVaultKey(address: `0x${string}`, chainId: number): string {
-  return `${address.toLowerCase()}-${chainId}`;
-}
-
-export async function saveTrackedVault(vault: TrackedVaultRecord): Promise<void> {
-  const db = await openRiskDB();
-  await db.put('trackedVaults', vault, trackedVaultKey(vault.address, vault.chainId));
-}
-
-export async function getTrackedVaults(): Promise<TrackedVaultRecord[]> {
-  const db = await openRiskDB();
-  return db.getAll('trackedVaults');
-}
-
-export async function getTrackedVaultsByChain(chainId: number): Promise<TrackedVaultRecord[]> {
-  const db = await openRiskDB();
-  return db.getAllFromIndex('trackedVaults', 'by-chain', chainId);
-}
-
-export async function removeTrackedVault(address: `0x${string}`, chainId: number): Promise<void> {
-  const db = await openRiskDB();
-  await db.delete('trackedVaults', trackedVaultKey(address, chainId));
-}
-
-export type { TrackedVaultRecord };

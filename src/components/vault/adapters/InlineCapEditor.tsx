@@ -5,7 +5,8 @@
 import { useState } from 'react';
 import type { Address } from 'viem';
 import { Loader2, Check } from 'lucide-react';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Button } from '../../ui/Button';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
 import { isUnlimitedCap, MAX_UINT128 } from '../../../lib/v2/adapterCapUtils';
@@ -30,7 +31,7 @@ export function InlineCapEditor({
 }: InlineCapEditorProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const handleSave = () => {

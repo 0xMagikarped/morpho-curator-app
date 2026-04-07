@@ -30,7 +30,12 @@ export function MarketPreview({ data, onBack, onDeploy }: MarketPreviewProps) {
 
   useEffect(() => {
     if (!client || !chainConfig) return;
-    setChecking(true);
+    let cancelled = false;
+
+    // Defer the synchronous setState to avoid cascading renders
+    queueMicrotask(() => {
+      if (!cancelled) setChecking(true);
+    });
 
     Promise.all([
       checkMarketExists(client, chainConfig.morphoBlue, marketId),
@@ -43,11 +48,14 @@ export function MarketPreview({ data, onBack, onDeploy }: MarketPreviewProps) {
         .catch(() => null),
       getMarketPrices(chainId, data.loanToken, data.collateralToken),
     ]).then(([marketExists, price, prices]) => {
+      if (cancelled) return;
       setExists(marketExists);
       setOraclePrice(price as bigint | null);
       setLlamaPrice(prices.relativePrice);
       setChecking(false);
     });
+
+    return () => { cancelled = true; };
   }, [client, chainConfig, marketId, data, chainId]);
 
   const lltvPercent = ((Number(data.lltv) / 1e18) * 100).toFixed(2);

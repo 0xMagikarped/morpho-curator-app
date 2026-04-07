@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { isAddress } from 'viem';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
@@ -96,13 +97,15 @@ function RoleField({
 }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const { writeContract, data: hash, isPending, error: txError } = useWriteContract();
+  const { writeContract, data: hash, isPending, error: txError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   useEffect(() => {
     if (isSuccess) {
-      setValue('');
-      setError(null);
+      queueMicrotask(() => {
+        setValue('');
+        setError(null);
+      });
       onSuccess();
     }
   }, [isSuccess, onSuccess]);
@@ -152,7 +155,7 @@ function RoleField({
       </div>
       {hint && <p className="text-[10px] text-text-tertiary mt-1">{hint}</p>}
       {error && <p className="text-[10px] text-danger mt-1">{error}</p>}
-      {txError && <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>}
+      {txError && <p className="text-[10px] text-danger mt-1 max-h-20 overflow-y-auto">{(txError as Error).message}</p>}
     </div>
   );
 }
@@ -168,7 +171,7 @@ function SetAllocator({
 }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const { writeContract, data: hash, isPending, error: txError, reset } = useWriteContract();
+  const { writeContract, data: hash, isPending, error: txError, reset } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   // Check if the entered address is currently an allocator
@@ -184,8 +187,10 @@ function SetAllocator({
 
   useEffect(() => {
     if (isSuccess) {
-      setValue('');
-      setError(null);
+      queueMicrotask(() => {
+        setValue('');
+        setError(null);
+      });
       reset();
       refetchCheck();
       onSuccess();
@@ -262,7 +267,7 @@ function SetAllocator({
       </div>
       <p className="text-[10px] text-text-tertiary mt-1">Grant or revoke allocator role (can reallocate between markets)</p>
       {error && <p className="text-[10px] text-danger mt-1">{error}</p>}
-      {txError && <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>}
+      {txError && <p className="text-[10px] text-danger mt-1 max-h-20 overflow-y-auto">{(txError as Error).message}</p>}
     </div>
   );
 }
@@ -278,13 +283,15 @@ function TransferOwnership({
 }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const { writeContract, data: hash, isPending, error: txError } = useWriteContract();
+  const { writeContract, data: hash, isPending, error: txError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   useEffect(() => {
     if (isSuccess) {
-      setValue('');
-      setError(null);
+      queueMicrotask(() => {
+        setValue('');
+        setError(null);
+      });
       onSuccess();
     }
   }, [isSuccess, onSuccess]);
@@ -332,7 +339,7 @@ function TransferOwnership({
       </div>
       <p className="text-[10px] text-warning mt-1">New owner must call acceptOwnership() to complete transfer</p>
       {error && <p className="text-[10px] text-danger mt-1">{error}</p>}
-      {txError && <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>}
+      {txError && <p className="text-[10px] text-danger mt-1 max-h-20 overflow-y-auto">{(txError as Error).message}</p>}
     </div>
   );
 }

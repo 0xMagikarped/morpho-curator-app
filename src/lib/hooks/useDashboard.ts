@@ -38,23 +38,45 @@ export interface VaultSummary {
 // useDashboardVaults — Enrich tracked vaults with on-chain data
 // ============================================================
 
+export interface DashboardVaultsResult {
+  vaults: VaultSummary[];
+  failedVaults: Array<{ address: string; chainId: number; error: string }>;
+}
+
 export function useDashboardVaults() {
   const { address: walletAddress } = useAccount();
   const trackedVaults = useAppStore((s) => s.trackedVaults);
   const trackedKey = trackedVaults.map((v) => `${v.chainId}-${v.address}`).join(',');
 
-  return useQuery<VaultSummary[]>({
+  return useQuery<DashboardVaultsResult>({
     queryKey: dashboardKeys.vaults(trackedKey, walletAddress),
     queryFn: async () => {
-      if (trackedVaults.length === 0) return [];
+      if (trackedVaults.length === 0) return { vaults: [], failedVaults: [] };
 
       const summaries = await Promise.allSettled(
         trackedVaults.map((tv) => enrichVaultSummary(tv.chainId, tv.address, tv.name, tv.version, walletAddress)),
       );
 
-      return summaries
-        .filter((r): r is PromiseFulfilledResult<VaultSummary> => r.status === 'fulfilled')
-        .map((r) => r.value);
+      const vaults: VaultSummary[] = [];
+      const failedVaults: Array<{ address: string; chainId: number; error: string }> = [];
+
+      for (let i = 0; i < summaries.length; i++) {
+        const result = summaries[i];
+        if (result.status === 'fulfilled' && result.value) {
+          vaults.push(result.value);
+        } else {
+          const tv = trackedVaults[i];
+          failedVaults.push({
+            address: tv.address,
+            chainId: tv.chainId,
+            error: result.status === 'rejected' ? String(result.reason) : 'Empty result',
+          });
+          console.warn(`[dashboard] Failed to load vault ${tv.address}:`,
+            result.status === 'rejected' ? result.reason : 'empty result');
+        }
+      }
+
+      return { vaults, failedVaults };
     },
     enabled: trackedVaults.length > 0,
     staleTime: 60_000,
@@ -197,9 +219,10 @@ async function enrichVaultSummary(
     { type: 'function', name: 'symbol', inputs: [], outputs: [{ type: 'string' }], stateMutability: 'view' },
   ] as const;
 
-  const [vaultName, symbol, totalAssets, fee, timelock, sharePrice, sqLen, owner, curator, assetAddress] = await Promise.all([
+  const [vaultName, symbol, assetAddress, totalAssets, fee, timelock, sharePrice, sqLen, owner, curator] = await Promise.all([
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'name' }).catch(() => name),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'symbol' }).catch(() => '???'),
+    client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }).catch(() => null),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'totalAssets' }).catch(() => 0n),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'fee' }).catch(() => 0n),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'timelock' }).catch(() => 0n),
@@ -207,7 +230,6 @@ async function enrichVaultSummary(
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'supplyQueueLength' }).catch(() => 0n),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'owner' }).catch(() => '0x0'),
     client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'curator' }).catch(() => '0x0'),
-    client.readContract({ address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'asset' }).catch(() => null),
   ]);
 
   // Fetch asset decimals and symbol from the underlying ERC20

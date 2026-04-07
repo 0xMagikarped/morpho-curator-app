@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -23,13 +24,15 @@ export function TimelockManagement({
 }: TimelockManagementProps) {
   const [daysInput, setDaysInput] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const { writeContract, data: hash, isPending, error: txError } = useWriteContract();
+  const { writeContract, data: hash, isPending, error: txError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   useEffect(() => {
     if (isSuccess) {
-      setDaysInput('');
-      setError(null);
+      queueMicrotask(() => {
+        setDaysInput('');
+        setError(null);
+      });
       onSuccess();
     }
   }, [isSuccess, onSuccess]);
@@ -114,7 +117,7 @@ export function TimelockManagement({
         )}
 
         {error && <p className="text-[10px] text-danger">{error}</p>}
-        {txError && <p className="text-[10px] text-danger">{(txError as Error).message?.slice(0, 120)}</p>}
+        {txError && <p className="text-[10px] text-danger max-h-20 overflow-y-auto">{(txError as Error).message}</p>}
       </div>
     </Card>
   );

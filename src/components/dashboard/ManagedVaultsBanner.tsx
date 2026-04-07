@@ -17,7 +17,6 @@ export function ManagedVaultsBanner() {
   const trackAll = useAppStore((s) => s.trackAll);
   const addTrackedVault = useAppStore((s) => s.addTrackedVault);
   const dismissDiscovered = useAppStore((s) => s.dismissDiscovered);
-  const persistToEdgeConfig = useAppStore((s) => s.persistToEdgeConfig);
 
   // Filter out already-tracked AND explicitly-dismissed vaults
   const untracked = useMemo(() => {
@@ -42,7 +41,6 @@ export function ManagedVaultsBanner() {
       version: v.version,
     }));
     trackAll(vaults);
-    persistToEdgeConfig(address);
   };
 
   const handleTrackOne = (v: (typeof untracked)[0]) => {
@@ -52,7 +50,6 @@ export function ManagedVaultsBanner() {
       name: v.name,
       version: v.version,
     });
-    persistToEdgeConfig(address);
   };
 
   const handleDismissAll = () => {

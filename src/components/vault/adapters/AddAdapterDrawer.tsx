@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { Address } from 'viem';
 import { isAddress, encodeFunctionData } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -36,7 +37,7 @@ export function AddAdapterDrawer({
     error: previewError,
   } = useAdapterPreview(chainId, vaultAddress, adapterAddress, vaultAsset, showPreview && !!adapterAddress);
 
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const handlePreview = () => {

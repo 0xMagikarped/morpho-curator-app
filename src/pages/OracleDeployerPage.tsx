@@ -5,9 +5,9 @@ import {
   useChainId,
   useSwitchChain,
   useSimulateContract,
-  useWriteContract,
   useWaitForTransactionReceipt,
 } from 'wagmi';
+import { useGuardedWriteContract } from '../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -60,7 +60,7 @@ const INPUT_CLASS =
 
 type Step = 'configure' | 'validate' | 'deploy';
 
-interface TokenInfo {
+interface OracleTokenInfo {
   name: string;
   decimals: number;
 }
@@ -69,10 +69,10 @@ interface TokenInfo {
 // Token Info Fetcher
 // ============================================================
 
-const fetchTokenInfo = async (
+const fetchOracleTokenInfo = async (
   address: string,
   chainId: number,
-  setter: (info: TokenInfo | null) => void,
+  setter: (info: OracleTokenInfo | null) => void,
 ) => {
   if (!isAddress(address) || address === ZERO_ADDRESS) {
     setter(null);
@@ -81,8 +81,8 @@ const fetchTokenInfo = async (
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) return;
   try {
-    const { createPublicClient, http } = await import('viem');
-    const client = createPublicClient({ transport: http(chainConfig.rpcUrls[0]) });
+    const { getPublicClient } = await import('../lib/data/rpcClient');
+    const client = getPublicClient(chainId);
     const [name, decimals] = await Promise.all([
       client.readContract({
         address: address as Address,
@@ -136,10 +136,10 @@ function ConfigureStep({
   setBaseVault,
   quoteVault,
   setQuoteVault,
-  baseTokenInfo,
-  setBaseTokenInfo,
-  quoteTokenInfo,
-  setQuoteTokenInfo,
+  baseOracleTokenInfo,
+  setBaseOracleTokenInfo,
+  quoteOracleTokenInfo,
+  setQuoteOracleTokenInfo,
   onValidate,
 }: {
   chainId: number;
@@ -160,10 +160,10 @@ function ConfigureStep({
   setBaseVault: (v: string) => void;
   quoteVault: string;
   setQuoteVault: (v: string) => void;
-  baseTokenInfo: TokenInfo | null;
-  setBaseTokenInfo: (info: TokenInfo | null) => void;
-  quoteTokenInfo: TokenInfo | null;
-  setQuoteTokenInfo: (info: TokenInfo | null) => void;
+  baseOracleTokenInfo: OracleTokenInfo | null;
+  setBaseOracleTokenInfo: (info: OracleTokenInfo | null) => void;
+  quoteOracleTokenInfo: OracleTokenInfo | null;
+  setQuoteOracleTokenInfo: (info: OracleTokenInfo | null) => void;
   onValidate: () => void;
 }) {
   const chainIds = getSupportedChainIds();
@@ -171,8 +171,8 @@ function ConfigureStep({
   const canValidate =
     isAddress(baseToken) &&
     isAddress(quoteToken) &&
-    baseTokenInfo !== null &&
-    quoteTokenInfo !== null;
+    baseOracleTokenInfo !== null &&
+    quoteOracleTokenInfo !== null;
 
   return (
     <Card>
@@ -208,13 +208,13 @@ function ConfigureStep({
             type="text"
             value={baseToken}
             onChange={(e) => setBaseToken(e.target.value)}
-            onBlur={() => fetchTokenInfo(baseToken, chainId, setBaseTokenInfo)}
+            onBlur={() => fetchOracleTokenInfo(baseToken, chainId, setBaseOracleTokenInfo)}
             placeholder="0x..."
             className={INPUT_CLASS}
           />
-          {baseTokenInfo && (
+          {baseOracleTokenInfo && (
             <div className="text-xs text-text-secondary">
-              {baseTokenInfo.name} — {baseTokenInfo.decimals} decimals
+              {baseOracleTokenInfo.name} — {baseOracleTokenInfo.decimals} decimals
             </div>
           )}
         </div>
@@ -226,13 +226,13 @@ function ConfigureStep({
             type="text"
             value={quoteToken}
             onChange={(e) => setQuoteToken(e.target.value)}
-            onBlur={() => fetchTokenInfo(quoteToken, chainId, setQuoteTokenInfo)}
+            onBlur={() => fetchOracleTokenInfo(quoteToken, chainId, setQuoteOracleTokenInfo)}
             placeholder="0x..."
             className={INPUT_CLASS}
           />
-          {quoteTokenInfo && (
+          {quoteOracleTokenInfo && (
             <div className="text-xs text-text-secondary">
-              {quoteTokenInfo.name} — {quoteTokenInfo.decimals} decimals
+              {quoteOracleTokenInfo.name} — {quoteOracleTokenInfo.decimals} decimals
             </div>
           )}
         </div>
@@ -469,13 +469,13 @@ function ValidateStep({
 
 function DeployStep({
   config,
-  baseTokenInfo,
-  quoteTokenInfo,
+  baseOracleTokenInfo,
+  quoteOracleTokenInfo,
   onBack,
 }: {
   config: OracleTestConfig;
-  baseTokenInfo: TokenInfo;
-  quoteTokenInfo: TokenInfo;
+  baseOracleTokenInfo: OracleTokenInfo;
+  quoteOracleTokenInfo: OracleTokenInfo;
   onBack: () => void;
 }) {
   const { address: walletAddress, isConnected } = useAccount();
@@ -512,7 +512,7 @@ function DeployStep({
     query: { enabled: !!factoryAddress && isConnected && !chainMismatch },
   });
 
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
     hash: txHash,
   });
@@ -544,13 +544,13 @@ function DeployStep({
             <div className="flex justify-between">
               <span className="text-text-tertiary">Base Token</span>
               <span className="text-text-primary font-mono">
-                {baseTokenInfo.name} ({baseTokenInfo.decimals}d)
+                {baseOracleTokenInfo.name} ({baseOracleTokenInfo.decimals}d)
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">Quote Token</span>
               <span className="text-text-primary font-mono">
-                {quoteTokenInfo.name} ({quoteTokenInfo.decimals}d)
+                {quoteOracleTokenInfo.name} ({quoteOracleTokenInfo.decimals}d)
               </span>
             </div>
             <div className="flex justify-between">
@@ -597,8 +597,8 @@ function DeployStep({
         {simError && !chainMismatch && isConnected && (
           <div className="space-y-1">
             <SectionLabel>Simulation Error</SectionLabel>
-            <div className="bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger font-mono break-all">
-              {simError.message.slice(0, 300)}
+            <div className="bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger font-mono break-all max-h-20 overflow-y-auto">
+              {simError.message}
             </div>
           </div>
         )}
@@ -697,8 +697,8 @@ export function OracleDeployerPage() {
   const [quoteVault, setQuoteVault] = useState(ZERO_ADDRESS as string);
 
   // Token info
-  const [baseTokenInfo, setBaseTokenInfo] = useState<TokenInfo | null>(null);
-  const [quoteTokenInfo, setQuoteTokenInfo] = useState<TokenInfo | null>(null);
+  const [baseOracleTokenInfo, setBaseOracleTokenInfo] = useState<OracleTokenInfo | null>(null);
+  const [quoteOracleTokenInfo, setQuoteOracleTokenInfo] = useState<OracleTokenInfo | null>(null);
 
   // Validation state
   const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);
@@ -715,8 +715,8 @@ export function OracleDeployerPage() {
     quoteVault: (quoteVault || ZERO_ADDRESS) as Address,
     baseTokenAddress: baseToken as Address,
     quoteTokenAddress: quoteToken as Address,
-    baseTokenDecimals: baseTokenInfo?.decimals ?? 18,
-    quoteTokenDecimals: quoteTokenInfo?.decimals ?? 18,
+    baseTokenDecimals: baseOracleTokenInfo?.decimals ?? 18,
+    quoteTokenDecimals: quoteOracleTokenInfo?.decimals ?? 18,
   });
 
   const handleValidate = async () => {
@@ -786,10 +786,10 @@ export function OracleDeployerPage() {
           setBaseVault={setBaseVault}
           quoteVault={quoteVault}
           setQuoteVault={setQuoteVault}
-          baseTokenInfo={baseTokenInfo}
-          setBaseTokenInfo={setBaseTokenInfo}
-          quoteTokenInfo={quoteTokenInfo}
-          setQuoteTokenInfo={setQuoteTokenInfo}
+          baseOracleTokenInfo={baseOracleTokenInfo}
+          setBaseOracleTokenInfo={setBaseOracleTokenInfo}
+          quoteOracleTokenInfo={quoteOracleTokenInfo}
+          setQuoteOracleTokenInfo={setQuoteOracleTokenInfo}
           onValidate={handleValidate}
         />
       )}
@@ -804,11 +804,11 @@ export function OracleDeployerPage() {
         />
       )}
 
-      {step === 'deploy' && baseTokenInfo && quoteTokenInfo && (
+      {step === 'deploy' && baseOracleTokenInfo && quoteOracleTokenInfo && (
         <DeployStep
           config={buildConfig()}
-          baseTokenInfo={baseTokenInfo}
-          quoteTokenInfo={quoteTokenInfo}
+          baseOracleTokenInfo={baseOracleTokenInfo}
+          quoteOracleTokenInfo={quoteOracleTokenInfo}
           onBack={() => setStep('validate')}
         />
       )}

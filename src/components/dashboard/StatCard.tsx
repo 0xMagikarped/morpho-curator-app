@@ -23,7 +23,8 @@ export function StatCard({ label, value, delta, deltaPositive, sparklineData, lo
 
   useEffect(() => {
     if (!motionOk.current || prevValue.current === value) {
-      setDisplayValue(value);
+      // Defer synchronous setState to avoid cascading renders
+      queueMicrotask(() => setDisplayValue(value));
       prevValue.current = value;
       return;
     }
@@ -32,7 +33,7 @@ export function StatCard({ label, value, delta, deltaPositive, sparklineData, lo
     const numMatch = value.match(/([\d,.]+)/);
     const prevMatch = prevValue.current.match(/([\d,.]+)/);
     if (!numMatch || !prevMatch) {
-      setDisplayValue(value);
+      queueMicrotask(() => setDisplayValue(value));
       prevValue.current = value;
       return;
     }

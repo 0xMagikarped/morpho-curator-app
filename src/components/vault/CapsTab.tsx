@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useQueryClient } from '@tanstack/react-query';
 import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
@@ -58,12 +59,15 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const role = useVaultRole(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
-  const { data: allChainMarkets } = useMarketScanner(chainId);
-  const marketIds = allocation
-    ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
-    : undefined;
+  const { data: allChainMarkets, error: scannerError } = useMarketScanner(chainId);
+  const marketIds = useMemo(
+    () => allocation
+      ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]
+      : undefined,
+    [allocation],
+  );
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   // Compute discovered market IDs that are NOT already in vault queues
@@ -498,6 +502,13 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         <span className="flex items-center gap-1"><CheckCircle size={10} className="text-info" /> Enabled — cap accepted, not yet in supply queue</span>
         <span className="flex items-center gap-1"><ArrowRight size={10} className="text-success" /> In Queue — actively receiving deposits</span>
       </div>
+
+      {/* Scanner Error */}
+      {scannerError && (
+        <p className="text-xs text-warning mt-2">
+          Could not scan for discoverable markets: {scannerError instanceof Error ? scannerError.message : 'Unknown error'}
+        </p>
+      )}
     </div>
   );
 }

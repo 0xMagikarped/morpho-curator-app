@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -22,7 +23,7 @@ export function V2SecurityTab({ chainId, vaultAddress }: V2SecurityTabProps) {
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const role = useVaultRole(chainId, vaultAddress);
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, undefined);
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
 
   const [deallocateMarketId, setDeallocateMarketId] = useState('');

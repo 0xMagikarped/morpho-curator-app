@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
+import * as Sentry from '@sentry/react';
 import {
   fetchVaultBasicInfo,
   fetchVaultQueues,
@@ -31,24 +32,37 @@ import { vaultKeys } from '../queryKeys';
  * Morpho GraphQL API (1 request). Falls back to RPC on API failure or
  * for unsupported chains (SEI).
  */
+export type DataSource = 'api' | 'rpc';
+
+interface VaultFullDataResult extends ApiVaultData {
+  dataSource: DataSource;
+}
+
 function useVaultFullData(chainId: number | undefined, vaultAddress: Address | undefined) {
   return useQuery({
     queryKey: vaultKeys.fullData(chainId!, vaultAddress!),
-    queryFn: async (): Promise<ApiVaultData> => {
+    queryFn: async (): Promise<VaultFullDataResult> => {
       if (!chainId || !vaultAddress) throw new Error('Missing params');
 
       // Try API first for supported chains
       if (isApiSupportedChain(chainId)) {
         try {
-          return await fetchVaultFromApi(chainId, vaultAddress);
+          const data = await fetchVaultFromApi(chainId, vaultAddress);
+          return { ...data, dataSource: 'api' as const };
         } catch (apiError) {
           console.warn('[useVaultFullData] API failed, falling back to RPC:', apiError);
+          Sentry.addBreadcrumb({
+            category: 'data',
+            message: `API failed for vault ${vaultAddress}, falling back to RPC`,
+            level: 'warning',
+          });
           // Fall through to RPC
         }
       }
 
       // RPC fallback
-      return fetchVaultDataViaRpc(chainId, vaultAddress);
+      const data = await fetchVaultDataViaRpc(chainId, vaultAddress);
+      return { ...data, dataSource: 'rpc' as const };
     },
     enabled: !!chainId && !!vaultAddress,
     staleTime: 30_000,
@@ -136,6 +150,7 @@ export function useVaultInfo(chainId: number | undefined, vaultAddress: Address 
   return {
     ...query,
     data: query.data?.info,
+    dataSource: query.data?.dataSource,
   };
 }
 

@@ -11,6 +11,7 @@ import { truncateAddress, formatTokenAmount, formatWadPercent, formatPercent } f
 import { cn } from '../../lib/utils/cn';
 import type { MarketRecord } from '../../lib/indexer/indexedDB';
 import type { MarketId } from '../../types';
+import type { EnrichedMarketState } from '../../lib/data/marketEnricher';
 
 type Tab = 'overview' | 'risk' | 'notes' | 'curator';
 
@@ -81,7 +82,7 @@ function OverviewTab({
   lltv,
 }: {
   market: MarketRecord;
-  state: any;
+  state: EnrichedMarketState | null | undefined;
   isLoading: boolean;
   lltv: bigint;
 }) {
@@ -164,7 +165,7 @@ function RiskTab({
   market: MarketRecord;
   chainId: number;
   lltvPct: number;
-  state: any;
+  state: EnrichedMarketState | null | undefined;
 }) {
   const currentUtil = state?.utilization ?? 0;
 

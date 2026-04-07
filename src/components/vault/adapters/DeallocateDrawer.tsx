@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -28,7 +29,7 @@ export function DeallocateDrawer({
   assetSymbol,
 }: DeallocateDrawerProps) {
   const [amount, setAmount] = useState('');
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const parsedAmount = useMemo(() => parseTokenAmount(amount, decimals), [amount, decimals]);

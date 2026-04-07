@@ -2,7 +2,7 @@ import { formatUnits } from 'viem';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import type { AllocationDiff } from '../../lib/vault/reallocationDiff';
-import { formatMarketId } from '../../lib/utils/formatting';
+import { formatMarketId } from '../../lib/utils/format';
 
 interface ReallocationDiffViewProps {
   diffs: AllocationDiff[];

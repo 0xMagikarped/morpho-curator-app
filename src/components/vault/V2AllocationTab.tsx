@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { formatUnits, parseUnits, encodeFunctionData, encodeAbiParameters, type Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -297,7 +298,7 @@ function ReallocateDialog({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { writeContract, data: hash, isPending, error: txError } = useWriteContract();
+  const { writeContract, data: hash, isPending, error: txError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   const marketRows = data.rows.filter((r): r is AllocationRow & { type: 'market' } => r.type === 'market');
@@ -489,7 +490,7 @@ function ReallocateDialog({
         </div>
 
         {txError && (
-          <p className="text-[10px] text-danger">{(txError as Error).message?.slice(0, 200)}</p>
+          <p className="text-[10px] text-danger max-h-20 overflow-y-auto">{(txError as Error).message}</p>
         )}
       </div>
     </div>

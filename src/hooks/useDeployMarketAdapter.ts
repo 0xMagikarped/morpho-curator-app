@@ -6,7 +6,8 @@
  * The factory reads the vault's asset and creates the adapter.
  */
 import { useState, useCallback } from 'react';
-import { useWriteContract, usePublicClient } from 'wagmi';
+import { usePublicClient } from 'wagmi';
+import { useGuardedWriteContract } from './useGuardedWriteContract';
 import type { Address } from 'viem';
 import { decodeEventLog } from 'viem';
 import { marketV1AdapterV2FactoryAbi } from '../lib/contracts/marketAdapterFactoryAbi';
@@ -40,12 +41,12 @@ export function useDeployMarketAdapter(
   const {
     writeContractAsync: writeDeployAsync,
     data: deployHash,
-  } = useWriteContract();
+  } = useGuardedWriteContract();
 
   const {
     writeContractAsync: writeAddAsync,
     data: addHash,
-  } = useWriteContract();
+  } = useGuardedWriteContract();
 
   const deploy = useCallback(async () => {
     if (!factoryAddress || !publicClient) {

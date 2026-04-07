@@ -8,7 +8,8 @@
  *   that preserves msg.sender (MetaMorpho V2 does have this).
  */
 import { useState, useCallback } from 'react';
-import { useWriteContract, usePublicClient } from 'wagmi';
+import { usePublicClient } from 'wagmi';
+import { useGuardedWriteContract } from './useGuardedWriteContract';
 import type { Address } from 'viem';
 import { encodeFunctionData } from 'viem';
 import { metaMorphoV2Abi } from '../lib/contracts/metaMorphoV2Abi';
@@ -31,7 +32,7 @@ export function useSequentialSetCaps(
   chainId: number,
 ) {
   const publicClient = usePublicClient({ chainId });
-  const { writeContractAsync } = useWriteContract();
+  const { writeContractAsync } = useGuardedWriteContract();
 
   const [step, setStep] = useState<SetCapsStep>('idle');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -90,7 +91,7 @@ export function useBatchSetCaps(
   chainId: number,
 ) {
   const publicClient = usePublicClient({ chainId });
-  const { writeContractAsync } = useWriteContract();
+  const { writeContractAsync } = useGuardedWriteContract();
 
   const [step, setStep] = useState<SetCapsStep>('idle');
   const [error, setError] = useState<Error | null>(null);

@@ -1,6 +1,7 @@
 import { useMemo, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { useAccount, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -391,7 +392,7 @@ function PendingOwnerItem({
   const isPendingOwner = userAddress && pendingOwner.toLowerCase() === userAddress.toLowerCase();
   const queryClient = useQueryClient();
   const abi = vaultVersion === 'v2' ? metaMorphoV2Abi : metaMorphoV1Abi;
-  const { writeContract, data: hash, isPending, error: txError } = useWriteContract();
+  const { writeContract, data: hash, isPending, error: txError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   useEffect(() => {
@@ -442,7 +443,7 @@ function PendingOwnerItem({
         )}
       </div>
       {txError && (
-        <p className="text-[10px] text-danger mt-1">{(txError as Error).message?.slice(0, 120)}</p>
+        <p className="text-[10px] text-danger mt-1 max-h-20 overflow-y-auto">{(txError as Error).message}</p>
       )}
     </div>
   );

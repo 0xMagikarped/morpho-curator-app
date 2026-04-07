@@ -8,5 +8,9 @@ import { getPublicClient } from "../data/rpcClient";
  * while the SDK expects `Client<Transport, Chain>`.
  */
 export function getMorphoClient(chainId: number): Client<Transport, Chain> {
-  return getPublicClient(chainId) as unknown as Client<Transport, Chain>;
+  const client = getPublicClient(chainId);
+  if (!client.chain) {
+    throw new Error(`[getMorphoClient] PublicClient for chain ${chainId} has no chain property`);
+  }
+  return client as unknown as Client<Transport, Chain>;
 }

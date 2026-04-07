@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import type { Address } from 'viem';
 import { encodeFunctionData } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWaitForTransactionReceipt } from 'wagmi';
+import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -30,7 +31,7 @@ export function UpdateCapsDrawer({
 }: UpdateCapsDrawerProps) {
   const [newAbsCap, setNewAbsCap] = useState('');
   const [newRelCap, setNewRelCap] = useState('');
-  const { writeContract, data: txHash, isPending } = useWriteContract();
+  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const parsedAbsCap = useMemo(() => parseTokenAmount(newAbsCap, decimals), [newAbsCap, decimals]);

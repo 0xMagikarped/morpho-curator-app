@@ -1,5 +1,6 @@
 import type { Address } from 'viem';
-import { useSimulateContract, useWriteContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
+import { useSimulateContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -35,7 +36,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
     query: { enabled: !!chainConfig && !isMismatch },
   });
 
-  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract();
+  const { writeContract, data: txHash, isPending, error: writeError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const handleDeploy = () => {
@@ -61,17 +62,17 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
         )}
 
         {simError && (
-          <div className="bg-danger/10 border border-danger/20 px-3 py-2">
+          <div className="bg-danger/10 border border-danger/20 px-3 py-2 max-h-20 overflow-y-auto">
             <p className="text-xs text-danger">
-              Simulation failed: {simError.message.slice(0, 200)}
+              Simulation failed: {simError.message}
             </p>
           </div>
         )}
 
         {writeError && (
-          <div className="bg-danger/10 border border-danger/20 px-3 py-2">
+          <div className="bg-danger/10 border border-danger/20 px-3 py-2 max-h-20 overflow-y-auto">
             <p className="text-xs text-danger">
-              Transaction failed: {writeError.message.slice(0, 200)}
+              Transaction failed: {writeError.message}
             </p>
           </div>
         )}

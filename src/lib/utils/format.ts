@@ -101,11 +101,13 @@ export function formatCountdown(validAtSeconds: bigint): string {
 }
 
 /**
- * Truncate an address for display: 0x1234...5678
+ * Truncate an address for display: 0x1234ab...5678
+ * Default shows first 6 chars (0x + 4) and last 4 chars.
  */
 export function truncateAddress(address: string, chars = 4): string {
-  if (address.length <= chars * 2 + 2) return address;
-  return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;
+  const startLen = chars + 2; // "0x" prefix + chars
+  if (address.length <= startLen + chars + 3) return address;
+  return `${address.slice(0, startLen)}...${address.slice(-chars)}`;
 }
 
 /**
@@ -139,4 +141,40 @@ export function calcSharePrice(
   if (totalSupply === 0n) return 1;
   return Number(formatUnits(totalAssets, decimals)) /
     Number(formatUnits(totalSupply, 18));
+}
+
+/**
+ * Format a token amount for display with token-type-aware decimal places.
+ */
+export function formatTokenDisplay(amount: number, tokenSymbol: string): string {
+  const symbol = tokenSymbol.toUpperCase();
+  let decimals: number;
+  if (symbol.includes('USD') || symbol.includes('USDT') || symbol.includes('USDC') || symbol.includes('DAI')) {
+    decimals = 0;
+  } else if (symbol.includes('ETH')) {
+    decimals = 2;
+  } else if (symbol.includes('BTC')) {
+    decimals = 6;
+  } else {
+    decimals = 2;
+  }
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  }).format(amount);
+}
+
+/**
+ * Truncate a market ID for display: 0x12345678...abcd
+ */
+export function formatMarketId(marketId: string): string {
+  if (marketId.length <= 14) return marketId;
+  return `${marketId.slice(0, 8)}...${marketId.slice(-4)}`;
+}
+
+/**
+ * Validate that a string is a valid Morpho market ID (64-char hex, with or without 0x prefix).
+ */
+export function isValidMarketId(marketId: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(marketId) || /^[a-fA-F0-9]{64}$/.test(marketId);
 }

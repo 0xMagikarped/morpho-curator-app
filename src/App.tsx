@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/react';
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -58,6 +58,7 @@ const queryClient = new QueryClient({
         if (status && status >= 400 && status < 500) return false;
         return failureCount < 2;
       },
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       refetchOnWindowFocus: false,     // Prevent surprise refetches burning RPC quota
       refetchOnReconnect: 'always',    // Do refetch when network comes back
     },
@@ -72,11 +73,45 @@ const queryClient = new QueryClient({
 });
 
 function SentryFallback({ error }: { error: Error }) {
+  const [showDetails, setShowDetails] = useState(false);
+
   return (
     <div style={{ color: '#0A0080', padding: '2rem', fontFamily: 'monospace', background: '#EBEBEB', minHeight: '100vh' }}>
-      <h1>Something went wrong</h1>
-      <pre style={{ color: '#DC2626', whiteSpace: 'pre-wrap' }}>{error.message}</pre>
-      <pre style={{ color: '#6B6BC8', fontSize: '0.75rem', marginTop: '1rem' }}>{error.stack}</pre>
+      <h1 style={{ marginBottom: '1rem' }}>Something went wrong</h1>
+      <pre style={{ color: '#DC2626', whiteSpace: 'pre-wrap', marginBottom: '1rem' }}>{error.message}</pre>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            background: '#00C060',
+            color: '#FFFFFF',
+            border: 'none',
+            padding: '0.5rem 1rem',
+            fontFamily: 'monospace',
+            cursor: 'pointer',
+            fontSize: '0.875rem',
+          }}
+        >
+          Refresh Page
+        </button>
+        <button
+          onClick={() => setShowDetails((v) => !v)}
+          style={{
+            background: 'transparent',
+            color: '#6B6BC8',
+            border: '1px solid #C5C5F0',
+            padding: '0.5rem 1rem',
+            fontFamily: 'monospace',
+            cursor: 'pointer',
+            fontSize: '0.875rem',
+          }}
+        >
+          {showDetails ? 'Hide Details' : 'Show Details'}
+        </button>
+      </div>
+      {showDetails && (
+        <pre style={{ color: '#6B6BC8', fontSize: '0.75rem', whiteSpace: 'pre-wrap', overflowX: 'auto' }}>{error.stack}</pre>
+      )}
     </div>
   );
 }

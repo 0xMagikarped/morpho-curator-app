@@ -14,7 +14,7 @@ export function useWalletConnectUri() {
 
   useEffect(() => {
     if (!connectModalOpen) {
-      setUri(null);
+      queueMicrotask(() => setUri(null));
       return;
     }
 

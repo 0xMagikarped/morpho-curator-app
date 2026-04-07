@@ -1,7 +1,9 @@
 import { createPublicClient, http, fallback, type Address, type PublicClient, type Chain, defineChain } from 'viem';
 import { mainnet, base } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
+import { metaMorphoV2Abi } from '../contracts/metaMorphoV2Abi';
 import { getChainConfig } from '../../config/chains';
+import { env } from '../../config/env';
 import type {
   MarketParams,
   MarketState,
@@ -42,9 +44,9 @@ const clientCache = new Map<number, PublicClient>();
 // Environment-configured RPCs (e.g. Infura) take priority over hardcoded public RPCs.
 // Set VITE_ETH_RPC_URL, VITE_BASE_RPC_URL, VITE_SEI_RPC_URL in .env.local.
 const ENV_RPC_URLS: Record<number, string | undefined> = {
-  1: import.meta.env.VITE_ETH_RPC_URL || undefined,
-  8453: import.meta.env.VITE_BASE_RPC_URL || undefined,
-  1329: import.meta.env.VITE_SEI_RPC_URL || undefined,
+  1: env.ethRpcUrl || undefined,
+  8453: env.baseRpcUrl || undefined,
+  1329: env.seiRpcUrl || undefined,
 };
 
 export function getPublicClient(chainId: number): PublicClient {
@@ -177,31 +179,7 @@ const vaultV2FactoryAbi = [
   },
 ] as const;
 
-/** ABI fragment for reading V2 vault view functions */
-const vaultV2Abi = [
-  { inputs: [], name: 'curator', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'owner', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'pendingOwner', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'adaptersLength', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: '', type: 'uint256' }], name: 'adapters', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: '', type: 'address' }], name: 'isAdapter', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: '', type: 'address' }], name: 'isSentinel', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: '', type: 'address' }], name: 'isAllocator', outputs: [{ name: '', type: 'bool' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'performanceFee', outputs: [{ name: '', type: 'uint96' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'managementFee', outputs: [{ name: '', type: 'uint96' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'performanceFeeRecipient', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'managementFeeRecipient', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'receiveSharesGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'sendSharesGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'receiveAssetsGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'sendAssetsGate', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'liquidityAdapter', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'name', outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'symbol', outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'asset', outputs: [{ name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'totalAssets', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'totalSupply', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
-] as const;
+// V2 vault ABI imported from ../contracts/metaMorphoV2Abi (single source of truth)
 
 /**
  * Detect vault version using per-chain factory addresses.
@@ -254,7 +232,7 @@ async function detectVaultVersion(
   try {
     await client.readContract({
       address: vaultAddress,
-      abi: vaultV2Abi,
+      abi: metaMorphoV2Abi,
       functionName: 'adaptersLength',
     });
     return 'v2';
@@ -269,8 +247,10 @@ async function safeRead<T>(
   params: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] },
 ): Promise<T | null> {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic wrapper for heterogeneous ABIs
     return await client.readContract(params as any) as T;
-  } catch {
+  } catch (error) {
+    console.warn(`[safeRead] ${params.functionName}(${params.address.slice(0, 10)}) failed:`, error instanceof Error ? error.message : error);
     return null;
   }
 }
@@ -326,6 +306,12 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
     safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV1Abi, functionName: 'guardian' }),
   ]);
 
+  const readResults = [name, symbol, asset, morpho, owner, pendingOwner, curator, timelock, fee, totalAssets, totalSupply, lastTotalAssets, feeRecipient, guardian];
+  const failedCount = readResults.filter(r => r === null || r === undefined).length;
+  if (failedCount > 0) {
+    console.warn(`[vault ${vaultAddress}] ${failedCount} of ${readResults.length} V1 reads returned null`);
+  }
+
   if (name === null || name === undefined) {
     throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
@@ -365,24 +351,30 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
     adaptersLength,
     receiveSharesGate, sendSharesGate, receiveAssetsGate, sendAssetsGate,
   ] = await Promise.all([
-    safeRead<string>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'name' }),
-    safeRead<string>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'symbol' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'asset' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'owner' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'pendingOwner' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'curator' }),
-    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'totalAssets' }),
-    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'totalSupply' }),
-    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'performanceFee' }),
-    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'managementFee' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'performanceFeeRecipient' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'managementFeeRecipient' }),
-    safeRead<bigint>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'adaptersLength' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'receiveSharesGate' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'sendSharesGate' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'receiveAssetsGate' }),
-    safeRead<Address>(client, { address: vaultAddress, abi: vaultV2Abi, functionName: 'sendAssetsGate' }),
+    safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'name' }),
+    safeRead<string>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'symbol' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'asset' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'owner' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'pendingOwner' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'curator' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'totalAssets' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'totalSupply' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'performanceFee' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'managementFee' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'performanceFeeRecipient' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'managementFeeRecipient' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'adaptersLength' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'receiveSharesGate' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'sendSharesGate' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'receiveAssetsGate' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'sendAssetsGate' }),
   ]);
+
+  const readResults = [name, symbol, asset, owner, pendingOwner, curator, totalAssets, totalSupply, performanceFee, managementFee, performanceFeeRecipient, managementFeeRecipient, adaptersLength, receiveSharesGate, sendSharesGate, receiveAssetsGate, sendAssetsGate];
+  const failedCount = readResults.filter(r => r === null || r === undefined).length;
+  if (failedCount > 0) {
+    console.warn(`[vault ${vaultAddress}] ${failedCount} of ${readResults.length} V2 reads returned null`);
+  }
 
   if (name === null || name === undefined) {
     throw new Error(`Contract at ${vaultAddress} is not a Morpho V2 vault (name() failed)`);
@@ -519,7 +511,7 @@ export async function fetchV2Adapters(chainId: number, vaultAddress: Address): P
   // Read adaptersLength
   const length = await safeRead<bigint>(client, {
     address: vaultAddress,
-    abi: vaultV2Abi,
+    abi: metaMorphoV2Abi,
     functionName: 'adaptersLength',
   });
 
@@ -530,7 +522,7 @@ export async function fetchV2Adapters(chainId: number, vaultAddress: Address): P
     Array.from({ length: Number(length) }, (_, i) =>
       safeRead<Address>(client, {
         address: vaultAddress,
-        abi: vaultV2Abi,
+        abi: metaMorphoV2Abi,
         functionName: 'adapters',
         args: [BigInt(i)],
       }),
@@ -782,8 +774,13 @@ export async function fetchPendingTimelock(
     });
     if (result[1] === 0n) return null;
     return { value: result[0], validAt: result[1] };
-  } catch {
-    // V2 vaults don't have pendingTimelock
+  } catch (error) {
+    // Expected for V2 vaults (no pendingTimelock function)
+    // Only warn if this is likely a real error (not a V2 vault)
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes('reverted') && !msg.includes('execution reverted')) {
+      console.warn(`[fetchPendingTimelock] Unexpected error for ${vaultAddress.slice(0, 10)}:`, msg);
+    }
     return null;
   }
 }
@@ -801,8 +798,13 @@ export async function fetchPendingGuardian(
     });
     if (result[1] === 0n) return null;
     return { value: result[0], validAt: result[1] };
-  } catch {
-    // V2 vaults don't have pendingGuardian
+  } catch (error) {
+    // Expected for V2 vaults (no pendingGuardian function)
+    // Only warn if this is likely a real error (not a V2 vault)
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes('reverted') && !msg.includes('execution reverted')) {
+      console.warn(`[fetchPendingGuardian] Unexpected error for ${vaultAddress.slice(0, 10)}:`, msg);
+    }
     return null;
   }
 }

@@ -11,17 +11,14 @@ export interface TrackedVault {
 }
 
 interface AppState {
-  // Tracked vaults (persisted locally + synced to Edge Config)
+  // Tracked vaults (persisted locally via Zustand persist middleware)
   trackedVaults: TrackedVault[];
   dismissedVaults: string[]; // vaultKey strings explicitly untracked by user
-  isSyncing: boolean;
   addTrackedVault: (vault: TrackedVault) => void;
   removeTrackedVault: (address: Address, chainId: number) => void;
   trackAll: (vaults: TrackedVault[]) => void;
   dismissDiscovered: (vaults: Array<{ address: string; chainId: number }>) => void;
   isDismissed: (address: string, chainId: number) => boolean;
-  syncFromEdgeConfig: (wallet: string) => Promise<void>;
-  persistToEdgeConfig: (wallet: string) => Promise<void>;
 
   // Active vault selection
   activeVaultAddress: Address | null;
@@ -54,7 +51,6 @@ export const useAppStore = create<AppState>()(
       // Tracked vaults
       trackedVaults: [],
       dismissedVaults: [],
-      isSyncing: false,
 
       addTrackedVault: (vault) =>
         set((state) => {
@@ -104,60 +100,6 @@ export const useAppStore = create<AppState>()(
 
       isDismissed: (address, chainId) => {
         return get().dismissedVaults.includes(vaultKey({ address, chainId }));
-      },
-
-      syncFromEdgeConfig: async (wallet) => {
-        if (!wallet) return;
-        set({ isSyncing: true });
-        try {
-          const res = await fetch(`/api/tracked-vaults?wallet=${wallet}`);
-          if (!res.ok) {
-            console.warn('[tracking] Edge Config fetch failed:', res.status);
-            return;
-          }
-          const remote = await res.json();
-          if (!Array.isArray(remote)) {
-            console.warn('[tracking] Edge Config returned non-array:', remote);
-            return;
-          }
-          const { trackedVaults: local, dismissedVaults } = get();
-          const remoteKeys = new Set(remote.map(vaultKey));
-          const dismissedKeys = new Set(dismissedVaults);
-
-          // Start with remote (authoritative)
-          // Add local-only vaults that aren't dismissed (added offline before sync)
-          const localOnly = local.filter(
-            (v) => !remoteKeys.has(vaultKey(v)) && !dismissedKeys.has(vaultKey(v)),
-          );
-          const merged = [...remote, ...localOnly];
-
-          set({ trackedVaults: merged });
-          // Push local-only additions back to Edge Config
-          if (localOnly.length > 0) {
-            get().persistToEdgeConfig(wallet);
-          }
-        } catch (err) {
-          console.warn('[tracking] Edge Config sync failed, using local data:', err);
-        } finally {
-          set({ isSyncing: false });
-        }
-      },
-
-      persistToEdgeConfig: async (wallet) => {
-        const { trackedVaults } = get();
-        try {
-          const res = await fetch('/api/track-vault', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ wallet, vaults: trackedVaults }),
-          });
-          if (!res.ok) {
-            const body = await res.text();
-            console.error('[tracking] Edge Config persist failed:', res.status, body);
-          }
-        } catch (err) {
-          console.warn('[tracking] Edge Config persist failed:', err);
-        }
       },
 
       // Active vault

@@ -33,7 +33,8 @@ export function PriceComparison({
 
   useEffect(() => {
     if (!client) return;
-    setLoading(true);
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) setLoading(true); });
 
     Promise.all([
       client.readContract({
@@ -43,6 +44,7 @@ export function PriceComparison({
       }).catch(() => null),
       getMarketPrices(chainId, loanToken, collateralToken),
     ]).then(([rawPrice, prices]) => {
+      if (cancelled) return;
       if (rawPrice !== null) {
         const scale = 36 + loanDecimals - collateralDecimals;
         setOraclePrice(Number(rawPrice) / Math.pow(10, scale));
@@ -50,6 +52,7 @@ export function PriceComparison({
       setLlamaPrice(prices.relativePrice);
       setLoading(false);
     });
+    return () => { cancelled = true; };
   }, [client, oracleAddress, chainId, loanToken, collateralToken, loanDecimals, collateralDecimals]);
 
   const deviation = oraclePrice && llamaPrice

@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { truncateAddress } from '../../lib/utils/format';
-import { formatTokenDisplay } from '../../lib/utils/formatting';
+import { formatTokenDisplay } from '../../lib/utils/format';
 import type { PositionData } from '../../lib/market/positionHealth';
 
 interface PositionHealthTableProps {

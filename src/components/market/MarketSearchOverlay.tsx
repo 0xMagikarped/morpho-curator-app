@@ -32,14 +32,16 @@ export function MarketSearchOverlay({ open, onClose, markets, onSelect }: Market
 
   useEffect(() => {
     if (open) {
-      setQuery('');
-      setActiveIndex(0);
+      queueMicrotask(() => {
+        setQuery('');
+        setActiveIndex(0);
+      });
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
   useEffect(() => {
-    setActiveIndex(0);
+    queueMicrotask(() => setActiveIndex(0));
   }, [query]);
 
   // Scroll active item into view

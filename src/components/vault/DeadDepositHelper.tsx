@@ -1,4 +1,5 @@
-import { useWriteContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
+import { useWaitForTransactionReceipt, useChainId } from 'wagmi';
+import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -20,10 +21,10 @@ export function DeadDepositHelper({ marketParams, hasDeadDeposit }: DeadDepositH
   const chainConfig = getChainConfig(chainId);
   const { isMismatch } = useChainGuard(chainId);
 
-  const { writeContract: writeApprove, data: approveTxHash, isPending: approvePending } = useWriteContract();
+  const { writeContract: writeApprove, data: approveTxHash, isPending: approvePending } = useGuardedWriteContract();
   const { isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
 
-  const { writeContract: writeSupply, data: supplyTxHash, isPending: supplyPending } = useWriteContract();
+  const { writeContract: writeSupply, data: supplyTxHash, isPending: supplyPending } = useGuardedWriteContract();
   const { isLoading: supplyConfirming, isSuccess: supplySuccess } = useWaitForTransactionReceipt({ hash: supplyTxHash });
 
   const handleApprove = () => {

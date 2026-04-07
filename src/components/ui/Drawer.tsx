@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils/cn';
 
@@ -14,10 +14,10 @@ interface DrawerProps {
 export function Drawer({ open, onClose, title, subtitle, children, footer }: DrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const motionOk = useRef(true);
+  const [motionOk, setMotionOk] = useState(true);
 
   useEffect(() => {
-    motionOk.current = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    queueMicrotask(() => setMotionOk(!window.matchMedia('(prefers-reduced-motion: reduce)').matches));
   }, []);
 
   // Focus trap + ESC handler
@@ -78,7 +78,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
       <div
         className={cn(
           'fixed inset-0 z-40 bg-black/60',
-          motionOk.current ? 'animate-[fade-in_200ms_ease-out]' : '',
+          motionOk ? 'animate-[fade-in_200ms_ease-out]' : '',
         )}
         onClick={onClose}
         aria-hidden="true"
@@ -93,7 +93,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
         className={cn(
           'fixed right-0 top-0 h-full w-full sm:w-[480px] z-50 flex flex-col',
           'bg-bg-surface border-l border-border-subtle',
-          motionOk.current ? 'animate-[slide-in-right_250ms_ease-out]' : '',
+          motionOk ? 'animate-[slide-in-right_250ms_ease-out]' : '',
         )}
       >
         {/* Header */}

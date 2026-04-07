@@ -1,4 +1,5 @@
-import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useWaitForTransactionReceipt } from "wagmi";
+import { useGuardedWriteContract } from "../useGuardedWriteContract";
 import type { Address } from "viem";
 import { metaMorphoV1Abi } from "../../lib/contracts/abis";
 
@@ -28,7 +29,7 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
     isPending,
     error,
     reset,
-  } = useWriteContract();
+  } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } =
     useWaitForTransactionReceipt({ hash });
 
