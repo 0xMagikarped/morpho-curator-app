@@ -14,7 +14,7 @@ import { RegistryAlertBanner } from './RegistryAlertBanner';
 import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
 import { useVaultInfo, useVaultRole, useVaultMarketsFromApi, useVaultAllocators } from '../../lib/hooks/useVault';
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
-import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice } from '../../lib/utils/format';
+import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 import { getEmergencyRole } from '../../types';
 import { metaMorphoV1Abi, metaMorphoV2Abi } from '../../lib/contracts/abis';
@@ -159,6 +159,33 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
           />
         </div>
       </Card>
+
+      {/* APY Stats */}
+      {(vault.apy != null || vault.netApy != null) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Yield</CardTitle>
+          </CardHeader>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <span className="text-[10px] text-text-tertiary uppercase">Net APY</span>
+              <p className={`text-lg font-mono font-medium mt-0.5 ${getApyColorClass(vault.netApy)}`}>
+                {formatApyDisplay(vault.netApy)}
+              </p>
+            </div>
+            <div>
+              <span className="text-[10px] text-text-tertiary uppercase">Native APY</span>
+              <p className="text-lg font-mono text-text-primary mt-0.5">
+                {formatApyDisplay(vault.apy)}
+              </p>
+            </div>
+            <InfoItem label="Performance Fee" value={formatWadPercent(vault.fee)} />
+            {vault.version === 'v2' && vault.managementFee > 0n && (
+              <InfoItem label="Management Fee" value={formatWadPercent(vault.managementFee)} />
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* ERC-4626 Metrics */}
       <Card>

@@ -49,6 +49,11 @@ const VAULT_QUERY = `
               utilization
               supplyApy
               borrowApy
+              rewards {
+                supplyApr
+                borrowApr
+                asset { symbol }
+              }
             }
           }
           supplyAssets
@@ -75,6 +80,12 @@ interface ApiAsset {
   decimals: number;
 }
 
+interface ApiReward {
+  supplyApr: number | null;
+  borrowApr: number | null;
+  asset: { symbol: string };
+}
+
 interface ApiMarketState {
   supplyAssets: string;
   borrowAssets: string;
@@ -82,6 +93,7 @@ interface ApiMarketState {
   utilization: number;
   supplyApy: number;
   borrowApy: number;
+  rewards: ApiReward[];
 }
 
 interface ApiMarket {
@@ -248,6 +260,11 @@ export async function fetchVaultFromApi(
       supplyAPY: m.state.supplyApy,
       borrowAPY: m.state.borrowApy,
       utilization: m.state.utilization,
+      rewards: (m.state.rewards ?? []).map((r) => ({
+        supplyApr: r.supplyApr,
+        borrowApr: r.borrowApr,
+        asset: { symbol: r.asset.symbol },
+      })),
     };
   });
 
@@ -275,6 +292,8 @@ export async function fetchVaultFromApi(
       version: 'v1',
       guardian: s.guardian as Address,
       assetInfo,
+      apy: s.apy ?? null,
+      netApy: s.netApy ?? null,
     },
     allocation: {
       supplyQueue,

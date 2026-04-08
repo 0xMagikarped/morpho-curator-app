@@ -32,6 +32,7 @@ export interface VaultSummary {
   sharePrice: bigint;
   role: 'owner' | 'curator' | 'allocator' | 'none';
   supplyQueueLength: number;
+  netApy: number | null;
 }
 
 // ============================================================
@@ -198,6 +199,7 @@ async function enrichVaultSummary(
           : 10n ** 18n,
         role,
         supplyQueueLength: apiData.allocation.supplyQueue.length,
+        netApy: info.netApy,
       };
     } catch (apiError) {
       console.warn(`[enrichVaultSummary] API failed for ${vaultAddress} on chain ${chainId}, falling back to RPC:`, apiError);
@@ -276,5 +278,6 @@ async function enrichVaultSummary(
     sharePrice: sharePrice as bigint,
     role,
     supplyQueueLength: Number(sqLen as bigint),
+    netApy: null,
   };
 }

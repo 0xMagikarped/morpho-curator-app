@@ -77,6 +77,33 @@ export function formatPercent(value: number, fractionDigits = 2): string {
 }
 
 /**
+ * Format an APY value for display.
+ * @param apy - APY as decimal (e.g., 0.0534 = 5.34%)
+ */
+export function formatApyDisplay(
+  apy: number | null | undefined,
+  options?: { decimals?: number; showPlus?: boolean; fallback?: string },
+): string {
+  const { decimals = 2, showPlus = false, fallback = '\u2014' } = options ?? {};
+  if (apy == null || isNaN(apy)) return fallback;
+  const pct = apy * 100;
+  const formatted = pct.toFixed(decimals);
+  const prefix = showPlus && pct > 0 ? '+' : '';
+  return `${prefix}${formatted}%`;
+}
+
+/**
+ * Get a Tailwind color class for an APY value.
+ */
+export function getApyColorClass(apy: number | null | undefined): string {
+  if (apy == null) return 'text-text-tertiary';
+  if (apy > 0.05) return 'text-accent-primary';
+  if (apy > 0) return 'text-success';
+  if (apy < 0) return 'text-danger';
+  return 'text-text-tertiary';
+}
+
+/**
  * Format seconds to human-readable duration.
  */
 export function formatDuration(seconds: number | bigint): string {

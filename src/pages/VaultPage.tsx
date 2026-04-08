@@ -16,6 +16,7 @@ import { isApiSupportedChain } from '../lib/data/morphoApi';
 import { useAppStore } from '../store/appStore';
 import { cn } from '../lib/utils/cn';
 import { getEmergencyRoleLabel } from '../types';
+import { formatApyDisplay, getApyColorClass } from '../lib/utils/format';
 
 type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security';
 
@@ -135,6 +136,11 @@ export function VaultPage() {
                 <Badge variant="purple">
                   {getEmergencyRoleLabel(vault.version)}
                 </Badge>
+              )}
+              {vault?.netApy != null && (
+                <span className={`text-sm font-mono font-medium ${getApyColorClass(vault.netApy)}`}>
+                  {formatApyDisplay(vault.netApy)} APY
+                </span>
               )}
             </div>
           )}

@@ -94,6 +94,10 @@ interface VaultInfoBase {
   totalAssets: bigint;
   totalSupply: bigint;
   lastTotalAssets: bigint;
+  /** Vault APY (supply-side, before fees). Decimal: 0.05 = 5%. Null if unavailable. */
+  apy: number | null;
+  /** Net APY (after fees, including rewards). Decimal: 0.05 = 5%. Null if unavailable. */
+  netApy: number | null;
 }
 
 /** V1 (MetaMorpho) vault — uses supply/withdraw queues and guardian */
@@ -157,6 +161,12 @@ export interface MarketState {
   fee: bigint;
 }
 
+export interface MarketReward {
+  supplyApr: number | null;
+  borrowApr: number | null;
+  asset: { symbol: string };
+}
+
 export interface MarketInfo {
   id: MarketId;
   params: MarketParams;
@@ -166,6 +176,7 @@ export interface MarketInfo {
   supplyAPY: number;
   borrowAPY: number;
   utilization: number;
+  rewards: MarketReward[];
 }
 
 // ============================================================

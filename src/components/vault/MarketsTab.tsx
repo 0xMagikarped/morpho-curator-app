@@ -4,7 +4,7 @@ import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { UtilizationBar } from '../risk/UtilizationBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
-import { formatTokenAmount, formatPercent, truncateAddress } from '../../lib/utils/format';
+import { formatTokenAmount, formatPercent, truncateAddress, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
 
 interface MarketsTabProps {
@@ -105,6 +105,8 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
                 <th className="text-right py-2 px-2">Supply</th>
                 <th className="text-right py-2 px-2">Cap</th>
                 <th className="text-right py-2 px-2">Used</th>
+                <th className="text-right py-2 px-2">Supply APY</th>
+                <th className="text-right py-2 px-2">Borrow APY</th>
                 <th className="text-right py-2 px-2">Util</th>
                 <th className="text-right py-2 px-2">Oracle</th>
               </tr>
@@ -145,6 +147,12 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
                         <span className="text-text-primary text-xs font-mono">{capUsed.toFixed(0)}%</span>
                         <ProgressBar value={capUsed} className="w-12 h-1.5" />
                       </div>
+                    </td>
+                    <td className={`text-right py-2.5 px-2 font-mono ${getApyColorClass(market.supplyAPY)}`}>
+                      {formatApyDisplay(market.supplyAPY)}
+                    </td>
+                    <td className="text-right py-2.5 px-2 font-mono text-text-secondary">
+                      {formatApyDisplay(market.borrowAPY)}
                     </td>
                     <td className="text-right py-2.5 px-2">
                       <UtilizationBar utilization={market.utilization * 100} compact />

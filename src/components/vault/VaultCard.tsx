@@ -7,7 +7,7 @@ import { RoleBadge } from '../ui/RoleBadge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { Button } from '../ui/Button';
 import { useVaultInfo, useVaultAllocation, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
-import { formatTokenAmount, formatTokenAmountCompact, formatWadPercent, formatDuration, formatCountdown } from '../../lib/utils/format';
+import { formatTokenAmount, formatTokenAmountCompact, formatWadPercent, formatDuration, formatCountdown, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { truncateAddress } from '../../lib/utils/format';
 import type { Address } from 'viem';
 
@@ -132,8 +132,10 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
           <p className="text-sm font-mono font-medium text-text-primary truncate">{formatWadPercent(vault.fee)}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Timelock</p>
-          <p className="text-sm font-mono font-medium text-text-primary truncate">{formatDuration(vault.timelock)}</p>
+          <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Net APY</p>
+          <p className={`text-sm font-mono font-medium truncate ${getApyColorClass(vault.netApy)}`}>
+            {formatApyDisplay(vault.netApy)}
+          </p>
         </div>
         <div className="min-w-0">
           <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Idle</p>

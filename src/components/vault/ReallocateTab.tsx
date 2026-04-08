@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole } from '../../lib/hooks/useVault';
-import { formatTokenAmount, parseTokenAmount } from '../../lib/utils/format';
+import { formatTokenAmount, parseTokenAmount, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { isMorphoSdkSupported } from '../../lib/morpho/sdk-config';
 import {
@@ -33,6 +33,7 @@ interface AllocationEdit {
   label: string;
   cap: bigint;
   isIdle: boolean;
+  supplyApy: number;
 }
 
 // ============================================================
@@ -207,6 +208,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
           : a.marketId.slice(0, 10),
         cap: a.supplyCap,
         isIdle,
+        supplyApy: isIdle ? 0 : (market?.supplyAPY ?? 0),
       };
     });
   }, [allocation, markets, edits, idleMarketId]);
@@ -283,6 +285,27 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     if (!ce || ce.cap === 0n) return false;
     return ce.targetAssets >= ce.cap;
   })();
+
+  // Projected vault APY = weighted average of per-market supply APY by target allocation
+  const projectedApy = useMemo(() => {
+    if (!hasChanges || totalAllocated === 0n) return null;
+    let weightedSum = 0;
+    for (const e of allocationEditsWithIdle) {
+      const weight = Number(e.targetAssets) / Number(totalAllocated);
+      weightedSum += weight * e.supplyApy;
+    }
+    return weightedSum;
+  }, [allocationEditsWithIdle, hasChanges, totalAllocated]);
+
+  const currentWeightedApy = useMemo(() => {
+    if (totalAllocated === 0n) return null;
+    let weightedSum = 0;
+    for (const e of allocationEditsWithIdle) {
+      const weight = Number(e.currentAssets) / Number(totalAllocated);
+      weightedSum += weight * e.supplyApy;
+    }
+    return weightedSum;
+  }, [allocationEditsWithIdle, totalAllocated]);
 
   const handleTargetChange = useCallback((marketId: string, value: bigint) => {
     setEdits((prev) => {
@@ -454,6 +477,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     <th className="text-center py-2 w-6"></th>
                     <th className="text-right py-2">Target</th>
                     <th className="text-right py-2">Delta</th>
+                    <th className="text-right py-2">APY</th>
                     <th className="text-right py-2">Supply Cap</th>
                     <th className="text-center py-2 w-8">Catcher</th>
                     <th className="text-right py-2 w-20"></th>
@@ -525,6 +549,11 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                               {formatTokenAmount(delta < 0n ? -delta : delta, assetDecimals, 2)}
                             </>
                           )}
+                        </td>
+
+                        {/* APY */}
+                        <td className={`text-right py-2 font-mono text-xs ${getApyColorClass(edit.supplyApy)}`}>
+                          {formatApyDisplay(edit.supplyApy)}
                         </td>
 
                         {/* Supply Cap */}
@@ -599,6 +628,23 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
               capViolations={capViolations}
               onAutoFix={handleAutoFixIdle}
             />
+
+            {/* Projected APY */}
+            {hasChanges && projectedApy != null && currentWeightedApy != null && (
+              <div className="flex items-center gap-4 text-xs px-1">
+                <span className="text-text-tertiary">Weighted APY:</span>
+                <span className="font-mono text-text-primary">{formatApyDisplay(currentWeightedApy)}</span>
+                <span className="text-text-tertiary">&rarr;</span>
+                <span className={`font-mono font-medium ${getApyColorClass(projectedApy)}`}>
+                  {formatApyDisplay(projectedApy)}
+                </span>
+                {projectedApy !== currentWeightedApy && (
+                  <span className={`font-mono text-[10px] ${projectedApy > currentWeightedApy ? 'text-success' : 'text-danger'}`}>
+                    ({formatApyDisplay(projectedApy - currentWeightedApy, { showPlus: true })})
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Catcher at cap warning */}
             {catcherAtCap && hasChanges && (

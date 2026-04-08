@@ -123,6 +123,7 @@ async function fetchVaultDataViaRpc(
           supplyAPY: 0,
           borrowAPY: 0,
           utilization: calcUtilization(state.totalBorrowAssets, state.totalSupplyAssets),
+          rewards: [],
         } as MarketInfo;
       }),
     ),
@@ -208,6 +209,7 @@ export function useVaultMarkets(
             supplyAPY: 0,
             borrowAPY: 0,
             utilization,
+            rewards: [],
           } as MarketInfo;
         }),
       );
