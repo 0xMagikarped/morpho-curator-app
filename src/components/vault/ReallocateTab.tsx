@@ -276,6 +276,14 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     .filter((e) => e.targetAssets > e.cap && e.cap > 0n)
     .map((e) => ({ label: e.label, target: e.targetAssets, cap: e.cap }));
 
+  // Warn if the catcher market's target is at its cap — MAX_UINT256 dust absorption
+  // will push it over the cap and revert with InconsistentReallocation or SupplyCapExceeded
+  const catcherAtCap = (() => {
+    const ce = allocationEditsWithIdle.find((e) => e.marketId === effectiveCatcher);
+    if (!ce || ce.cap === 0n) return false;
+    return ce.targetAssets >= ce.cap;
+  })();
+
   const handleTargetChange = useCallback((marketId: string, value: bigint) => {
     setEdits((prev) => {
       const next = new Map(prev);
@@ -413,7 +421,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   }
 
   const canSimulate = hasChanges && sdkSupported && !isSimulating;
-  const canExecute = isBalanced && hasChanges && capViolations.length === 0 && !isMismatch;
+  const canExecute = isBalanced && hasChanges && capViolations.length === 0 && !isMismatch && !catcherAtCap;
 
   return (
     <div className="space-y-4">
@@ -591,6 +599,17 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
               capViolations={capViolations}
               onAutoFix={handleAutoFixIdle}
             />
+
+            {/* Catcher at cap warning */}
+            {catcherAtCap && hasChanges && (
+              <div className="flex items-center gap-2 text-xs text-warning bg-warning/10 border border-warning/20 px-3 py-2">
+                <span>&#9888;</span>
+                <span>
+                  Catcher market is at its supply cap. Rounding dust may cause a revert.
+                  Lower the target slightly below the cap or pick a different catcher with more headroom.
+                </span>
+              </div>
+            )}
 
             {/* Simulation Results */}
             {simulation && simulation.isValid && (
