@@ -366,10 +366,20 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       return 0;
     });
 
-    // Append catcher last with MAX_UINT256 to absorb rounding dust
+    // Append catcher last — use MAX_UINT256 only if the market has headroom under its cap.
+    // If the catcher's target is at or near its supply cap, MAX_UINT256 would push it over
+    // the cap (the contract supplies ALL remaining vault balance, which may exceed the cap
+    // by rounding dust). In that case, use the exact target amount and let dust stay idle.
     const MAX_UINT256 = 2n ** 256n - 1n;
     if (catcherParams) {
-      changedAllocations.push({ ...catcherParams, assets: MAX_UINT256 });
+      const catcherCap = catcherEdit?.cap ?? 0n;
+      const catcherTarget = catcherEdit?.targetAssets ?? 0n;
+      // Use MAX_UINT256 only if cap is 0 (unlimited) or target is well below the cap
+      const hasCapHeadroom = catcherCap === 0n || catcherTarget < catcherCap;
+      changedAllocations.push({
+        ...catcherParams,
+        assets: hasCapHeadroom ? MAX_UINT256 : catcherParams.assets,
+      });
     }
 
     await reallocate(changedAllocations);
