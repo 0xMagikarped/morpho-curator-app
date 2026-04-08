@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { formatEther, parseEther, formatUnits, parseUnits, isAddress } from 'viem';
 import type { Address } from 'viem';
 import { ChevronDown, ChevronRight, Zap, Shield } from 'lucide-react';
@@ -46,6 +46,15 @@ export function PublicAllocatorPanel({
   const [adminInput, setAdminInput] = useState('');
   const [showAdminForm, setShowAdminForm] = useState(false);
   const [showFeeForm, setShowFeeForm] = useState(false);
+  const [flowCapError, setFlowCapError] = useState<string | null>(null);
+
+  // Refetch PA config when a transaction succeeds
+  useEffect(() => {
+    if (actions.isSuccess) {
+      refetch();
+      actions.reset();
+    }
+  }, [actions.isSuccess, refetch, actions.reset]);
 
   const isEditing = Object.keys(editingCaps).length > 0;
   const canConfigure = isOwner || isCurator;
@@ -85,6 +94,7 @@ export function PublicAllocatorPanel({
   }
 
   const handleApplyFlowCaps = () => {
+    setFlowCapError(null);
     const configs: FlowCapConfig[] = Object.entries(editingCaps).map(([marketId, caps]) => ({
       marketId: marketId as `0x${string}`,
       caps: {
@@ -96,13 +106,13 @@ export function PublicAllocatorPanel({
     // Validate: none exceed MAX_SETTABLE_FLOW_CAP
     for (const c of configs) {
       if (c.caps.maxIn > MAX_SETTABLE_FLOW_CAP || c.caps.maxOut > MAX_SETTABLE_FLOW_CAP) {
-        return; // Silently reject — UI should prevent this
+        setFlowCapError(`Flow cap exceeds maximum (uint128.max / 2). Reduce the value.`);
+        return;
       }
     }
 
     actions.setFlowCaps(configs);
     setEditingCaps({});
-    setTimeout(() => refetch(), 3000);
   };
 
   const setAllCaps = (maxIn: string, maxOut: string) => {
@@ -143,8 +153,7 @@ export function PublicAllocatorPanel({
                 } else {
                   actions.enablePA();
                 }
-                setTimeout(() => refetch(), 3000);
-              }}
+                          }}
               loading={actions.isPending || actions.isConfirming}
               disabled={!isOwner}
             >
@@ -219,8 +228,7 @@ export function PublicAllocatorPanel({
                       variant="ghost"
                       onClick={() => {
                         actions.transferFee();
-                        setTimeout(() => refetch(), 3000);
-                      }}
+                                          }}
                       loading={actions.isPending || actions.isConfirming}
                     >
                       Withdraw Fees
@@ -246,8 +254,7 @@ export function PublicAllocatorPanel({
                         actions.setAdmin(adminInput as Address);
                         setAdminInput('');
                         setShowAdminForm(false);
-                        setTimeout(() => refetch(), 3000);
-                      }
+                                          }
                     }}
                     disabled={!isAddress(adminInput) || actions.isPending}
                     loading={actions.isPending || actions.isConfirming}
@@ -278,8 +285,7 @@ export function PublicAllocatorPanel({
                         actions.setFee(fee);
                         setFeeInput('');
                         setShowFeeForm(false);
-                        setTimeout(() => refetch(), 3000);
-                      } catch { /* invalid input */ }
+                                          } catch { /* invalid input */ }
                     }}
                     disabled={!feeInput || actions.isPending}
                     loading={actions.isPending || actions.isConfirming}
@@ -413,6 +419,9 @@ export function PublicAllocatorPanel({
                         Apply Flow Caps ({Object.keys(editingCaps).length} markets)
                       </Button>
                     </div>
+                    {flowCapError && (
+                      <p className="text-xs text-danger mt-1">{flowCapError}</p>
+                    )}
                   </div>
                 )}
               </div>

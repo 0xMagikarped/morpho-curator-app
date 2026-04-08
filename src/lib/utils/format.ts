@@ -22,10 +22,10 @@ export function formatTokenAmount(
   decimals: number,
   maxFractionDigits = 2,
 ): string {
+  if (value === 0n) return '0';
   const formatted = formatUnits(value, decimals);
   const num = parseFloat(formatted);
-  if (num === 0) return '0';
-  if (num < 0.01) return '<0.01';
+  if (num === 0 || num < 0.01) return '<0.01';
   return num.toLocaleString('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: maxFractionDigits,

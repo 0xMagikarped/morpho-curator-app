@@ -162,6 +162,7 @@ export function usePublicAllocatorActions(
       abi: [{ inputs: [{ name: 'allocator', type: 'address' }, { name: 'isAllocator', type: 'bool' }], name: 'setIsAllocator', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
       functionName: 'setIsAllocator',
       args: [paAddress, true],
+      chainId,
     });
   };
 
@@ -172,6 +173,7 @@ export function usePublicAllocatorActions(
       abi: [{ inputs: [{ name: 'allocator', type: 'address' }, { name: 'isAllocator', type: 'bool' }], name: 'setIsAllocator', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
       functionName: 'setIsAllocator',
       args: [paAddress, false],
+      chainId,
     });
   };
 
@@ -182,6 +184,7 @@ export function usePublicAllocatorActions(
       abi: publicAllocatorAbi,
       functionName: 'setAdmin',
       args: [vaultAddress, newAdmin],
+      chainId,
     });
   };
 
@@ -192,6 +195,7 @@ export function usePublicAllocatorActions(
       abi: publicAllocatorAbi,
       functionName: 'setFee',
       args: [vaultAddress, newFee],
+      chainId,
     });
   };
 
@@ -206,6 +210,7 @@ export function usePublicAllocatorActions(
       abi: publicAllocatorAbi,
       functionName: 'setFlowCaps',
       args: [vaultAddress, configTuples],
+      chainId,
     });
   };
 
@@ -218,6 +223,7 @@ export function usePublicAllocatorActions(
       abi: publicAllocatorAbi,
       functionName: 'transferFee',
       args: [vaultAddress, to],
+      chainId,
     });
   };
 

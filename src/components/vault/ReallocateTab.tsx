@@ -36,6 +36,24 @@ interface AllocationEdit {
 }
 
 // ============================================================
+// Normalize decimal input: handle EU-style commas vs thousands separators
+// If the string contains a dot, commas are thousands separators (strip them).
+// If no dot, treat the LAST comma as decimal separator.
+// ============================================================
+
+function normalizeDecimalInput(input: string): string {
+  if (!input) return input;
+  if (input.includes('.')) {
+    // Dot present — commas are thousands separators
+    return input.replace(/,/g, '');
+  }
+  // No dot — treat last comma as decimal point
+  const lastComma = input.lastIndexOf(',');
+  if (lastComma === -1) return input;
+  return input.slice(0, lastComma).replace(/,/g, '') + '.' + input.slice(lastComma + 1);
+}
+
+// ============================================================
 // Token Amount Input — format on blur, raw on focus
 // ============================================================
 
@@ -67,20 +85,16 @@ function TokenAmountInput({
 
   const handleBlur = () => {
     setIsFocused(false);
-    // Parse the final value
-    const cleaned = rawInput.replace(/,/g, '.');
-    const parsed = parseTokenAmount(cleaned || '0', decimals);
+    const parsed = parseTokenAmount(normalizeDecimalInput(rawInput) || '0', decimals);
     onChange(parsed);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target.value;
-    // Allow digits, one decimal point, and commas (which we'll normalize)
+    // Allow digits, one decimal point, and commas
     const cleaned = input.replace(/[^0-9.,]/g, '');
     setRawInput(cleaned);
-    // Live update the bigint value
-    const normalized = cleaned.replace(/,/g, '.');
-    const parsed = parseTokenAmount(normalized || '0', decimals);
+    const parsed = parseTokenAmount(normalizeDecimalInput(cleaned) || '0', decimals);
     onChange(parsed);
   };
 
@@ -212,6 +226,9 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       .reduce((sum, e) => sum + e.targetAssets, 0n);
 
     const idleTarget = totalAllocated > nonIdleSum ? totalAllocated - nonIdleSum : 0n;
+    if (nonIdleSum > totalAllocated) {
+      console.warn('[ReallocateTab] Non-idle targets exceed total allocated — IDLE clipped to 0');
+    }
 
     return allocationEdits.map((e) => {
       if (e.isIdle) {
@@ -232,13 +249,13 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     // Otherwise pick the supply market with the largest target
     const supplyMarkets = allocationEditsWithIdle.filter((e) => e.targetAssets > e.currentAssets);
     if (supplyMarkets.length > 0) {
-      return supplyMarkets.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, supplyMarkets[0]!).marketId;
+      return supplyMarkets.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, supplyMarkets[0]).marketId;
     }
     // Fallback: IDLE even if decreasing (it's the safest catcher)
     const idleAny = allocationEditsWithIdle.find((e) => e.isIdle);
     if (idleAny) return idleAny.marketId;
     // Last resort: largest target
-    return allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]!).marketId;
+    return allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]).marketId;
   })();
 
   // Balance check
@@ -297,8 +314,14 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     simulate(changes);
   };
 
-  const handleExecute = () => {
+  const handleExecute = async () => {
     if (!isBalanced || !hasChanges || !markets) return;
+
+    // Safety: if manually selected catcher is a withdrawal market, override to auto-select
+    const catcherEdit = allocationEditsWithIdle.find((e) => e.marketId === effectiveCatcher);
+    const safeCatcher = (catcherEdit && catcherEdit.targetAssets < catcherEdit.currentAssets)
+      ? null // force auto-selection below
+      : effectiveCatcher;
 
     // Build allocations for all changed markets EXCEPT the catcher
     // (the catcher will be appended last with MAX_UINT256)
@@ -309,7 +332,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       const market = markets.find((m) => m.id === e.marketId);
       if (!market) continue;
 
-      const isCatcher = e.marketId === effectiveCatcher;
+      const isCatcher = e.marketId === safeCatcher;
 
       if (isCatcher) {
         // Save catcher separately — will be appended with MAX_UINT256
@@ -349,7 +372,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
       changedAllocations.push({ ...catcherParams, assets: MAX_UINT256 });
     }
 
-    reallocate(changedAllocations);
+    await reallocate(changedAllocations);
   };
 
   // Loading
@@ -500,8 +523,11 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                             name="catcher"
                             checked={isCatcher}
                             onChange={() => setCatcherMarketId(edit.marketId)}
-                            className="accent-accent-primary"
-                            title="Use as max-catcher (absorbs rounding dust)"
+                            disabled={edit.targetAssets < edit.currentAssets}
+                            className="accent-accent-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={edit.targetAssets < edit.currentAssets
+                              ? "Cannot use a withdrawal market as catcher"
+                              : "Use as max-catcher (absorbs rounding dust)"}
                           />
                         </td>
 

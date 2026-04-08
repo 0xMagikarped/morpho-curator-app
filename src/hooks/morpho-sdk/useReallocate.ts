@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useWaitForTransactionReceipt, useAccount } from "wagmi";
 import { useGuardedWriteContract } from "../useGuardedWriteContract";
 import type { Address } from "viem";
-import { createPublicClient, http, BaseError, ContractFunctionRevertedError } from "viem";
+import { BaseError, ContractFunctionRevertedError } from "viem";
 import { metaMorphoV1Abi } from "../../lib/contracts/abis";
-import { getChainConfig } from "../../config/chains";
+import { getPublicClient } from "../../lib/data/rpcClient";
 
 export interface MarketAllocationArg {
   marketParams: {
@@ -64,9 +64,7 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
     // This bypasses Rabby/wallet simulation which may fail on SEI with misleading errors
     if (userAddress) {
       try {
-        const chainConfig = getChainConfig(chainId);
-        const rpcUrl = chainConfig?.rpcUrls[0] ?? "https://sei-evm-rpc.publicnode.com";
-        const client = createPublicClient({ transport: http(rpcUrl) });
+        const client = getPublicClient(chainId);
 
         await client.simulateContract({
           address: vaultAddress,
