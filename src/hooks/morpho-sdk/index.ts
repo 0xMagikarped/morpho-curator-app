@@ -9,7 +9,7 @@ export type {
   MarketImpact,
   SimulationResult,
 } from "./useReallocationSimulation";
-export { useReallocate, buildReallocateArgs, orderAllocations } from "./useReallocate";
+export { useReallocate } from "./useReallocate";
 export type { MarketAllocationArg } from "./useReallocate";
 export { useMarketLiquidity } from "./useMarketLiquidity";
 export type { MarketLiquidityData } from "./useMarketLiquidity";
