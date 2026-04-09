@@ -17,7 +17,7 @@ export function isApiSupportedChain(chainId: number): boolean {
 function buildVaultQuery(): string {
   const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 86400;
   return `
-  query GetVault($address: String!, $chainId: Int!) {`;
+  query GetVault($address: String!, $chainId: Int!) {
     vaultByAddress(address: $address, chainId: $chainId) {
       address
       name
