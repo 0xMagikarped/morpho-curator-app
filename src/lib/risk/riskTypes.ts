@@ -54,7 +54,7 @@ export interface RiskAlert {
 
 // Thresholds
 export const UTILIZATION_ELEVATED = 80;
-export const UTILIZATION_CRITICAL = 90;
+export const UTILIZATION_CRITICAL = 91;
 export const SHARE_PRICE_WARNING = -0.01;  // -0.01%
 export const SHARE_PRICE_CRITICAL = -0.1;  // -0.1%
 

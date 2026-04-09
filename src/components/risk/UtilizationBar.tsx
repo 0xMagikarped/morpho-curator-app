@@ -7,7 +7,7 @@ interface UtilizationBarProps {
 }
 
 export function UtilizationBar({ utilization, label, compact }: UtilizationBarProps) {
-  const color = utilization >= 90
+  const color = utilization >= 91
     ? 'text-danger'
     : utilization >= 80
       ? 'text-warning'

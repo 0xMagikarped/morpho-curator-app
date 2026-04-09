@@ -955,8 +955,8 @@ function formatUtilPercent(util: number): string {
 
 function getUtilColorClass(util: number, lltv: bigint): string {
   const lltvRatio = Number(lltv) / 1e18;
-  // Critical: utilization > 90% of LLTV
-  if (lltvRatio > 0 && util > lltvRatio * 0.9) return 'text-danger';
+  // Critical: utilization > 91% of LLTV
+  if (lltvRatio > 0 && util > lltvRatio * 0.91) return 'text-danger';
   // Warning: utilization > 80%
   if (util > 0.8) return 'text-warning';
   // Normal

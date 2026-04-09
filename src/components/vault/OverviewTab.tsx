@@ -62,13 +62,13 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
     const now = Date.now();
     const alerts: RiskAlert[] = [];
     for (const m of markets) {
-      if (m.utilization > 0.9) {
+      if (m.utilization > 0.91) {
         alerts.push({
           id: `util-crit-${m.id}`,
           severity: 'critical',
           type: 'utilization_high',
           title: `${m.collateralToken.symbol}/${m.loanToken.symbol} utilization ${(m.utilization * 100).toFixed(0)}%`,
-          description: 'Above 90% — withdrawals may be delayed',
+          description: 'Above 91% — withdrawals may be constrained',
           chainId,
           marketId: m.id,
           timestamp: now,
