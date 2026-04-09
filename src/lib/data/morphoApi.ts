@@ -14,8 +14,10 @@ export function isApiSupportedChain(chainId: number): boolean {
 // GraphQL query
 // ============================================================
 
-const VAULT_QUERY = `
-  query GetVault($address: String!, $chainId: Int!) {
+function buildVaultQuery(): string {
+  const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 86400;
+  return `
+  query GetVault($address: String!, $chainId: Int!) {`;
     vaultByAddress(address: $address, chainId: $chainId) {
       address
       name
@@ -24,6 +26,7 @@ const VAULT_QUERY = `
       chain { id }
       state {
         totalAssets
+        totalAssetsUsd
         totalSupply
         lastTotalAssets
         fee
@@ -66,9 +69,16 @@ const VAULT_QUERY = `
           removableAt
         }
       }
+      historicalState {
+        sharePrice(options: { startTimestamp: ${thirtyDaysAgo}, interval: DAY }) {
+          x
+          y
+        }
+      }
     }
   }
 `;
+}
 
 // ============================================================
 // Types for API response
@@ -120,6 +130,7 @@ interface ApiAllocation {
 
 interface ApiVaultState {
   totalAssets: string;
+  totalAssetsUsd: number | null;
   totalSupply: string;
   lastTotalAssets: string;
   fee: number;
@@ -133,6 +144,11 @@ interface ApiVaultState {
   allocation: ApiAllocation[];
 }
 
+interface ApiHistoricalPoint {
+  x: number;
+  y: number;
+}
+
 interface ApiVault {
   address: string;
   name: string;
@@ -140,6 +156,9 @@ interface ApiVault {
   asset: ApiAsset;
   chain: { id: number };
   state: ApiVaultState;
+  historicalState?: {
+    sharePrice?: ApiHistoricalPoint[];
+  };
 }
 
 // ============================================================
@@ -185,7 +204,7 @@ export async function fetchVaultFromApi(
   vaultAddress: Address,
 ): Promise<ApiVaultData> {
   const data = await queryApi<{ vaultByAddress: ApiVault | null }>(
-    VAULT_QUERY,
+    buildVaultQuery(),
     { address: vaultAddress, chainId },
   );
 
@@ -294,6 +313,10 @@ export async function fetchVaultFromApi(
       assetInfo,
       apy: s.apy ?? null,
       netApy: s.netApy ?? null,
+      totalAssetsUsd: s.totalAssetsUsd ?? null,
+      pnl: null, // API doesn't expose cumulative P&L directly
+      pnlUsd: null,
+      historicalSharePrice: vault.historicalState?.sharePrice ?? null,
     },
     allocation: {
       supplyQueue,

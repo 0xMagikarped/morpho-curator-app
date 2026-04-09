@@ -19,6 +19,7 @@ import { getChainConfig } from '../../config/chains';
 import { getEmergencyRole } from '../../types';
 import { metaMorphoV1Abi, metaMorphoV2Abi } from '../../lib/contracts/abis';
 import type { RiskAlert } from '../../lib/risk/riskTypes';
+import type { VaultInfo } from '../../types';
 
 interface OverviewTabProps {
   chainId: number;
@@ -160,32 +161,8 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
         </div>
       </Card>
 
-      {/* APY Stats */}
-      {(vault.apy != null || vault.netApy != null) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Yield</CardTitle>
-          </CardHeader>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <span className="text-[10px] text-text-tertiary uppercase">Net APY</span>
-              <p className={`text-lg font-mono font-medium mt-0.5 ${getApyColorClass(vault.netApy)}`}>
-                {formatApyDisplay(vault.netApy)}
-              </p>
-            </div>
-            <div>
-              <span className="text-[10px] text-text-tertiary uppercase">Native APY</span>
-              <p className="text-lg font-mono text-text-primary mt-0.5">
-                {formatApyDisplay(vault.apy)}
-              </p>
-            </div>
-            <InfoItem label="Performance Fee" value={formatWadPercent(vault.fee)} />
-            {vault.version === 'v2' && vault.managementFee > 0n && (
-              <InfoItem label="Management Fee" value={formatWadPercent(vault.managementFee)} />
-            )}
-          </div>
-        </Card>
-      )}
+      {/* Vault Performance */}
+      <VaultPerformanceCard vault={vault} />
 
       {/* ERC-4626 Metrics */}
       <Card>
@@ -333,6 +310,236 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
         />
       )}
     </div>
+  );
+}
+
+// ============================================================
+// Fee Revenue Estimates
+// ============================================================
+
+interface FeeEstimates {
+  dailyFeeTokens: number;
+  monthlyFeeTokens: number;
+  annualFeeTokens: number;
+  dailyFeeUsd: number | null;
+  monthlyFeeUsd: number | null;
+  annualFeeUsd: number | null;
+}
+
+function computeFeeEstimates(
+  totalAssets: bigint,
+  totalAssetsUsd: number | null,
+  nativeApy: number,
+  performanceFee: number,
+  tokenDecimals: number,
+): FeeEstimates {
+  const tvl = Number(totalAssets) / 10 ** tokenDecimals;
+  const annualYield = tvl * nativeApy;
+  const annualFee = annualYield * performanceFee;
+
+  const annualFeeUsd = totalAssetsUsd != null ? totalAssetsUsd * nativeApy * performanceFee : null;
+
+  return {
+    dailyFeeTokens: annualFee / 365,
+    monthlyFeeTokens: annualFee / 12,
+    annualFeeTokens: annualFee,
+    dailyFeeUsd: annualFeeUsd != null ? annualFeeUsd / 365 : null,
+    monthlyFeeUsd: annualFeeUsd != null ? annualFeeUsd / 12 : null,
+    annualFeeUsd,
+  };
+}
+
+function formatFeeAmount(amount: number): string {
+  if (amount < 0.01 && amount > 0) return amount.toExponential(2);
+  if (amount < 10) return amount.toFixed(4);
+  if (amount < 1000) return amount.toFixed(2);
+  return amount.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+// ============================================================
+// Share Price Sparkline (SVG)
+// ============================================================
+
+function SharePriceSparkline({ data }: { data: Array<{ x: number; y: number }> }) {
+  if (data.length < 2) return null;
+
+  const values = data.map((d) => d.y);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  const width = 400;
+  const height = 48;
+  const padding = 2;
+
+  const points = values
+    .map((v, i) => {
+      const x = padding + (i / (values.length - 1)) * (width - 2 * padding);
+      const y = height - padding - ((v - min) / range) * (height - 2 * padding);
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  const isPositive = values[values.length - 1] >= values[0];
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="w-full h-12"
+      role="img"
+      aria-label={`Share price trend over 30 days, ${isPositive ? 'increasing' : 'decreasing'}`}
+    >
+      <polyline
+        points={points}
+        fill="none"
+        stroke={isPositive ? 'var(--color-success)' : 'var(--color-danger)'}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// ============================================================
+// Vault Performance Card
+// ============================================================
+
+function VaultPerformanceCard({ vault }: { vault: VaultInfo & { assetInfo: { symbol: string; decimals: number } } }) {
+  const feeDecimal = Number(vault.fee) / 1e18;
+  const symbol = vault.assetInfo.symbol;
+  const decimals = vault.assetInfo.decimals;
+
+  const feeEstimates = useMemo(() => {
+    if (vault.apy == null || feeDecimal === 0) return null;
+    return computeFeeEstimates(
+      vault.totalAssets,
+      vault.totalAssetsUsd,
+      vault.apy,
+      feeDecimal,
+      decimals,
+    );
+  }, [vault.apy, vault.totalAssets, vault.totalAssetsUsd, feeDecimal, decimals]);
+
+  const hasApy = vault.apy != null || vault.netApy != null;
+  const isZeroFee = feeDecimal === 0;
+
+  // Compute P&L from totalAssets - lastTotalAssets (accumulated yield proxy)
+  const cumulativePnl = vault.pnl;
+  const cumulativePnlUsd = vault.pnlUsd;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Vault Performance</CardTitle>
+        {!hasApy && <Badge>RPC — APY unavailable</Badge>}
+      </CardHeader>
+
+      {/* Row 1: APY + Fee + P&L */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div>
+          <span className="text-[10px] text-text-tertiary uppercase">Net APY</span>
+          <p className={`text-lg font-mono font-medium mt-0.5 ${getApyColorClass(vault.netApy)}`}>
+            {formatApyDisplay(vault.netApy)}
+          </p>
+        </div>
+        <div>
+          <span className="text-[10px] text-text-tertiary uppercase">Native APY</span>
+          <p className="text-lg font-mono text-text-primary mt-0.5">
+            {formatApyDisplay(vault.apy)}
+          </p>
+        </div>
+        <div>
+          <span className="text-[10px] text-text-tertiary uppercase">Perf. Fee</span>
+          <p className="text-lg font-mono text-text-primary mt-0.5">
+            {formatWadPercent(vault.fee)}
+          </p>
+        </div>
+        {vault.version === 'v2' && vault.managementFee > 0n && (
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Mgmt. Fee</span>
+            <p className="text-lg font-mono text-text-primary mt-0.5">
+              {formatWadPercent(vault.managementFee)}
+            </p>
+          </div>
+        )}
+        {cumulativePnl != null && (
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Total P&L</span>
+            <p className={`text-lg font-mono font-medium mt-0.5 ${cumulativePnl > 0n ? 'text-success' : cumulativePnl < 0n ? 'text-danger' : 'text-text-primary'}`}>
+              {cumulativePnl > 0n ? '+' : ''}{formatTokenAmount(cumulativePnl, decimals)} {symbol}
+            </p>
+            {cumulativePnlUsd != null && (
+              <p className="text-xs font-mono text-text-tertiary">
+                (~${cumulativePnlUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })})
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Row 2: Fee Revenue Estimates */}
+      {feeEstimates && !isZeroFee && (
+        <div className="border-t border-border-subtle pt-4 mt-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <span className="text-[10px] text-text-tertiary uppercase">Est. Daily Fees</span>
+              <p className="text-sm font-mono text-text-primary mt-0.5">
+                ~{formatFeeAmount(feeEstimates.dailyFeeTokens)} {symbol}
+              </p>
+              {feeEstimates.dailyFeeUsd != null && (
+                <p className="text-xs font-mono text-text-tertiary">
+                  (~${formatFeeAmount(feeEstimates.dailyFeeUsd)})
+                </p>
+              )}
+            </div>
+            <div>
+              <span className="text-[10px] text-text-tertiary uppercase">Est. Monthly Fees</span>
+              <p className="text-sm font-mono text-text-primary mt-0.5">
+                ~{formatFeeAmount(feeEstimates.monthlyFeeTokens)} {symbol}
+              </p>
+              {feeEstimates.monthlyFeeUsd != null && (
+                <p className="text-xs font-mono text-text-tertiary">
+                  (~${formatFeeAmount(feeEstimates.monthlyFeeUsd)})
+                </p>
+              )}
+            </div>
+            <div>
+              <span className="text-[10px] text-text-tertiary uppercase">Est. Annual Fees</span>
+              <p className="text-sm font-mono text-text-primary mt-0.5">
+                ~{formatFeeAmount(feeEstimates.annualFeeTokens)} {symbol}
+              </p>
+              {feeEstimates.annualFeeUsd != null && (
+                <p className="text-xs font-mono text-text-tertiary">
+                  (~${formatFeeAmount(feeEstimates.annualFeeUsd)})
+                </p>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-text-tertiary mt-2">
+            * Estimates based on current APY x TVL x performance fee. Actual fees depend on realized yield.
+          </p>
+        </div>
+      )}
+      {isZeroFee && hasApy && (
+        <div className="border-t border-border-subtle pt-3 mt-4">
+          <p className="text-xs text-text-tertiary">No performance fee — all yield accrues to depositors.</p>
+        </div>
+      )}
+
+      {/* Row 3: Share Price Sparkline (from API historical data) */}
+      {vault.historicalSharePrice && vault.historicalSharePrice.length >= 2 && (
+        <div className="border-t border-border-subtle pt-4 mt-4">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-[10px] text-text-tertiary uppercase">Share Price (30d)</span>
+            <span className="text-sm font-mono text-text-primary">
+              {calcSharePrice(vault.totalAssets, vault.totalSupply, decimals).toFixed(6)}
+            </span>
+          </div>
+          <SharePriceSparkline data={vault.historicalSharePrice} />
+        </div>
+      )}
+    </Card>
   );
 }
 

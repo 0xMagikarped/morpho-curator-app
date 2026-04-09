@@ -340,6 +340,10 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
     guardian: guardian ?? ZERO,
     apy: null,
     netApy: null,
+    totalAssetsUsd: null,
+    pnl: null,
+    pnlUsd: null,
+    historicalSharePrice: null,
   };
 }
 
@@ -406,6 +410,10 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
     lastTotalAssets: 0n, // V2 doesn't have lastTotalAssets
     apy: null,
     netApy: null,
+    totalAssetsUsd: null,
+    pnl: null,
+    pnlUsd: null,
+    historicalSharePrice: null,
     version: 'v2' as const,
     // V2-specific: sentinel is checked per-address, not a single address
     sentinel: ZERO,

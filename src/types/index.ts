@@ -98,6 +98,14 @@ interface VaultInfoBase {
   apy: number | null;
   /** Net APY (after fees, including rewards). Decimal: 0.05 = 5%. Null if unavailable. */
   netApy: number | null;
+  /** TVL in USD. Null if unavailable (e.g., RPC-only chains). */
+  totalAssetsUsd: number | null;
+  /** Cumulative P&L in raw token units. Null if unavailable. */
+  pnl: bigint | null;
+  /** Cumulative P&L in USD. Null if unavailable. */
+  pnlUsd: number | null;
+  /** Historical share price data points (30d, daily). Null if unavailable. */
+  historicalSharePrice: Array<{ x: number; y: number }> | null;
 }
 
 /** V1 (MetaMorpho) vault — uses supply/withdraw queues and guardian */
