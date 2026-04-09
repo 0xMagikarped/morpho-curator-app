@@ -12,6 +12,7 @@ import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
 import { RegistryAlertBanner } from './RegistryAlertBanner';
 import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
+import { useVaultPendingState } from './owner/useVaultPendingState';
 import { useVaultInfo, useVaultRole, useVaultMarketsFromApi, useVaultAllocators } from '../../lib/hooks/useVault';
 import { useSharePriceHistory } from '../../lib/hooks/useRiskMonitoring';
 import { formatTokenAmount, formatWadPercent, formatDuration, truncateAddress, calcSharePrice, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
@@ -34,6 +35,7 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
   const { data: markets } = useVaultMarketsFromApi(chainId, vaultAddress);
   const { data: sharePriceHistory } = useSharePriceHistory(chainId, vaultAddress);
   const { data: allocators } = useVaultAllocators(chainId, vaultAddress);
+  const { data: pendingState } = useVaultPendingState(chainId, vaultAddress);
 
   // Live RPC read for pendingOwner (Ownable2Step) — works for both V1 and V2
   const { data: pendingOwner, refetch: refetchPendingOwner } = useReadContract({
@@ -240,6 +242,37 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
               )}
             </p>
           </div>
+          {vault.version === 'v1' && (
+            <div>
+              <span className="text-xs text-text-tertiary">Timelock</span>
+              <p className="text-sm font-mono text-text-primary mt-0.5">
+                {vault.timelock === 0n ? '0 (no delay)' : formatDuration(vault.timelock)}
+              </p>
+            </div>
+          )}
+          {vault.version === 'v1' && (
+            <div>
+              <span className="text-xs text-text-tertiary">Pending Timelock</span>
+              {pendingState?.pendingTimelock ? (
+                <div>
+                  <p className="text-sm font-mono text-warning mt-0.5">
+                    {formatDuration(pendingState.pendingTimelock.value)}
+                  </p>
+                  <p className="text-xs text-text-tertiary">
+                    {(() => {
+                      const now = Math.floor(Date.now() / 1000);
+                      const remaining = Number(pendingState.pendingTimelock.validAt) - now;
+                      return remaining <= 0
+                        ? 'Ready to execute'
+                        : `Executable in ${formatDuration(remaining)}`;
+                    })()}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-text-tertiary mt-0.5">None</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Allocators + Public Allocator Status */}
