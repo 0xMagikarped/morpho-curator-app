@@ -7,7 +7,7 @@ import { RoleBadge } from '../ui/RoleBadge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { Button } from '../ui/Button';
 import { useVaultInfo, useVaultAllocation, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
-import { formatTokenAmount, formatTokenAmountCompact, formatWadPercent, formatDuration, formatCountdown, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
+import { formatTokenAmount, formatTokenAmountCompact, formatWadPercent, formatCountdown, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { truncateAddress } from '../../lib/utils/format';
 import type { Address } from 'viem';
 

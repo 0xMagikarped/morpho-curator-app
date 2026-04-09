@@ -92,6 +92,7 @@ function apiToMarketInfo(item: ApiMarketItem): MarketInfo {
     supplyAPY: item.state.supplyApy,
     borrowAPY: item.state.borrowApy,
     utilization: item.state.utilization,
+    rewards: [],
   };
 }
 

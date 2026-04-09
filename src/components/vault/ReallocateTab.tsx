@@ -34,6 +34,10 @@ interface AllocationEdit {
   cap: bigint;
   isIdle: boolean;
   supplyApy: number;
+  utilization: number;
+  totalSupplyAssets: bigint;
+  totalBorrowAssets: bigint;
+  lltv: bigint;
 }
 
 // ============================================================
@@ -209,6 +213,10 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
         cap: a.supplyCap,
         isIdle,
         supplyApy: isIdle ? 0 : (market?.supplyAPY ?? 0),
+        utilization: isIdle ? 0 : (market?.utilization ?? 0),
+        totalSupplyAssets: market?.state.totalSupplyAssets ?? 0n,
+        totalBorrowAssets: market?.state.totalBorrowAssets ?? 0n,
+        lltv: market?.params.lltv ?? 0n,
       };
     });
   }, [allocation, markets, edits, idleMarketId]);
@@ -477,6 +485,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     <th className="text-center py-2 w-6"></th>
                     <th className="text-right py-2">Target</th>
                     <th className="text-right py-2">Delta</th>
+                    <th className="text-right py-2">Util</th>
                     <th className="text-right py-2">APY</th>
                     <th className="text-right py-2">Supply Cap</th>
                     <th className="text-center py-2 w-8">Catcher</th>
@@ -549,6 +558,31 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                               {formatTokenAmount(delta < 0n ? -delta : delta, assetDecimals, 2)}
                             </>
                           )}
+                        </td>
+
+                        {/* Utilization: current → projected */}
+                        <td className="text-right py-2 font-mono text-xs">
+                          {edit.isIdle ? (
+                            <span className="text-text-tertiary">—</span>
+                          ) : (() => {
+                            const projected = computeProjectedUtilization(edit);
+                            const isChanged = edit.targetAssets !== edit.currentAssets;
+                            return (
+                              <span className="whitespace-nowrap">
+                                <span className={getUtilColorClass(edit.utilization, edit.lltv)}>
+                                  {formatUtilPercent(edit.utilization)}
+                                </span>
+                                {isChanged && projected != null && (
+                                  <>
+                                    <span className="text-text-tertiary/50 mx-0.5">&rarr;</span>
+                                    <span className={getUtilChangeClass(edit.utilization, projected)}>
+                                      {formatUtilPercent(projected)}
+                                    </span>
+                                  </>
+                                )}
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* APY */}
@@ -900,6 +934,40 @@ function SimulationPanel({ simulation }: { simulation: SimulationResult }) {
 
 function formatLltv(lltv: bigint): string {
   return `${(Number(lltv) / 1e18 * 100).toFixed(1)}%`;
+}
+
+/**
+ * Compute projected utilization after a vault reallocation delta.
+ * delta = targetAssets - currentAssets (positive = more supply to this market)
+ * projectedUtil = totalBorrowAssets / (totalSupplyAssets + delta)
+ */
+function computeProjectedUtilization(edit: AllocationEdit): number | null {
+  if (edit.isIdle) return null;
+  const delta = edit.targetAssets - edit.currentAssets;
+  const projectedSupply = edit.totalSupplyAssets + delta;
+  if (projectedSupply <= 0n) return edit.totalBorrowAssets > 0n ? 1 : 0;
+  return Number(edit.totalBorrowAssets) / Number(projectedSupply);
+}
+
+function formatUtilPercent(util: number): string {
+  return `${(util * 100).toFixed(1)}%`;
+}
+
+function getUtilColorClass(util: number, lltv: bigint): string {
+  const lltvRatio = Number(lltv) / 1e18;
+  // Critical: utilization > 90% of LLTV
+  if (lltvRatio > 0 && util > lltvRatio * 0.9) return 'text-danger';
+  // Warning: utilization > 80%
+  if (util > 0.8) return 'text-warning';
+  // Normal
+  if (util > 0) return 'text-text-primary';
+  return 'text-text-tertiary';
+}
+
+function getUtilChangeClass(current: number, projected: number): string {
+  const diff = projected - current;
+  if (Math.abs(diff) < 0.001) return 'text-text-tertiary';
+  return diff > 0 ? 'text-warning' : 'text-success';
 }
 
 function formatApy(apy: number): string {
