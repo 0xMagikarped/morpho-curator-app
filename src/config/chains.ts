@@ -187,6 +187,61 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   },
 };
 
+  // ============================================================
+  // BNB Smart Chain (Chain ID 56) — Lista/Moolah (Morpho Blue fork)
+  // V1 ONLY, NO MORPHO API, NO PUBLIC ALLOCATOR
+  // ============================================================
+  56: {
+    chainId: 56,
+    name: 'BNB Chain',
+    rpcUrls: [
+      'https://bsc.publicnode.com',
+      'https://bsc-dataseed1.binance.org',
+      'https://bsc-dataseed2.binance.org',
+    ],
+    blockExplorer: 'https://bscscan.com',
+    morphoBlue: '0xf820fB4680712CD7263a0D3D024D5b5aEA82Fd70' as Address, // Moolah singleton
+    vaultFactories: {
+      v1: '0x2a0Cb6401FD3c6196750dc6b46702040761D9671' as Address, // MoolahVaultFactory
+    },
+    periphery: {
+      adaptiveCurveIrm: '0x8b7d334d243b74D63C4b963893267A0F5240F990' as Address,
+      fixedRateIrm: ['0x9A7cA2CfB886132B6024789163e770979E4222e1' as Address],
+    },
+    apiSupported: false,
+    blockTime: 3_000,
+    finality: 'probabilistic',
+    gasConfig: {
+      blockGasLimit: 140_000_000,
+      sstoreCost: 20_000,
+    },
+    nativeToken: {
+      symbol: 'BNB',
+      decimals: 18,
+      wrapped: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' as Address,
+    },
+    stablecoins: [
+      {
+        symbol: 'USDT',
+        address: '0x55d398326f99059fF775485246999027B3197955' as Address,
+        decimals: 18,
+      },
+      {
+        symbol: 'USD1',
+        address: '0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d' as Address,
+        decimals: 18,
+      },
+    ],
+    oracleProviders: ['chainlink-push', 'pyth', 'custom'],
+    deploymentBlock: 47_000_000,
+    verified: true,
+    scanner: {
+      batchSize: 5_000,
+      pollIntervalMs: 5_000,
+    },
+  },
+};
+
 /** Chains where Morpho GraphQL API is available */
 export const MORPHO_API_CHAINS = Object.values(CHAIN_CONFIGS)
   .filter((c) => c.apiSupported)

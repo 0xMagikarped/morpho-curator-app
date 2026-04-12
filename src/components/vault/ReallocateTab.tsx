@@ -20,6 +20,8 @@ import {
   type MarketAllocationArg,
 } from '../../hooks/morpho-sdk/useReallocate';
 import { PublicAllocatorPanel } from './PublicAllocatorPanel';
+import { getMarketRateType } from '../../lib/utils/irm';
+import { getChainConfig } from '../../config/chains';
 
 interface ReallocateTabProps {
   chainId: number;
@@ -38,6 +40,7 @@ interface AllocationEdit {
   totalSupplyAssets: bigint;
   totalBorrowAssets: bigint;
   lltv: bigint;
+  irmAddress: `0x${string}`;
 }
 
 // ============================================================
@@ -217,6 +220,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
         totalSupplyAssets: market?.state.totalSupplyAssets ?? 0n,
         totalBorrowAssets: market?.state.totalBorrowAssets ?? 0n,
         lltv: market?.params.lltv ?? 0n,
+        irmAddress: (market?.params.irm ?? '0x0000000000000000000000000000000000000000') as `0x${string}`,
       };
     });
   }, [allocation, markets, edits, idleMarketId]);
@@ -509,10 +513,20 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                       >
                         {/* Market label */}
                         <td className="py-2 text-text-primary">
-                          <div className="flex items-center gap-1.5">
-                            <span>{edit.label}</span>
-                            {isIdleLocked && (
-                              <Badge variant="default" className="text-[9px] py-0 px-1">AUTO</Badge>
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span>{edit.label}</span>
+                              {isIdleLocked && (
+                                <Badge variant="default" className="text-[9px] py-0 px-1">AUTO</Badge>
+                              )}
+                              {!edit.isIdle && getMarketRateType(edit.irmAddress, chainId) === 'fixed' && (
+                                <Badge variant="info" className="text-[9px] py-0 px-1">Fixed</Badge>
+                              )}
+                            </div>
+                            {!edit.isIdle && getMarketRateType(edit.irmAddress, chainId) === 'fixed' && delta < 0n && (
+                              <span className="text-[10px] text-warning">
+                                Fixed-rate: only idle liquidity withdrawable
+                              </span>
                             )}
                           </div>
                         </td>
@@ -736,8 +750,8 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
         )}
       </Card>
 
-      {/* Public Allocator Configuration */}
-      {vault?.version === 'v1' && markets && allocation && (
+      {/* Public Allocator Configuration — only for chains with PA deployed */}
+      {vault?.version === 'v1' && markets && allocation && getChainConfig(chainId)?.periphery.publicAllocator && (
         <PublicAllocatorPanel
           chainId={chainId}
           vaultAddress={vaultAddress}

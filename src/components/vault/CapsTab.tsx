@@ -14,6 +14,7 @@ import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { vaultKeys } from '../../lib/queryKeys';
+import { MarketTypeBadge } from '../ui/MarketTypeBadge';
 import type { MarketInfo, PendingAction, PendingCap } from '../../types';
 import type { MarketRecord } from '../../lib/indexer/indexedDB';
 
@@ -30,6 +31,7 @@ interface MarketLifecycleItem {
   label: string;
   collateralSymbol: string;
   loanSymbol: string;
+  irmAddress: `0x${string}`;
   lltv: number;
   supplyCap: bigint;
   supplyAssets: bigint;
@@ -161,6 +163,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
           label: `${market.collateralToken.symbol} / ${market.loanToken.symbol}`,
           collateralSymbol: market.collateralToken.symbol,
           loanSymbol: market.loanToken.symbol,
+          irmAddress: market.params.irm,
           lltv,
           supplyCap,
           supplyAssets,
@@ -207,6 +210,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
           label: `${collateralLabel} / ${loanLabel}`,
           collateralSymbol: collateralLabel,
           loanSymbol: loanLabel,
+          irmAddress: m.irm as `0x${string}`,
           lltv,
           supplyCap,
           supplyAssets: 0n,
@@ -471,6 +475,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                     <MarketRow
                       key={item.marketId}
                       item={item}
+                      chainId={chainId}
                       StatusIcon={StatusIcon}
                       isExpanded={isExpanded}
                       canSubmit={canSubmit}
@@ -517,6 +522,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
 
 function MarketRow({
   item,
+  chainId,
   StatusIcon,
   isExpanded,
   canSubmit,
@@ -531,6 +537,7 @@ function MarketRow({
   onSubmitCap,
 }: {
   item: MarketLifecycleItem;
+  chainId: number;
   StatusIcon: typeof Circle;
   isExpanded: boolean;
   canSubmit: boolean;
@@ -556,6 +563,7 @@ function MarketRow({
           <div className="flex items-center gap-2">
             <span className="font-medium text-text-primary">{item.collateralSymbol}</span>
             <span className="text-text-tertiary text-xs">/ {item.loanSymbol}</span>
+            <MarketTypeBadge irmAddress={item.irmAddress} chainId={chainId} />
           </div>
           <p className="text-[10px] text-text-tertiary font-mono mt-0.5">{item.marketId.slice(0, 10)}...</p>
         </td>

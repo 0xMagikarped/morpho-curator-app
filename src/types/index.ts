@@ -27,6 +27,8 @@ export interface ChainConfig {
     morphoMarketV1AdapterV2Factory?: Address;
     /** MorphoVaultV1Adapter factory — deploys vault adapters for V2 vaults */
     morphoVaultV1AdapterFactory?: Address;
+    /** FixedRateIRM contract address(es) — markets using these IRMs are fixed-rate */
+    fixedRateIrm?: Address[];
   };
   apiSupported: boolean;
   blockTime: number;

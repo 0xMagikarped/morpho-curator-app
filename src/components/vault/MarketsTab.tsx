@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { UtilizationBar } from '../risk/UtilizationBar';
+import { MarketTypeBadge } from '../ui/MarketTypeBadge';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { formatTokenAmount, formatPercent, truncateAddress, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
@@ -131,6 +132,7 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
                         <span className="text-text-tertiary text-xs">
                           / {market.loanToken.symbol}
                         </span>
+                        <MarketTypeBadge irmAddress={market.params.irm} chainId={chainId} />
                       </div>
                     </td>
                     <td className="text-right py-2.5 px-2 text-text-primary font-mono">
