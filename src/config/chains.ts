@@ -185,7 +185,6 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       pollIntervalMs: 5_000,
     },
   },
-};
 
   // ============================================================
   // BNB Smart Chain (Chain ID 56) — Lista/Moolah (Morpho Blue fork)
