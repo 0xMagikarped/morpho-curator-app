@@ -30,6 +30,8 @@
   --color-chain-sei:      #C8102E;
   --color-chain-ethereum: #1400FF;
   --color-chain-base:     #0052FF;
+  --color-chain-bnb:      #F0B90B;
+  --color-chain-pharos:   #8B5CF6;
 
   /* ── Oracle grade ─────────────────────────────────────────────────── */
   --color-grade-a: #00C060;

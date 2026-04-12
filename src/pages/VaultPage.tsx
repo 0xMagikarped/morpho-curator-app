@@ -17,6 +17,7 @@ import { useAppStore } from '../store/appStore';
 import { cn } from '../lib/utils/cn';
 import { getEmergencyRoleLabel } from '../types';
 import { formatApyDisplay, getApyColorClass } from '../lib/utils/format';
+import { isChainDeployed, getChainConfig } from '../config/chains';
 
 type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security';
 
@@ -70,6 +71,32 @@ export function VaultPage() {
         <Button variant="ghost" className="mt-4" onClick={() => navigate('/')}>
           Back to Dashboard
         </Button>
+      </div>
+    );
+  }
+
+  if (!isChainDeployed(chainId)) {
+    const cfg = getChainConfig(chainId);
+    return (
+      <div className="text-center py-12">
+        <p className="text-lg font-medium text-text-primary mb-2">{cfg?.name ?? `Chain ${chainId}`} — Coming Soon</p>
+        <p className="text-sm text-text-secondary mb-4">
+          Morpho contracts are being deployed on {cfg?.name ?? 'this chain'}.
+          This page will activate automatically once deployment is complete.
+        </p>
+        <a
+          href="https://github.com/morpho-org/sdks"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-info hover:text-info/80"
+        >
+          Track deployment progress
+        </a>
+        <div className="mt-4">
+          <Button variant="ghost" onClick={() => navigate('/')}>
+            Back to Dashboard
+          </Button>
+        </div>
       </div>
     );
   }

@@ -239,6 +239,41 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       pollIntervalMs: 5_000,
     },
   },
+
+  // ============================================================
+  // Pharos (Chain ID 1672) — Official Morpho Deployment (RWA L1)
+  // CONTRACTS NOT YET DEPLOYED — fill addresses when morpho-org/sdks ships Pharos support
+  // Track: https://github.com/morpho-org/sdks → packages/blue-sdk/src/addresses.ts
+  // ============================================================
+  1672: {
+    chainId: 1672,
+    name: 'Pharos',
+    rpcUrls: ['https://rpc.pharos.xyz'],
+    blockExplorer: 'https://pharosscan.xyz',
+    morphoBlue: null, // NOT YET DEPLOYED
+    vaultFactories: {},
+    periphery: {},
+    apiSupported: false,
+    blockTime: 2_000,
+    finality: 'probabilistic',
+    gasConfig: {
+      blockGasLimit: 30_000_000,
+      sstoreCost: 20_000,
+    },
+    nativeToken: {
+      symbol: 'PHRS',
+      decimals: 18,
+      wrapped: '0x0000000000000000000000000000000000000000' as Address, // UPDATE when known
+    },
+    stablecoins: [],
+    oracleProviders: [],
+    deploymentBlock: 0,
+    verified: false,
+    scanner: {
+      batchSize: 5_000,
+      pollIntervalMs: 5_000,
+    },
+  },
 };
 
 /** Chains where Morpho GraphQL API is available */
@@ -271,4 +306,13 @@ export function getChainConfig(chainId: number): ChainConfig | undefined {
 
 export function getSupportedChainIds(): number[] {
   return Object.keys(CHAIN_CONFIGS).map(Number);
+}
+
+/**
+ * Check if a chain has Morpho contracts deployed and configured.
+ * Returns false for chains added to the config but awaiting deployment (e.g., Pharos).
+ */
+export function isChainDeployed(chainId: number): boolean {
+  const config = CHAIN_CONFIGS[chainId];
+  return config != null && config.morphoBlue != null;
 }

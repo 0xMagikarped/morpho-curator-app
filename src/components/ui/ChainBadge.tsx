@@ -4,6 +4,8 @@ const chainColors: Record<number, { dot: string; bg: string; text: string; label
   1329: { dot: 'bg-chain-sei', bg: 'bg-chain-sei/10', text: 'text-chain-sei', label: 'SEI' },
   1: { dot: 'bg-chain-ethereum', bg: 'bg-chain-ethereum/10', text: 'text-chain-ethereum', label: 'ETH' },
   8453: { dot: 'bg-chain-base', bg: 'bg-chain-base/10', text: 'text-chain-base', label: 'BASE' },
+  56: { dot: 'bg-chain-bnb', bg: 'bg-chain-bnb/10', text: 'text-chain-bnb', label: 'BNB' },
+  1672: { dot: 'bg-chain-pharos', bg: 'bg-chain-pharos/10', text: 'text-chain-pharos', label: 'PHAROS' },
 };
 
 interface ChainBadgeProps {

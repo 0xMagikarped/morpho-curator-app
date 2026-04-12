@@ -34,6 +34,25 @@ export const sei: Chain = {
   },
 };
 
+/**
+ * Pharos chain definition (RWA-focused L1, chainId 1672).
+ * Not in wagmi/chains — defined manually.
+ */
+export const pharos: Chain = {
+  id: 1672,
+  name: 'Pharos',
+  nativeCurrency: { name: 'Pharos', symbol: 'PHRS', decimals: 18 },
+  rpcUrls: {
+    default: {
+      http: ['https://rpc.pharos.xyz'],
+    },
+  },
+  blockExplorers: {
+    default: { name: 'PharosScan', url: 'https://pharosscan.xyz' },
+  },
+  testnet: false,
+};
+
 // Build transport lists — env-configured RPCs (e.g. Infura) get priority
 const seiTransports = [
   ...(env.seiRpcUrl ? [http(env.seiRpcUrl)] : []),
@@ -58,16 +77,21 @@ const bnbTransports = [
   http('https://bsc-dataseed1.binance.org'),
   http('https://bsc-dataseed2.binance.org'),
 ];
+const pharosTransports = [
+  ...(env.pharosRpcUrl ? [http(env.pharosRpcUrl)] : []),
+  http('https://rpc.pharos.xyz'),
+];
 
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: env.walletConnectProjectId,
-  chains: [sei, mainnet, base, bsc],
+  chains: [sei, mainnet, base, bsc, pharos],
   transports: {
     [sei.id]: fallback(seiTransports),
     [mainnet.id]: fallback(ethTransports),
     [base.id]: fallback(baseTransports),
     [bsc.id]: fallback(bnbTransports),
+    [pharos.id]: fallback(pharosTransports),
   },
   wallets: [
     {

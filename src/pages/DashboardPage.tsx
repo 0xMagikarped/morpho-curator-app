@@ -15,7 +15,7 @@ import { RiskAlertBanner } from '../components/risk/RiskAlertBanner';
 import { ManagedVaultsBanner } from '../components/dashboard/ManagedVaultsBanner';
 import { useAppStore } from '../store/appStore';
 import { useDashboardVaults, useDashboardPendingActions } from '../lib/hooks/useDashboard';
-import { getSupportedChainIds, getChainConfig, SEI_KNOWN_VAULTS } from '../config/chains';
+import { getSupportedChainIds, getChainConfig, isChainDeployed, SEI_KNOWN_VAULTS } from '../config/chains';
 import { formatUsd } from '../lib/utils/format';
 import type { RiskAlert } from '../lib/risk/riskTypes';
 
@@ -29,7 +29,9 @@ export function DashboardPage() {
   const { data: pendingActionsList } = useDashboardPendingActions();
   const [showAddVault, setShowAddVault] = useState(false);
   const [newVaultAddress, setNewVaultAddress] = useState('');
-  const [newVaultChainId, setNewVaultChainId] = useState(getSupportedChainIds()[0]);
+  const [newVaultChainId, setNewVaultChainId] = useState(
+    () => getSupportedChainIds().find(isChainDeployed) ?? getSupportedChainIds()[0],
+  );
 
   // Filter out vaults with TVL < $1,000
   const significantVaults = useMemo(() => {
@@ -226,9 +228,10 @@ export function DashboardPage() {
               >
                 {getSupportedChainIds().map((id) => {
                   const cfg = getChainConfig(id);
+                  const deployed = isChainDeployed(id);
                   return (
-                    <option key={id} value={id}>
-                      {cfg?.name ?? `Chain ${id}`}
+                    <option key={id} value={id} disabled={!deployed}>
+                      {cfg?.name ?? `Chain ${id}`}{!deployed ? ' (Coming Soon)' : ''}
                     </option>
                   );
                 })}

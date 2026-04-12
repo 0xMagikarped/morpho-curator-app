@@ -11,7 +11,8 @@ export interface ChainConfig {
   /** Separate RPC for getLogs if the primary RPC doesn't support it (e.g., SEI) */
   eventRpcUrl?: string;
   blockExplorer: string;
-  morphoBlue: Address;
+  /** Morpho Blue singleton address. Null if contracts not yet deployed (e.g., Pharos). */
+  morphoBlue: Address | null;
   vaultFactories: {
     v1?: Address;
     v2?: Address;

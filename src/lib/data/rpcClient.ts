@@ -1,5 +1,5 @@
 import { createPublicClient, http, fallback, type Address, type PublicClient, type Chain, defineChain } from 'viem';
-import { mainnet, base } from 'viem/chains';
+import { mainnet, base, bsc } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
 import { metaMorphoV2Abi } from '../contracts/metaMorphoV2Abi';
 import { getChainConfig } from '../../config/chains';
@@ -30,10 +30,20 @@ const sei = defineChain({
   },
 });
 
+const pharos = defineChain({
+  id: 1672,
+  name: 'Pharos',
+  nativeCurrency: { name: 'Pharos', symbol: 'PHRS', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.pharos.xyz'] } },
+  testnet: false,
+});
+
 const VIEM_CHAINS: Record<number, Chain> = {
   1: mainnet,
   8453: base,
   1329: sei,
+  56: bsc,
+  1672: pharos,
 };
 
 /**
@@ -47,6 +57,8 @@ const ENV_RPC_URLS: Record<number, string | undefined> = {
   1: env.ethRpcUrl || undefined,
   8453: env.baseRpcUrl || undefined,
   1329: env.seiRpcUrl || undefined,
+  56: env.bnbRpcUrl || undefined,
+  1672: env.pharosRpcUrl || undefined,
 };
 
 export function getPublicClient(chainId: number): PublicClient {
