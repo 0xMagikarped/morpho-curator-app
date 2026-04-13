@@ -202,7 +202,9 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       'https://bsc-dataseed2.binance.org',
     ],
     blockExplorer: 'https://bscscan.com',
-    morphoBlue: '0xf820fB4680712CD7263a0D3D024D5b5aEA82Fd70' as Address, // Moolah singleton
+    // Moolah singleton — use IMPLEMENTATION address for reads.
+    // Proxy 0xf820fB4680712CD7263a0D3D024D5b5aEA82Fd70 is access-controlled and reverts on eth_call.
+    morphoBlue: '0x8f73b65b4caaf64fba2af91cc5d4a2a1318e5d8c' as Address,
     deployed: true,
     vaultFactories: {
       v1: '0x2a0Cb6401FD3c6196750dc6b46702040761D9671' as Address, // MoolahVaultFactory
@@ -236,7 +238,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       },
     ],
     oracleProviders: ['chainlink-push', 'pyth', 'custom'],
-    deploymentBlock: 47_000_000,
+    deploymentBlock: 48_174_557, // First CreateMarket on Moolah (2025-04-08)
     verified: true,
     scanner: {
       batchSize: 5_000,
@@ -302,6 +304,26 @@ export const SEI_KNOWN_VAULTS: Record<string, { address: `0x${string}`; name: st
   seiLeveredRWA: {
     address: '0x959C4C55876C193132eaEC2675a13b7fE3e85648',
     name: 'Sei Levered RWA Vault',
+  },
+};
+
+/** Known vaults on BNB / Lista Lending (pre-factory + factory-created, verified April 2026) */
+export const BNB_KNOWN_VAULTS: Record<string, { address: `0x${string}`; name: string }> = {
+  listaWbnb: {
+    address: '0x57134a64B7cD9F9eb72F8255A671F5Bf2fe3E2d0',
+    name: 'Lista DAO BNB Vault',
+  },
+  listaUsd1: {
+    address: '0xfa27f172e0b6ebcEF9c51ABf817E2cb142FbE627',
+    name: 'Lista USD1 Vault',
+  },
+  re7Usd1: {
+    address: '0x02a5ca3a749855d1002a78813e679584a96646d0',
+    name: 'Re7 USD1',
+  },
+  nativeUsdt: {
+    address: '0xce51d66343ed1ffaf82432b7436b5a128445ef2b',
+    name: 'Native BSC USDT',
   },
 };
 

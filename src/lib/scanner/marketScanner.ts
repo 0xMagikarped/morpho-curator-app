@@ -7,7 +7,7 @@ import {
   type Address,
 } from 'viem';
 import { getPublicClient } from '../data/rpcClient';
-import { getChainConfig, SEI_KNOWN_VAULTS } from '../../config/chains';
+import { getChainConfig, SEI_KNOWN_VAULTS, BNB_KNOWN_VAULTS } from '../../config/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, erc20Abi } from '../contracts/abis';
 import {
   saveDiscoveredMarkets,
@@ -418,6 +418,15 @@ function usesExplorerApi(chainId: number): boolean {
 }
 
 /**
+ * Check if event-based scanning (getLogs) should be skipped for a chain.
+ * BNB public RPCs aggressively prune historical blocks, making getLogs useless.
+ * Market discovery on BNB relies entirely on vault queue reads.
+ */
+function shouldSkipEventScan(chainId: number): boolean {
+  return chainId === 56;
+}
+
+/**
  * Hardcoded seed markets for SEI.
  * SEI public RPCs prune historical transactions, and seitrace pagination
  * can be unreliable. These seeds ensure known markets are always present.
@@ -536,7 +545,10 @@ export async function runIncrementalScan(
     }
   }
 
-  if (usesExplorerApi(chainId)) {
+  if (shouldSkipEventScan(chainId)) {
+    // Step 2: BNB — skip event scanning (public RPCs prune historical blocks).
+    // Vault-based discovery (Step 1) is the sole market source.
+  } else if (usesExplorerApi(chainId)) {
     // Step 2a: SEI — use block explorer API to find ALL createMarket txs
     try {
       const existingIds = new Set(allMarkets.map((m) => m.id));
@@ -670,6 +682,9 @@ async function enrichTokensForMarkets(
 function getKnownVaultAddresses(chainId: number): Address[] {
   if (chainId === 1329) {
     return Object.values(SEI_KNOWN_VAULTS).map((v) => v.address as Address);
+  }
+  if (chainId === 56) {
+    return Object.values(BNB_KNOWN_VAULTS).map((v) => v.address as Address);
   }
   return [];
 }
