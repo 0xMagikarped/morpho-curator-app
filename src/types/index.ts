@@ -11,8 +11,7 @@ export interface ChainConfig {
   /** Separate RPC for getLogs if the primary RPC doesn't support it (e.g., SEI) */
   eventRpcUrl?: string;
   blockExplorer: string;
-  /** Morpho Blue singleton address. Null if contracts not yet deployed (e.g., Pharos). */
-  morphoBlue: Address | null;
+  morphoBlue: Address;
   vaultFactories: {
     v1?: Address;
     v2?: Address;
@@ -31,6 +30,8 @@ export interface ChainConfig {
     /** FixedRateIRM contract address(es) — markets using these IRMs are fixed-rate */
     fixedRateIrm?: Address[];
   };
+  /** False if contracts are not yet deployed on this chain (e.g., Pharos). */
+  deployed: boolean;
   apiSupported: boolean;
   blockTime: number;
   finality: 'instant' | 'probabilistic';

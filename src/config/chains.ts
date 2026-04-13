@@ -22,6 +22,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     ],
     blockExplorer: 'https://seiscan.io',
     morphoBlue: '0xc9cDAc20FCeAAF616f7EB0bb6Cd2c69dcfa9094c' as Address,
+    deployed: true,
     vaultFactories: {
       v1: '0x8Dea49ec5bd5AeAc8bcf96B3E187F59354118291' as Address, // MetaMorpho Factory V1.1
     },
@@ -81,6 +82,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     rpcUrls: ['https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com'],
     blockExplorer: 'https://etherscan.io',
     morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
+    deployed: true,
     vaultFactories: {
       v1: '0x1897A8997241C1cD4bD0698647e4EB7213535c24' as Address,
       v2: '0xA1D94F746dEfa1928926b84fB2596c06926C0405' as Address,
@@ -144,6 +146,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     rpcUrls: ['https://mainnet.base.org', 'https://base.llamarpc.com'],
     blockExplorer: 'https://basescan.org',
     morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
+    deployed: true,
     vaultFactories: {
       v1: '0xFf62A7c278C62eD665133147129245053Bbf5918' as Address,
       v2: '0x4501125508079A99ebBebCE205DeC9593C2b5857' as Address,
@@ -200,6 +203,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     ],
     blockExplorer: 'https://bscscan.com',
     morphoBlue: '0xf820fB4680712CD7263a0D3D024D5b5aEA82Fd70' as Address, // Moolah singleton
+    deployed: true,
     vaultFactories: {
       v1: '0x2a0Cb6401FD3c6196750dc6b46702040761D9671' as Address, // MoolahVaultFactory
     },
@@ -250,7 +254,8 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     name: 'Pharos',
     rpcUrls: ['https://rpc.pharos.xyz'],
     blockExplorer: 'https://pharosscan.xyz',
-    morphoBlue: null, // NOT YET DEPLOYED
+    morphoBlue: '0x0000000000000000000000000000000000000000' as Address, // NOT YET DEPLOYED — update when contracts ship
+    deployed: false,
     vaultFactories: {},
     periphery: {},
     apiSupported: false,
@@ -314,5 +319,5 @@ export function getSupportedChainIds(): number[] {
  */
 export function isChainDeployed(chainId: number): boolean {
   const config = CHAIN_CONFIGS[chainId];
-  return config != null && config.morphoBlue != null;
+  return config != null && config.deployed;
 }

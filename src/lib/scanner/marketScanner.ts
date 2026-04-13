@@ -511,7 +511,7 @@ export async function runIncrementalScan(
 ): Promise<DiscoveredMarket[]> {
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
-  if (!chainConfig.morphoBlue) return []; // Contracts not yet deployed (e.g., Pharos)
+  if (!chainConfig.deployed) return []; // Contracts not yet deployed (e.g., Pharos)
 
   const allMarkets: DiscoveredMarket[] = [];
 
