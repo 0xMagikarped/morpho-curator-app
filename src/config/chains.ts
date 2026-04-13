@@ -268,7 +268,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     nativeToken: {
       symbol: 'PHRS',
       decimals: 18,
-      wrapped: '0x0000000000000000000000000000000000000000' as Address, // UPDATE when known
+      wrapped: '0x0000000000000000000000000000000000000000' as Address, // Placeholder — update when WPHRS is deployed
     },
     stablecoins: [],
     oracleProviders: [],

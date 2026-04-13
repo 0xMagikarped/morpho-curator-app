@@ -1,11 +1,13 @@
 import { ChevronUp, ChevronDown, X } from 'lucide-react';
 import { Badge } from '../../ui/Badge';
+import { MarketTypeBadge } from '../../ui/MarketTypeBadge';
 import { ProgressBar } from '../../ui/ProgressBar';
 import { formatTokenAmount } from '../../../lib/utils/format';
 
 export interface QueueMarketItem {
   marketId: `0x${string}`;
   label: string; // e.g. "wstETH/USDC 86% LLTV"
+  irmAddress?: `0x${string}`;
   supplyAssets: bigint;
   supplyCap: bigint;
   availableLiquidity: bigint;
@@ -19,6 +21,7 @@ interface QueueListProps {
   mode: 'supply' | 'withdraw';
   decimals: number;
   assetSymbol: string;
+  chainId: number;
   onMove?: (fromIndex: number, toIndex: number) => void;
   onRemove?: (index: number) => void;
   /** Markets that can be removed from withdraw queue (0 supply or pending removal) */
@@ -31,6 +34,7 @@ export function QueueList({
   mode,
   decimals,
   assetSymbol: _assetSymbol, // eslint-disable-line @typescript-eslint/no-unused-vars
+  chainId,
   onMove,
   onRemove,
   removableMarkets,
@@ -81,10 +85,15 @@ export function QueueList({
 
             {/* Market label */}
             <div className="col-span-4">
-              <span className="text-text-primary">{item.label}</span>
-              {highCap && mode === 'supply' && (
-                <Badge variant="warning" className="ml-1 text-[9px]">NEAR CAP</Badge>
-              )}
+              <div className="flex items-center gap-1.5">
+                <span className="text-text-primary">{item.label}</span>
+                {item.irmAddress && (
+                  <MarketTypeBadge irmAddress={item.irmAddress} chainId={chainId} />
+                )}
+                {highCap && mode === 'supply' && (
+                  <Badge variant="warning" className="ml-1 text-[9px]">NEAR CAP</Badge>
+                )}
+              </div>
             </div>
 
             {mode === 'supply' ? (

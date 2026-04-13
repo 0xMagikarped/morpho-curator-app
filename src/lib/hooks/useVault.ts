@@ -18,6 +18,7 @@ import {
 } from '../data/rpcClient';
 import type { V2AdapterData } from '../data/rpcClient';
 import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../data/morphoApi';
+import { isChainDeployed } from '../../config/chains';
 import type { VaultRole, AllocationState, MarketInfo, PendingAction, MarketCap, PendingCap } from '../../types';
 import type { VaultInfoV1 } from '../../types';
 import { calcUtilization } from '../utils/format';
@@ -43,6 +44,7 @@ function useVaultFullData(chainId: number | undefined, vaultAddress: Address | u
     queryKey: vaultKeys.fullData(chainId!, vaultAddress!),
     queryFn: async (): Promise<VaultFullDataResult> => {
       if (!chainId || !vaultAddress) throw new Error('Missing params');
+      if (!isChainDeployed(chainId)) throw new Error(`Chain ${chainId} contracts not yet deployed`);
 
       // Try API first for supported chains
       if (isApiSupportedChain(chainId)) {
@@ -64,7 +66,7 @@ function useVaultFullData(chainId: number | undefined, vaultAddress: Address | u
       const data = await fetchVaultDataViaRpc(chainId, vaultAddress);
       return { ...data, dataSource: 'rpc' as const };
     },
-    enabled: !!chainId && !!vaultAddress,
+    enabled: !!chainId && !!vaultAddress && isChainDeployed(chainId),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });

@@ -58,6 +58,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
   const marketLookup = useMemo(() => {
     const map = new Map<string, {
       label: string;
+      irmAddress: `0x${string}`;
       supplyAssets: bigint;
       supplyCap: bigint;
       availableLiquidity: bigint;
@@ -78,6 +79,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
 
       map.set(m.id, {
         label,
+        irmAddress: m.params.irm,
         supplyAssets: alloc?.supplyAssets ?? 0n,
         supplyCap: alloc?.supplyCap ?? 0n,
         availableLiquidity: alloc?.availableLiquidity ?? 0n,
@@ -96,6 +98,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
         return {
           marketId: id,
           label: info?.label ?? `${id.slice(0, 10)}...`,
+          irmAddress: info?.irmAddress,
           supplyAssets: info?.supplyAssets ?? 0n,
           supplyCap: info?.supplyCap ?? 0n,
           availableLiquidity: info?.availableLiquidity ?? 0n,
@@ -359,6 +362,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
           mode="supply"
           decimals={decimals}
           assetSymbol={assetSymbol}
+          chainId={chainId}
           onMove={editingSupply ? moveSupply : undefined}
           onRemove={editingSupply ? removeSupply : undefined}
         />
@@ -445,6 +449,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
           mode="withdraw"
           decimals={decimals}
           assetSymbol={assetSymbol}
+          chainId={chainId}
           onMove={editingWithdraw ? moveWithdraw : undefined}
           onRemove={editingWithdraw ? removeWithdraw : undefined}
           removableMarkets={removableWithdrawMarkets}

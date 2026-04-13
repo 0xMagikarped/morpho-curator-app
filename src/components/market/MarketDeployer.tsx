@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { morphoBlueExtendedAbi } from '../../lib/contracts/abis';
-import { getChainConfig } from '../../config/chains';
+import { getChainConfig, isChainDeployed } from '../../config/chains';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import type { MarketFormData } from './MarketForm';
 
@@ -33,7 +33,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
     abi: morphoBlueExtendedAbi,
     functionName: 'createMarket',
     args: [marketParams],
-    query: { enabled: !!chainConfig && !isMismatch },
+    query: { enabled: !!chainConfig && !isMismatch && isChainDeployed(chainId) },
   });
 
   const { writeContract, data: txHash, isPending, error: writeError } = useGuardedWriteContract();

@@ -28,7 +28,7 @@ export function DeadDepositHelper({ marketParams, hasDeadDeposit }: DeadDepositH
   const { isLoading: supplyConfirming, isSuccess: supplySuccess } = useWaitForTransactionReceipt({ hash: supplyTxHash });
 
   const handleApprove = () => {
-    if (!chainConfig) return;
+    if (!chainConfig || !chainConfig.deployed) return;
     writeApprove({
       address: marketParams.loanToken,
       abi: erc20ApproveAbi,
@@ -38,7 +38,7 @@ export function DeadDepositHelper({ marketParams, hasDeadDeposit }: DeadDepositH
   };
 
   const handleSupply = () => {
-    if (!chainConfig) return;
+    if (!chainConfig || !chainConfig.deployed) return;
     writeSupply({
       address: chainConfig.morphoBlue,
       abi: morphoBlueExtendedAbi,

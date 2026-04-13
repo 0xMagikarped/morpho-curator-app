@@ -29,7 +29,7 @@ export function MarketPreview({ data, onBack, onDeploy }: MarketPreviewProps) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (!client || !chainConfig) return;
+    if (!client || !chainConfig || !chainConfig.deployed) return;
     let cancelled = false;
 
     // Defer the synchronous setState to avoid cascading renders

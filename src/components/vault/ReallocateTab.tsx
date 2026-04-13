@@ -503,6 +503,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     const isCatcher = edit.marketId === effectiveCatcher;
                     const isChanged = edit.targetAssets !== edit.currentAssets;
                     const isIdleLocked = edit.isIdle && idleAutoMode;
+                    const rateType = !edit.isIdle ? getMarketRateType(edit.irmAddress, chainId) : null;
 
                     return (
                       <tr
@@ -519,11 +520,11 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                               {isIdleLocked && (
                                 <Badge variant="default" className="text-[9px] py-0 px-1">AUTO</Badge>
                               )}
-                              {!edit.isIdle && getMarketRateType(edit.irmAddress, chainId) === 'fixed' && (
+                              {rateType === 'fixed' && (
                                 <Badge variant="info" className="text-[9px] py-0 px-1">Fixed</Badge>
                               )}
                             </div>
-                            {!edit.isIdle && getMarketRateType(edit.irmAddress, chainId) === 'fixed' && delta < 0n && (
+                            {rateType === 'fixed' && delta < 0n && (
                               <span className="text-[10px] text-warning">
                                 Fixed-rate: only idle liquidity withdrawable
                               </span>

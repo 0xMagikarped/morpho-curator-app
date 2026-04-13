@@ -22,7 +22,7 @@ export function RateSimulator({ marketId }: RateSimulatorProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    if (!client || !chainConfig) return;
+    if (!client || !chainConfig || !chainConfig.deployed) return;
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
