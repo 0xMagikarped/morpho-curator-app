@@ -13,14 +13,18 @@ import { sei } from '../../../config/wagmi';
 import {
   buildDeploymentTxSequence,
   buildV2DeploymentTxSequence,
+  buildMoolahDeploymentTxSequence,
   parseVaultAddressFromReceipt,
   parseV2VaultAddressFromReceipt,
+  parseMoolahVaultAddressFromReceipt,
   feePercentToWad,
+  MOOLAH_MIN_TIMELOCK_DELAY,
   type TransactionStep,
   type PostDeployConfig,
   type VaultCreationParams,
   type V2VaultCreationParams,
   type V2PostDeployConfig,
+  type MoolahVaultCreationParams,
 } from '../../../lib/vault/createVault';
 import { generateRandomSalt } from '../../../lib/vault/vaultSaltGenerator';
 import { useAppStore } from '../../../store/appStore';
@@ -104,6 +108,8 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
   const isV2 = state.version === 'v2';
+  const isMoolah = chainConfig?.protocol === 'moolah';
+  const [moolahTimeLocks, setMoolahTimeLocks] = useState<{ manager: `0x${string}`; curator: `0x${string}` } | null>(null);
 
   // Build steps from state
   const buildSteps = useCallback((salt: `0x${string}`) => {
@@ -117,6 +123,41 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
           : undefined;
     const feeRecipient =
       state.feeRecipientMode === 'owner' ? state.owner : state.feeRecipientAddress ?? undefined;
+
+    // Moolah: single-tx deploy, no multicall config. The factory enforces
+    // 18-decimal assets + ≥1-day timelock delay; we repeat the delay check
+    // here so the user sees a clean error before signing.
+    if (isMoolah) {
+      if (state.assetDecimals !== 18) {
+        setError('Lista Moolah only supports 18-decimal assets.');
+        return [];
+      }
+      const delay = BigInt(state.finalTimelockSeconds || state.initialTimelockSeconds || 0);
+      if (delay < MOOLAH_MIN_TIMELOCK_DELAY) {
+        setError(`Lista enforces a 1-day timelock floor. Set the delay to at least ${Number(MOOLAH_MIN_TIMELOCK_DELAY)} seconds.`);
+        return [];
+      }
+      const moolahParams: MoolahVaultCreationParams = {
+        chainId: state.chainId,
+        // Manager defaults to owner; curator from the roles step; guardian optional.
+        manager: state.owner,
+        curator: curator ?? state.owner,
+        guardian:
+          state.guardianMode === 'custom' && state.guardianAddress
+            ? state.guardianAddress
+            : ('0x0000000000000000000000000000000000000000' as `0x${string}`),
+        timeLockDelay: delay,
+        asset: state.asset,
+        name: state.vaultName,
+        symbol: state.vaultSymbol,
+      };
+      try {
+        return buildMoolahDeploymentTxSequence(moolahParams);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Moolah deploy validation failed');
+        return [];
+      }
+    }
 
     if (isV2) {
       const v2Params: V2VaultCreationParams = {
@@ -255,6 +296,26 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
         // Parse vault address from deploy step
         if (i === 0) {
+          // Moolah: grab (vault, managerTL, curatorTL) in one go.
+          if (isMoolah) {
+            const moolah = parseMoolahVaultAddressFromReceipt(receipt);
+            if (moolah) {
+              deployedVaultAddr = moolah.vault;
+              setVaultAddress(moolah.vault);
+              setMoolahTimeLocks({ manager: moolah.managerTimeLock, curator: moolah.curatorTimeLock });
+              addTrackedVault({
+                address: moolah.vault,
+                chainId: state.chainId!,
+                name: state.vaultName,
+                version: 'v1',
+              });
+            }
+            setSteps((prev) =>
+              prev.map((s, idx) => (idx === i ? { ...s, status: 'confirmed' } : s)),
+            );
+            continue;
+          }
+
           let addr = isV2
             ? parseV2VaultAddressFromReceipt(receipt)
             : parseVaultAddressFromReceipt(receipt);
@@ -355,6 +416,45 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
             ? '1 transaction — deploy only (no additional config)'
             : `${steps.length} transactions${totalOps > 0 ? ` — ${totalOps} config operations batched via multicall` : ''}`}
         </p>
+      )}
+
+      {/* Moolah-specific banner */}
+      {isMoolah && (
+        <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary space-y-1">
+          <div>
+            <span className="font-mono text-[#F0B90B]">[Moolah · Lista]</span>{' '}
+            Your deploy calls <span className="font-mono">createMoolahVault(...)</span>
+            . Lista keeps upgrade control of the vault implementation via
+            <span className="font-mono"> vaultAdmin</span>.
+          </div>
+          <div>
+            You control <span className="font-mono">managerTimeLock</span> +{' '}
+            <span className="font-mono">curatorTimeLock</span>. All post-deploy
+            config (caps, queues, fees) is scheduled via those TimeLocks with
+            your chosen delay (≥ 1 day).
+          </div>
+        </div>
+      )}
+
+      {/* Moolah success block — the factory returns three addresses. */}
+      {isMoolah && moolahTimeLocks && vaultAddress && (
+        <div className="bg-success/10 border border-success/20 p-3 text-xs space-y-1">
+          <div className="text-success font-semibold mb-1">
+            MoolahVault deployed — 3 contracts created:
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-text-tertiary w-32">Vault:</span>
+            <a href={`${chainConfig?.blockExplorer}/address/${vaultAddress}`} target="_blank" rel="noreferrer" className="font-mono text-success hover:underline">{vaultAddress}</a>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-text-tertiary w-32">managerTimeLock:</span>
+            <a href={`${chainConfig?.blockExplorer}/address/${moolahTimeLocks.manager}`} target="_blank" rel="noreferrer" className="font-mono text-success hover:underline">{moolahTimeLocks.manager}</a>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-text-tertiary w-32">curatorTimeLock:</span>
+            <a href={`${chainConfig?.blockExplorer}/address/${moolahTimeLocks.curator}`} target="_blank" rel="noreferrer" className="font-mono text-success hover:underline">{moolahTimeLocks.curator}</a>
+          </div>
+        </div>
       )}
 
       {/* Vault address */}

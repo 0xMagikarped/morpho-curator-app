@@ -8,6 +8,7 @@ import {
   type Address,
 } from 'viem';
 import { metaMorphoFactoryAbi, metaMorphoV1Abi, metaMorphoV2FactoryAbi, metaMorphoV2Abi } from '../contracts/abis';
+import { moolahVaultFactoryAbi } from '../contracts/moolahAbis';
 import { getChainConfig } from '../../config/chains';
 
 // ============================================================
@@ -513,4 +514,120 @@ export function buildV2DeploymentTxSequence(
   }
 
   return steps;
+}
+
+// ============================================================
+// Moolah vault deployment (Lista DAO BNB)
+// ============================================================
+
+/**
+ * Lista Moolah vaults are deployed in a single transaction that returns
+ * (vault, managerTimeLock, curatorTimeLock). Post-deploy configuration
+ * (caps, queues, fees) cannot be bundled because every state change must
+ * be proposed on the appropriate TimelockController with ≥ 1 day delay.
+ *
+ * The wizard collects Manager / Curator / Guardian / Delay inputs on the
+ * Roles and Timelock steps — we map them to the factory's positional
+ * arguments here.
+ */
+export interface MoolahVaultCreationParams {
+  chainId: number;
+  manager: `0x${string}`;
+  curator: `0x${string}`;
+  guardian: `0x${string}`;
+  /** Min delay for both TimelockControllers, in seconds. Must be ≥ 86_400 (1 day). */
+  timeLockDelay: bigint;
+  asset: `0x${string}`;
+  name: string;
+  symbol: string;
+}
+
+export const MOOLAH_MIN_TIMELOCK_DELAY = 86_400n; // 1 day — Lista protocol floor
+
+export function buildMoolahDeploymentTxSequence(
+  params: MoolahVaultCreationParams,
+): TransactionStep[] {
+  const chainConfig = getChainConfig(params.chainId);
+  if (!chainConfig) throw new Error(`Unsupported chain: ${params.chainId}`);
+  if (chainConfig.protocol !== 'moolah') {
+    throw new Error(
+      `buildMoolahDeploymentTxSequence: chain ${params.chainId} is not a Moolah deployment`,
+    );
+  }
+
+  const factoryAddress = chainConfig.vaultFactories.v1;
+  if (!factoryAddress) throw new Error(`No MoolahVaultFactory on chain ${params.chainId}`);
+
+  if (params.timeLockDelay < MOOLAH_MIN_TIMELOCK_DELAY) {
+    throw new Error(
+      `Moolah enforces a 1-day floor on the timelock delay (got ${params.timeLockDelay}s).`,
+    );
+  }
+
+  return [
+    {
+      id: 'step-0',
+      label: 'Deploy MoolahVault + TimeLocks',
+      to: factoryAddress,
+      data: encodeFunctionData({
+        abi: moolahVaultFactoryAbi,
+        functionName: 'createMoolahVault',
+        args: [
+          params.manager,
+          params.curator,
+          params.guardian,
+          params.timeLockDelay,
+          params.asset,
+          params.name,
+          params.symbol,
+        ],
+      }),
+      status: 'pending',
+      operations: [
+        `Manager:  ${params.manager}`,
+        `Curator:  ${params.curator}`,
+        `Guardian: ${params.guardian}`,
+        `Delay:    ${Number(params.timeLockDelay) / 86_400} day(s)`,
+      ],
+    },
+  ];
+}
+
+export interface MoolahVaultDeployResult {
+  vault: `0x${string}`;
+  managerTimeLock: `0x${string}`;
+  curatorTimeLock: `0x${string}`;
+}
+
+/**
+ * Parse the 3 addresses emitted by `MoolahVaultFactory.VaultCreated`
+ * from the deploy receipt.
+ */
+export function parseMoolahVaultAddressFromReceipt(
+  receipt: TransactionReceipt,
+): MoolahVaultDeployResult | null {
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: moolahVaultFactoryAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'VaultCreated') {
+        const args = decoded.args as {
+          vault: `0x${string}`;
+          managerTimeLock: `0x${string}`;
+          curatorTimeLock: `0x${string}`;
+        };
+        return {
+          vault: args.vault,
+          managerTimeLock: args.managerTimeLock,
+          curatorTimeLock: args.curatorTimeLock,
+        };
+      }
+    } catch {
+      // Not our event, skip.
+    }
+  }
+  return null;
 }
