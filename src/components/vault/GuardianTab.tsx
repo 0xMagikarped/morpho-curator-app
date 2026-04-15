@@ -10,6 +10,7 @@ import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { formatCountdown } from '../../lib/utils/format';
 import { getEmergencyRoleLabel } from '../../types';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
+import { useVaultFlavor } from '../../lib/vault/flavor';
 
 interface GuardianTabProps {
   chainId: number;
@@ -20,6 +21,47 @@ export function GuardianTab({ chainId, vaultAddress }: GuardianTabProps) {
   const role = useVaultRole(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
+  const { data: flavor } = useVaultFlavor(chainId, vaultAddress);
+
+  // Moolah's guardian pattern is entirely different — cancellers work on the
+  // TimelockControllers, not via revokePending* setters on the vault. Those
+  // setters don't exist on MoolahVault and would revert. Redirect to the
+  // Pending Proposals panel (Cancel button per queued op) instead.
+  if (flavor === 'moolahVault') {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <span className="inline-flex items-center gap-2">
+              Guardian
+              <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-[#F0B90B]/10 border border-[#F0B90B]/30 text-[#F0B90B]">
+                Moolah
+              </span>
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <div className="space-y-3 text-sm text-text-secondary">
+          <p>
+            On Lista Moolah vaults, guardian powers live on the
+            <span className="font-mono"> curatorTimeLock</span> and
+            <span className="font-mono"> managerTimeLock</span> as
+            <span className="font-mono"> CANCELLER_ROLE</span>. To veto a
+            queued change, open the <span className="font-mono">Pending
+            Proposals</span> panel on the Overview tab and hit
+            <span className="font-mono"> Cancel</span> on the relevant op.
+          </p>
+          <p className="text-xs text-text-tertiary">
+            There is no <span className="font-mono">submitGuardian</span> /
+            <span className="font-mono"> revokePendingGuardian</span> surface
+            on Moolah — membership in the canceller role is changed through
+            the timelocks themselves, via a scheduled
+            <span className="font-mono"> grantRole</span> /
+            <span className="font-mono"> revokeRole</span> proposal.
+          </p>
+        </div>
+      </Card>
+    );
+  }
   const { data: allocation } = useVaultAllocation(chainId, vaultAddress);
   const marketIds = allocation
     ? [...new Set([...allocation.supplyQueue, ...allocation.withdrawQueue])]

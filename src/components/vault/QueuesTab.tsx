@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Address } from 'viem';
-import { useWaitForTransactionReceipt } from 'wagmi';
-import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
+import { useVaultWrite } from '../../hooks/useVaultWrite';
 import { ArrowRightLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -10,7 +9,6 @@ import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole,
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount } from '../../lib/utils/format';
-import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { QueueList, type QueueMarketItem } from './queues/QueueList';
 import { QueueSuggestions } from './queues/QueueSuggestions';
 
@@ -44,8 +42,8 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
 
   const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
 
-  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { submit, mode, isPending, isConfirming, isSuccess } = useVaultWrite(chainId, vaultAddress);
+  const isMoolah = mode === 'timelocked';
 
   const [editingSupply, setEditingSupply] = useState(false);
   const [editingWithdraw, setEditingWithdraw] = useState(false);
@@ -250,28 +248,15 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
   }, [editingWithdraw, withdrawDraft, originalWithdrawQueue]);
 
   const saveSupplyQueue = () => {
-    const newQueue = supplyDraft.map((m) => m.marketId);
-    writeContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'setSupplyQueue',
-      args: [newQueue],
-    });
+    const newQueue = supplyDraft.map((m) => m.marketId as `0x${string}`);
+    void submit({ kind: 'setSupplyQueue', newSupplyQueue: newQueue });
   };
 
   const saveWithdrawQueue = () => {
     // Compute index permutation: desired[i] was at original index X
     const originalIds = originalWithdrawQueue.map((m) => m.marketId);
-    const indexes = withdrawDraft.map((m) => {
-      const idx = originalIds.indexOf(m.marketId);
-      return BigInt(idx);
-    });
-    writeContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'updateWithdrawQueue',
-      args: [indexes],
-    });
+    const indexes = withdrawDraft.map((m) => BigInt(originalIds.indexOf(m.marketId)));
+    void submit({ kind: 'updateWithdrawQueue', indexes });
   };
 
   // Suggestion handlers
@@ -318,6 +303,15 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
         <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
           <span className="text-xs text-warning">Wrong network. Switch to submit transactions.</span>
           <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch</Button>
+        </div>
+      )}
+
+      {/* Moolah propose-mode note */}
+      {isMoolah && (
+        <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary">
+          <span className="font-mono text-[#F0B90B]">[Moolah]</span>{' '}
+          Queue edits on Lista vaults are proposed through the curatorTimeLock.
+          The Save button queues a proposal — execute it from <span className="font-mono">Pending Proposals</span> once ready.
         </div>
       )}
 

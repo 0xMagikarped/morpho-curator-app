@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Address } from 'viem';
-import { useWaitForTransactionReceipt } from 'wagmi';
-import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useQueryClient } from '@tanstack/react-query';
+import { useVaultWrite } from '../../hooks/useVaultWrite';
 import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -10,7 +9,6 @@ import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
-import { metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { vaultKeys } from '../../lib/queryKeys';
@@ -69,8 +67,8 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     [allocation],
   );
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
-  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { submit, mode, isPending, isConfirming, isSuccess } = useVaultWrite(chainId, vaultAddress);
+  const isMoolah = mode === 'timelocked';
 
   // Compute discovered market IDs that are NOT already in vault queues
   const vaultAssetLower = vault?.asset?.toLowerCase();
@@ -240,69 +238,36 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     if (!newCapValue) return;
     const capWei = parseTokenAmount(newCapValue, decimals);
 
-    if (item.vaultMarket) {
-      writeContract({
-        address: vaultAddress,
-        abi: metaMorphoV1Abi,
-        functionName: 'submitCap',
-        args: [item.vaultMarket.params, capWei],
+    const marketParams =
+      item.vaultMarket?.params ??
+      (item.discoveredMarket && {
+        loanToken: item.discoveredMarket.loanToken as Address,
+        collateralToken: item.discoveredMarket.collateralToken as Address,
+        oracle: item.discoveredMarket.oracle as Address,
+        irm: item.discoveredMarket.irm as Address,
+        lltv: BigInt(item.discoveredMarket.lltv),
       });
-    } else if (item.discoveredMarket) {
-      const d = item.discoveredMarket;
-      writeContract({
-        address: vaultAddress,
-        abi: metaMorphoV1Abi,
-        functionName: 'submitCap',
-        args: [
-          {
-            loanToken: d.loanToken as Address,
-            collateralToken: d.collateralToken as Address,
-            oracle: d.oracle as Address,
-            irm: d.irm as Address,
-            lltv: BigInt(d.lltv),
-          },
-          capWei,
-        ],
-      });
-    }
+    if (!marketParams) return;
+    void submit({ kind: 'setCap', marketParams, newSupplyCap: capWei });
     setNewCapValue('');
   };
 
   const handleAcceptCap = (item: MarketLifecycleItem) => {
-    // Accept works with market params — available from either vaultMarket or discoveredMarket
-    if (item.vaultMarket) {
-      writeContract({
-        address: vaultAddress,
-        abi: metaMorphoV1Abi,
-        functionName: 'acceptCap',
-        args: [item.vaultMarket.params],
+    const marketParams =
+      item.vaultMarket?.params ??
+      (item.discoveredMarket && {
+        loanToken: item.discoveredMarket.loanToken as Address,
+        collateralToken: item.discoveredMarket.collateralToken as Address,
+        oracle: item.discoveredMarket.oracle as Address,
+        irm: item.discoveredMarket.irm as Address,
+        lltv: BigInt(item.discoveredMarket.lltv),
       });
-    } else if (item.discoveredMarket) {
-      const d = item.discoveredMarket;
-      writeContract({
-        address: vaultAddress,
-        abi: metaMorphoV1Abi,
-        functionName: 'acceptCap',
-        args: [
-          {
-            loanToken: d.loanToken as Address,
-            collateralToken: d.collateralToken as Address,
-            oracle: d.oracle as Address,
-            irm: d.irm as Address,
-            lltv: BigInt(d.lltv),
-          },
-        ],
-      });
-    }
+    if (!marketParams) return;
+    void submit({ kind: 'acceptCap', marketParams });
   };
 
   const handleRevokeCap = (marketId: string) => {
-    writeContract({
-      address: vaultAddress,
-      abi: metaMorphoV1Abi,
-      functionName: 'revokePendingCap',
-      args: [marketId as `0x${string}`],
-    });
+    void submit({ kind: 'removeCap', marketId: marketId as `0x${string}` });
   };
 
   if (allocLoading || marketsLoading) {
@@ -351,6 +316,16 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         )}
       </div>
 
+      {/* Moolah propose-mode note */}
+      {isMoolah && (
+        <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary">
+          <span className="font-mono text-[#F0B90B]">[Moolah]</span>{' '}
+          Cap changes on Lista vaults go through the curatorTimeLock. Buttons here
+          <span className="font-mono"> propose → wait → execute</span> — review the queued op in
+          <span className="font-mono"> Pending Proposals</span> to fire once ready.
+        </div>
+      )}
+
       {/* Pending Caps Alert — includes both vault queue pending caps and discovered market pending caps */}
       {(() => {
         // Combine pending caps from vault queues + discovered markets
@@ -398,7 +373,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                           disabled={isMismatch || isPending || isConfirming}
                           loading={isPending || isConfirming}
                         >
-                          Accept
+                          {isMoolah ? 'Propose Accept' : 'Accept'}
                         </Button>
                       )}
                       {role.isEmergencyRole && pc.marketId && (
@@ -409,7 +384,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                           disabled={isMismatch || isPending || isConfirming}
                           loading={isPending || isConfirming}
                         >
-                          Revoke
+                          {isMoolah ? 'Propose Revoke' : 'Revoke'}
                         </Button>
                       )}
                     </div>
@@ -484,6 +459,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                       isMismatch={isMismatch}
                       isPending={isPending}
                       isConfirming={isConfirming}
+                      isMoolah={isMoolah}
                       newCapValue={newCapValue}
                       onToggleExpand={() => {
                         setExpandedMarket(isExpanded ? null : item.marketId);
@@ -531,6 +507,7 @@ function MarketRow({
   isMismatch,
   isPending,
   isConfirming,
+  isMoolah,
   newCapValue,
   onToggleExpand,
   onCapValueChange,
@@ -546,6 +523,7 @@ function MarketRow({
   isMismatch: boolean;
   isPending: boolean;
   isConfirming: boolean;
+  isMoolah: boolean;
   newCapValue: string;
   onToggleExpand: () => void;
   onCapValueChange: (v: string) => void;
@@ -641,7 +619,9 @@ function MarketRow({
                   disabled={!newCapValue || isMismatch || isPending || isConfirming}
                   loading={isPending || isConfirming}
                 >
-                  {item.status === 'available' ? 'Submit Cap (Add Market)' : 'Submit Cap Change'}
+                  {isMoolah
+                    ? (item.status === 'available' ? 'Propose Cap (Add Market)' : 'Propose Cap Change')
+                    : (item.status === 'available' ? 'Submit Cap (Add Market)' : 'Submit Cap Change')}
                 </Button>
               </div>
               {item.supplyCap > 0n && (
