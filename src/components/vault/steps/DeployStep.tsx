@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { createPublicClient, custom, type TransactionReceipt, type Hash, type EIP1193Provider } from 'viem';
-import { mainnet, base } from 'viem/chains';
+import { mainnet, base, bsc } from 'viem/chains';
 import { CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -18,7 +18,6 @@ import {
   parseV2VaultAddressFromReceipt,
   parseMoolahVaultAddressFromReceipt,
   feePercentToWad,
-  MOOLAH_MIN_TIMELOCK_DELAY,
   type TransactionStep,
   type PostDeployConfig,
   type VaultCreationParams,
@@ -26,6 +25,7 @@ import {
   type V2PostDeployConfig,
   type MoolahVaultCreationParams,
 } from '../../../lib/vault/createVault';
+import { MOOLAH_MIN_TIMELOCK_DELAY } from '../../../lib/contracts/abis';
 import { generateRandomSalt } from '../../../lib/vault/vaultSaltGenerator';
 import { useAppStore } from '../../../store/appStore';
 import type { WizardState } from '../CreateVaultWizard';
@@ -37,7 +37,12 @@ interface DeployStepProps {
 
 type DeployStatus = 'idle' | 'deploying' | 'complete' | 'failed';
 
-const VIEM_CHAINS: Record<number, typeof mainnet | typeof base | typeof sei> = { 1: mainnet, 8453: base, 1329: sei };
+const VIEM_CHAINS: Record<number, typeof mainnet | typeof base | typeof sei | typeof bsc> = {
+  1: mainnet,
+  8453: base,
+  1329: sei,
+  56: bsc,
+};
 
 function getExplorerTxUrl(chainId: number | null, txHash: string): string | null {
   if (!chainId) return null;
@@ -108,8 +113,14 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
   const isV2 = state.version === 'v2';
-  const isMoolah = chainConfig?.protocol === 'moolah';
+  const isMoolah = chainConfig?.protocol === 'moolah' && !isV2;
   const [moolahTimeLocks, setMoolahTimeLocks] = useState<{ manager: `0x${string}`; curator: `0x${string}` } | null>(null);
+
+  // Moolah preflight surfaces — used for inline warnings on the wizard
+  // step before the user clicks Deploy.
+  const moolahAssetBlocked = isMoolah && state.assetDecimals !== 18;
+  const moolahDelayClamped =
+    isMoolah && BigInt(state.initialTimelockSeconds) < MOOLAH_MIN_TIMELOCK_DELAY;
 
   // Build steps from state
   const buildSteps = useCallback((salt: `0x${string}`) => {
@@ -420,7 +431,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         </p>
       )}
 
-      {/* Moolah-specific banner */}
+      {/* Moolah-specific banner — explains the deploy + pre-flight warnings */}
       {isMoolah && (
         <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary space-y-1">
           <div>
@@ -435,6 +446,20 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
             config (caps, queues, fees) is scheduled via those TimeLocks with
             your chosen delay (≥ 1 day).
           </div>
+          {moolahDelayClamped && (
+            <div className="text-warning">
+              Timelock {state.initialTimelockSeconds}s is below Moolah's
+              86,400 s (1 day) minimum — `buildMoolahDeploymentTxSequence`
+              will reject this. Bump the delay before deploy.
+            </div>
+          )}
+          {moolahAssetBlocked && (
+            <div className="text-danger">
+              Asset {state.assetSymbol} has {state.assetDecimals} decimals.
+              Moolah factory rejects any asset whose decimals() ≠ 18. Pick
+              an 18-decimal asset (USDT, USD1, WBNB, lisUSD).
+            </div>
+          )}
         </div>
       )}
 
@@ -565,8 +590,12 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
             <Button variant="secondary" onClick={onBack}>
               Back
             </Button>
-            <Button onClick={executeSteps} disabled={!walletClient}>
-              {walletClient ? 'Start Deployment' : 'Connect Wallet'}
+            <Button onClick={executeSteps} disabled={!walletClient || moolahAssetBlocked}>
+              {!walletClient
+                ? 'Connect Wallet'
+                : moolahAssetBlocked
+                  ? 'Asset decimals must be 18'
+                  : 'Start Deployment'}
             </Button>
           </>
         )}

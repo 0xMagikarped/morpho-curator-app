@@ -326,42 +326,11 @@ export const moolahVaultAbi = [
 
 // ============================================================
 // MoolahVaultFactory
+// ------------------------------------------------------------
+// `moolahVaultFactoryAbi` lives in `src/lib/contracts/abis.ts` so that
+// the verified BscScan event signature (CreateMoolahVault, 12 indexed
+// args) is the single source of truth. Importers should pull from there.
 // ============================================================
-
-export const moolahVaultFactoryAbi = [
-  {
-    inputs: [
-      { name: 'manager', type: 'address' },
-      { name: 'curator', type: 'address' },
-      { name: 'guardian', type: 'address' },
-      { name: 'timeLockDelay', type: 'uint256' },
-      { name: 'asset', type: 'address' },
-      { name: 'name', type: 'string' },
-      { name: 'symbol', type: 'string' },
-    ],
-    name: 'createMoolahVault',
-    outputs: [
-      { name: 'vault', type: 'address' },
-      { name: 'managerTimeLock', type: 'address' },
-      { name: 'curatorTimeLock', type: 'address' },
-    ],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    anonymous: false,
-    inputs: [
-      { indexed: true, name: 'vault', type: 'address' },
-      { indexed: false, name: 'managerTimeLock', type: 'address' },
-      { indexed: false, name: 'curatorTimeLock', type: 'address' },
-      { indexed: true, name: 'asset', type: 'address' },
-      { indexed: false, name: 'name', type: 'string' },
-      { indexed: false, name: 'symbol', type: 'string' },
-    ],
-    name: 'VaultCreated',
-    type: 'event',
-  },
-] as const;
 
 // ============================================================
 // MoolahMarketFactory (OPERATOR-gated)

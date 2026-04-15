@@ -611,6 +611,77 @@ export const metaMorphoFactoryAbi = [
 ] as const;
 
 // ============================================================
+// Moolah Vault Factory (Lista DAO — BNB Chain)
+// ------------------------------------------------------------
+// Fork of MetaMorpho with a different factory signature.
+// Selector: 0x72147ee8 createMoolahVault(address,address,address,uint256,address,string,string)
+// Constraints:
+//   - timeLockDelay >= 86400 (1 day) — enforced by TimeLock constructor
+//   - asset.decimals() == 18 — enforced by factory
+//   - No salt (uses CREATE, not CREATE2)
+// Returns: (vaultProxy, managerTimeLock, curatorTimeLock)
+// Source: https://github.com/lista-dao/moolah/blob/main/src/moolah-vault/MoolahVaultFactory.sol
+// ============================================================
+
+export const moolahVaultFactoryAbi = [
+  {
+    inputs: [{ name: 'target', type: 'address' }],
+    name: 'isMoolahVault',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'MOOLAH',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'manager', type: 'address' },
+      { name: 'curator', type: 'address' },
+      { name: 'guardian', type: 'address' },
+      { name: 'timeLockDelay', type: 'uint256' },
+      { name: 'asset', type: 'address' },
+      { name: 'name', type: 'string' },
+      { name: 'symbol', type: 'string' },
+    ],
+    name: 'createMoolahVault',
+    outputs: [
+      { name: 'vault', type: 'address' },
+      { name: 'managerTimeLock', type: 'address' },
+      { name: 'curatorTimeLock', type: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'moolahVault', type: 'address' },
+      { indexed: false, name: 'implementation', type: 'address' },
+      { indexed: false, name: 'managerTimeLock', type: 'address' },
+      { indexed: false, name: 'curatorTimeLock', type: 'address' },
+      { indexed: false, name: 'timeLockDelay', type: 'uint256' },
+      { indexed: true, name: 'caller', type: 'address' },
+      { indexed: false, name: 'manager', type: 'address' },
+      { indexed: false, name: 'curator', type: 'address' },
+      { indexed: false, name: 'guardian', type: 'address' },
+      { indexed: true, name: 'asset', type: 'address' },
+      { indexed: false, name: 'name', type: 'string' },
+      { indexed: false, name: 'symbol', type: 'string' },
+    ],
+    name: 'CreateMoolahVault',
+    type: 'event',
+  },
+] as const;
+
+/** Moolah TimeLock minimum delay — enforced in TimeLock constructor. */
+export const MOOLAH_MIN_TIMELOCK_DELAY = 86_400n; // 1 day
+
+// ============================================================
 // MetaMorpho V2 Factory
 // ============================================================
 
