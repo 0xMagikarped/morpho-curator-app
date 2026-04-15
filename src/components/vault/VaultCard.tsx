@@ -104,9 +104,12 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
 
   return (
     <Card
-      hover
+      // Blacklisted vaults skip hover affordances — the card stays
+      // clickable (navigation still works) but doesn't pretend to be
+      // actionable.
+      hover={!isBlacklisted}
       onClick={() => navigate(`/vault/${chainId}/${vaultAddress}`)}
-      className={`space-y-3 ${isBlacklisted ? 'opacity-50 grayscale' : ''}`}
+      className={`space-y-3 ${isBlacklisted ? 'opacity-50 grayscale cursor-default' : ''}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between">

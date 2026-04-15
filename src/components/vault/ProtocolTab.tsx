@@ -95,23 +95,31 @@ function ProtocolStateCard({ chainId }: { chainId: number }) {
             </span>
           </Row>
 
-          {state.minLoanValue > 0n && (
-            <Row icon={<DollarSign size={12} className="text-text-tertiary" />} label="Min loan value">
-              <span className="font-mono text-text-primary">
-                ${(Number(state.minLoanValue) / 1e8).toFixed(2)}
-              </span>
-              <span className="text-text-tertiary ml-1">(8dp oracle, anti-dust floor)</span>
-            </Row>
-          )}
+          <Row icon={<DollarSign size={12} className="text-text-tertiary" />} label="Min loan value">
+            {state.minLoanValue > 0n ? (
+              <>
+                <span className="font-mono text-text-primary">
+                  ${(Number(state.minLoanValue) / 1e8).toFixed(2)}
+                </span>
+                <span className="text-text-tertiary ml-1">(8dp oracle, anti-dust floor)</span>
+              </>
+            ) : (
+              <span className="text-text-tertiary">Not set</span>
+            )}
+          </Row>
 
-          {state.defaultMarketFee > 0n && (
-            <Row icon={<Layers size={12} className="text-text-tertiary" />} label="Default market fee">
-              <span className="font-mono text-text-primary">
-                {(Number(state.defaultMarketFee) / 1e16).toFixed(2)}%
-              </span>
-              <span className="text-text-tertiary ml-1">(WAD)</span>
-            </Row>
-          )}
+          <Row icon={<Layers size={12} className="text-text-tertiary" />} label="Default market fee">
+            {state.defaultMarketFee > 0n ? (
+              <>
+                <span className="font-mono text-text-primary">
+                  {(Number(state.defaultMarketFee) / 1e16).toFixed(2)}%
+                </span>
+                <span className="text-text-tertiary ml-1">(WAD)</span>
+              </>
+            ) : (
+              <span className="text-text-tertiary">Not set</span>
+            )}
+          </Row>
 
           {singleton && (
             <Row label="Singleton proxy">
@@ -258,7 +266,6 @@ function RestrictedListsCard({ chainId }: { chainId: number }) {
   });
 
   const hasAnything = (results?.vaults.length ?? 0) > 0 || (results?.tokens.length ?? 0) > 0;
-  if (!hasAnything) return null;
 
   return (
     <Card>
@@ -294,9 +301,15 @@ function RestrictedListsCard({ chainId }: { chainId: number }) {
             </ul>
           </div>
         )}
+        {!hasAnything && (
+          <p className="text-text-secondary">
+            No known vaults or tokens are on Lista's restricted lists today.
+          </p>
+        )}
         <p className="text-[10px] text-text-tertiary">
           Only known candidates are probed. The singleton doesn't expose
-          membership enumeration, so unlisted addresses may still be restricted.
+          membership enumeration, so additional addresses may be restricted
+          without this UI knowing.
         </p>
       </div>
     </Card>

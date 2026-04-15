@@ -24,6 +24,7 @@ import { getMarketRateType } from '../../lib/utils/irm';
 import { getChainConfig } from '../../config/chains';
 import { useVaultFlavor } from '../../lib/vault/flavor';
 import { useIsVaultBlacklisted, useMoolahSingletonState } from '../../lib/hooks/useMoolahSingleton';
+import { isStablecoin } from '../../config/tokens';
 import { AlertTriangle } from 'lucide-react';
 
 /**
@@ -32,14 +33,19 @@ import { AlertTriangle } from 'lucide-react';
  * anti-dust floor we need to put the borrow in the same 8dp USD scale.
  * For stablecoin loan tokens (~$1) we assume parity; for anything else we
  * return null and the warning stays hidden — better silent than wrong.
+ *
+ * Classification is keyed on the token address via `src/config/tokens.ts`
+ * rather than symbol, to defuse symbol-spoofing attacks (an ERC-20 named
+ * "USDT" that isn't USDT).
  */
-const STABLECOIN_SYMBOLS = new Set(['USDT', 'USD1', 'lisUSD', 'USDC', 'DAI', 'USDe']);
 function borrowToUsd8dpOrNull(
+  chainId: number,
   assets: bigint,
   decimals: number,
-  symbol: string,
+  loanTokenAddress: Address | undefined,
 ): bigint | null {
-  if (!STABLECOIN_SYMBOLS.has(symbol)) return null;
+  if (!loanTokenAddress) return null;
+  if (!isStablecoin(chainId, loanTokenAddress)) return null;
   // assets * 10^8 / 10^decimals, done without FP.
   if (decimals >= 8) return assets / 10n ** BigInt(decimals - 8);
   return assets * 10n ** BigInt(8 - decimals);
@@ -559,7 +565,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     // (their per-position debt fails the anti-dust floor).
                     const borrowUsd8dp =
                       isMoolah && !edit.isIdle
-                        ? borrowToUsd8dpOrNull(edit.totalBorrowAssets, assetDecimals, assetSymbol)
+                        ? borrowToUsd8dpOrNull(chainId, edit.totalBorrowAssets, assetDecimals, vault?.asset)
                         : null;
                     const showMinLoanWarning =
                       isMoolah &&

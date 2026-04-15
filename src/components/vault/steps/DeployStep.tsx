@@ -308,6 +308,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
                 chainId: state.chainId!,
                 name: state.vaultName,
                 version: 'v1',
+                flavor: 'moolahVault',
               });
             }
             setSteps((prev) =>
@@ -351,6 +352,7 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
               chainId: state.chainId!,
               name: state.vaultName,
               version: state.version,
+              flavor: 'metaMorphoV1' as const,
             };
             addTrackedVault(vault);
           }

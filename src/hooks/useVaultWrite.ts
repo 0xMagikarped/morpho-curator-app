@@ -60,6 +60,12 @@ export interface UseVaultWriteResult {
   /** Component-level breakdown (exposed so UIs can render multiple warnings). */
   isBlacklisted: boolean;
   isPaused: boolean;
+  /**
+   * Set after the most recent `submit()` call returned an `invalid`
+   * preflight (simulation reverted, intent inapplicable for the flavor,
+   * etc). UI renders this as an inline warning.
+   */
+  invalidReason: string | null;
 }
 
 export function useVaultWrite(
@@ -133,6 +139,7 @@ export function useVaultWrite(
     [chainId, vaultAddress, snapshot],
   );
 
+  const [invalidReason, setInvalidReason] = useState<string | null>(null);
   const submit = useCallback(
     async (intent: WriteIntent) => {
       if (!chainId || !vaultAddress) return;
@@ -140,18 +147,17 @@ export function useVaultWrite(
       // but if something slips through (programmatic invocation, stale
       // state), refuse to broadcast a tx that would revert on-chain.
       if (disabled) return;
+      setInvalidReason(null);
       const client = getPublicClient(chainId);
       const prepared = await prepareWrite(vaultAddress, intent, snapshot ?? null, client);
 
+      if (prepared.type === 'invalid') {
+        setInvalidReason(prepared.reason);
+        return;
+      }
+
       if (prepared.type === 'direct') {
-        writeContract({
-          address: prepared.to,
-          abi: prepared.abi as never,
-          functionName: prepared.functionName as never,
-          args: prepared.args as never,
-          chainId,
-          value: prepared.value,
-        });
+        writeDirect(writeContract, prepared, chainId);
         return;
       }
 
@@ -187,6 +193,7 @@ export function useVaultWrite(
 
   const reset = useCallback(() => {
     setPendingOp(null);
+    setInvalidReason(null);
     resetWrite();
   }, [resetWrite]);
 
@@ -206,5 +213,27 @@ export function useVaultWrite(
     disabledTooltip,
     isBlacklisted,
     isPaused,
+    invalidReason,
   };
+}
+
+/**
+ * Bridges wagmi's strictly-typed `writeContract` union to our type-erased
+ * `PreparedWrite.direct` shape. All casts live here so the consumer call
+ * sites (CapsTab, QueuesTab, etc.) stay cast-free and the surface-level
+ * types remain honest.
+ */
+function writeDirect(
+  writeContract: ReturnType<typeof useGuardedWriteContract>['writeContract'],
+  prepared: Extract<PreparedWrite, { type: 'direct' }>,
+  chainId: number,
+): void {
+  writeContract({
+    address: prepared.to,
+    abi: prepared.abi as never,
+    functionName: prepared.functionName as never,
+    args: prepared.args as never,
+    chainId,
+    value: prepared.value,
+  });
 }

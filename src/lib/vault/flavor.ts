@@ -18,6 +18,7 @@ import { getChainConfig, getDefaultVaultFlavor } from '../../config/chains';
 import { getPublicClient } from '../data/rpcClient';
 import { metaMorphoV1Abi } from '../contracts/abis';
 import { moolahVaultAbi } from '../contracts/moolahAbis';
+import { useAppStore } from '../../store/appStore';
 
 /** Zero hash — OZ v4 uses `bytes32(0)` as DEFAULT_ADMIN_ROLE. */
 const DEFAULT_ADMIN_ROLE =
@@ -89,6 +90,17 @@ export function useVaultFlavor(
   chainId: number | undefined,
   vault: Address | undefined,
 ) {
+  // A previously-tracked vault carries a flavor tag set at deploy / track
+  // time. If present, we use it to seed `placeholderData` so consumers
+  // render the correct layout immediately without waiting for the probe.
+  const trackedFlavor = useAppStore((s) => {
+    if (!chainId || !vault) return undefined;
+    const lower = vault.toLowerCase();
+    return s.trackedVaults.find(
+      (v) => v.chainId === chainId && v.address.toLowerCase() === lower,
+    )?.flavor;
+  });
+
   return useQuery({
     queryKey: ['vault-flavor', chainId, vault?.toLowerCase()],
     queryFn: async (): Promise<VaultFlavor> => {
@@ -100,9 +112,11 @@ export function useVaultFlavor(
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 1,
-    // Seed with the chain/known-vault default so consumers get an instant
-    // (usually-correct) value while the probe runs.
-    placeholderData: () =>
-      chainId && vault ? getDefaultVaultFlavor(chainId, vault) : undefined,
+    // Seed with the tracked-vault flavor if available, otherwise fall
+    // back to the chain/known-vault default.
+    placeholderData: () => {
+      if (!chainId || !vault) return undefined;
+      return trackedFlavor ?? getDefaultVaultFlavor(chainId, vault);
+    },
   });
 }

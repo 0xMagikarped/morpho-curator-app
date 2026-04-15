@@ -14,6 +14,7 @@
 import type { Address } from 'viem';
 import type { DecodedArg } from './decodeCall';
 import { getChainConfig } from '../../config/chains';
+import { MOOLAH_BROKERS, MOOLAH_RATE_CALCULATORS } from '../../config/moolah';
 
 export interface AmountHint {
   decimals: number;
@@ -159,6 +160,20 @@ export function resolveAddressLabel(
   // Chain singleton
   if (config.morphoBlue.toLowerCase() === lower) {
     return { label: config.protocol === 'moolah' ? 'Moolah singleton' : 'Morpho Blue', explorerUrl };
+  }
+
+  // Moolah LendingBrokers + RateCalculators published in the static
+  // registry. Each broker is keyed by market pair (e.g. "BTCB/USD1"); we
+  // reuse that label as-is.
+  for (const broker of MOOLAH_BROKERS[chainId] ?? []) {
+    if (broker.address.toLowerCase() === lower) {
+      return { label: `Broker: ${broker.label}`, explorerUrl };
+    }
+  }
+  for (const rc of MOOLAH_RATE_CALCULATORS[chainId] ?? []) {
+    if (rc.address.toLowerCase() === lower) {
+      return { label: rc.label, explorerUrl };
+    }
   }
 
   return { explorerUrl };

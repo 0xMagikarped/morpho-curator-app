@@ -310,7 +310,10 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     chainId: 1672,
     name: 'Pharos',
     protocol: 'morpho',
-    defaultVaultFlavor: 'metaMorphoV1',
+    // No live contracts yet; leave the flavor undefined so callers have
+    // to reach for the null-safe default handler instead of silently
+    // assuming metaMorphoV1.
+    defaultVaultFlavor: undefined,
     rpcUrls: ['https://rpc.pharos.xyz'],
     blockExplorer: 'https://pharosscan.xyz',
     morphoBlue: '0x0000000000000000000000000000000000000000' as Address, // NOT YET DEPLOYED — update when contracts ship

@@ -1,13 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Address } from 'viem';
-import type { Alert, VaultVersion } from '../types';
+import type { Alert, VaultFlavor, VaultVersion } from '../types';
 
 export interface TrackedVault {
   address: Address;
   chainId: number;
   name: string;
   version: VaultVersion;
+  /**
+   * Optional flavor tag. Set by the deploy flow or any caller that knows
+   * the flavor; used by `useVaultFlavor` to seed `placeholderData` and
+   * skip the flavor probe round-trip.
+   */
+  flavor?: VaultFlavor;
 }
 
 /**

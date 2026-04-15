@@ -1,3 +1,10 @@
+// LEGACY: Pre-adapter read layer. New features should use readVaultSnapshot
+// in `src/lib/vault/adapter.ts`. Migration tracked: do NOT remove until
+// fee-management + timelock-management UIs on MetaMorpho chains are
+// snapshot-driven (see `src/components/vault/owner/{FeeManagement,TimelockManagement}.tsx`).
+// The Moolah legacy fallback at `fetchMoolahVaultInfoLegacy` exists
+// solely to keep `useVaultFullData` populated while other consumers
+// migrate — it is NOT authoritative.
 import { createPublicClient, http, fallback, type Address, type PublicClient, type Chain, defineChain } from 'viem';
 import { mainnet, base, bsc } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';

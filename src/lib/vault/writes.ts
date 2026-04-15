@@ -31,15 +31,15 @@
  */
 
 import {
+  encodeAbiParameters,
   encodeFunctionData,
   keccak256,
-  toHex,
-  concat,
+  parseAbiParameters,
   type Address,
   type PublicClient,
 } from 'viem';
 import { metaMorphoV1Abi } from '../contracts/abis';
-import { moolahVaultAbi, timelockControllerAbi } from '../contracts/moolahAbis';
+import { timelockControllerAbi } from '../contracts/moolahAbis';
 import type { VaultSnapshot } from './adapter';
 
 export type WriteIntentKind =
@@ -205,8 +205,24 @@ function encodeVaultCall(intent: WriteIntent): `0x${string}` {
  * returns the same `opId` — handy for dedupe and polling.
  */
 function makeSalt(intent: WriteIntent, vault: Address): `0x${string}` {
-  const payload = toHex(JSON.stringify(intent, (_, v) => (typeof v === 'bigint' ? v.toString() : v)));
-  return keccak256(concat([toHex(vault), payload]));
+  const payload = JSON.stringify(intent, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+  return keccak256(
+    encodeAbiParameters(parseAbiParameters('address, string'), [vault, payload]),
+  );
+}
+
+/**
+ * Parse a revert / simulation error into a short human-readable string.
+ * Viem wraps chain errors in nested causes; pick the first useful one.
+ */
+function parseSimulationError(err: unknown): string {
+  if (!err) return 'Simulation failed.';
+  const e = err as { shortMessage?: string; message?: string; cause?: { shortMessage?: string; message?: string } };
+  const short = e.shortMessage ?? e.cause?.shortMessage;
+  if (short) return short;
+  const full = e.message ?? e.cause?.message ?? String(err);
+  // Trim stack traces / RPC boilerplate.
+  return full.split('\n')[0]?.slice(0, 160) ?? 'Simulation failed.';
 }
 
 export type PreparedWrite =
@@ -217,6 +233,11 @@ export type PreparedWrite =
       functionName: string;
       args: readonly unknown[];
       value: bigint;
+    }
+  | {
+      type: 'invalid';
+      /** Human-readable blocker so UI can render a disabled+tooltipped button. */
+      reason: string;
     }
   | {
       type: 'timelocked';
@@ -249,6 +270,13 @@ export async function prepareWrite(
   client?: PublicClient,
 ): Promise<PreparedWrite> {
   const flavor = snapshot?.flavor ?? 'metaMorphoV1';
+
+  // setManager is a Moolah-only intent — it doesn't exist on MM V1.
+  // Refuse to emit a direct tx on a MetaMorpho vault; UI gets the same
+  // disabled+reason treatment as any other invalid.
+  if (intent.kind === 'setManager' && flavor !== 'moolahVault') {
+    return { type: 'invalid', reason: 'setManager is Moolah-only.' };
+  }
 
   if (flavor === 'metaMorphoV1') {
     // Direct vault call, mirroring today's behavior.
@@ -284,6 +312,27 @@ export async function prepareWrite(
     '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
   const salt = makeSalt(intent, vault);
   const delay = timelockEntry.minDelay;
+
+  // Simulation preflight: run the inner call against the target BEFORE
+  // scheduling. If Moolah has renamed a selector or the curator's inputs
+  // are bad, we catch it now — not after a 1-day timelock delay.
+  // Skipped when no client (unit-test path) or for `setTimelockDelay`
+  // where the inner call is `updateDelay` on the timelock itself, which
+  // only the timelock can call (and thus always reverts under
+  // `eth_call`).
+  if (client && intent.kind !== 'setTimelockDelay') {
+    try {
+      await client.call({
+        to: target,
+        data: calldata,
+      });
+    } catch (err) {
+      return {
+        type: 'invalid',
+        reason: parseSimulationError(err),
+      };
+    }
+  }
 
   // Hash the operation on-chain when a client is available — guarantees we
   // match OZ's keccak across versions (v4 vs v5).
@@ -361,10 +410,11 @@ function directMetaMorpho(vault: Address, intent: WriteIntent): PreparedWrite {
         functionName: 'setCurator', args: [intent.newCurator],
       };
     case 'setManager':
-      return {
-        type: 'direct', to: vault, abi: moolahVaultAbi, value: 0n,
-        functionName: 'setManager' as unknown as 'asset', args: [intent.newManager] as readonly unknown[],
-      };
+      // `setManager` exists only on MoolahVault. On the MetaMorpho direct
+      // path the `prepareWrite` invariant has already intercepted and
+      // returned `{type:'invalid'}`. Keep an unreachable branch so the
+      // switch stays exhaustive without carrying a broken cast.
+      throw new Error('directMetaMorpho: setManager is Moolah-only (should have been intercepted earlier)');
     case 'setIsAllocator':
       return {
         type: 'direct', to: vault, abi: metaMorphoV1Abi, value: 0n,
@@ -388,27 +438,25 @@ function directMetaMorpho(vault: Address, intent: WriteIntent): PreparedWrite {
 }
 
 /**
- * Fallback for hashing ops when the timelock isn't available: OZ v4 layout is
- * `keccak256(abi.encode(target, value, data, predecessor, salt))`. We fake
- * encode by concatenating the canonical forms — not bit-perfect across
- * every OZ version but fine as a dedupe key.
+ * Fallback for hashing ops when the timelock isn't reachable. Matches OZ
+ * TimelockController v4/v5 exactly: `keccak256(abi.encode(address, uint256,
+ * bytes, bytes32, bytes32))`. We prefer the on-chain `hashOperation` path
+ * (see `prepareWrite`) because it's guaranteed to match the target OZ
+ * version; this fallback is only for offline / no-client paths (tests,
+ * dedupe).
  */
-function computeOpIdFallback(
+export function computeOpIdFallback(
   target: Address,
   value: bigint,
   data: `0x${string}`,
   predecessor: `0x${string}`,
   salt: `0x${string}`,
 ): `0x${string}` {
-  return keccak256(
-    concat([
-      toHex(target, { size: 32 }),
-      toHex(value, { size: 32 }),
-      data,
-      predecessor,
-      salt,
-    ]),
+  const encoded = encodeAbiParameters(
+    parseAbiParameters('address, uint256, bytes, bytes32, bytes32'),
+    [target, value, data, predecessor, salt],
   );
+  return keccak256(encoded);
 }
 
 /** Short human-readable label — used in the Pending Proposals panel. */
