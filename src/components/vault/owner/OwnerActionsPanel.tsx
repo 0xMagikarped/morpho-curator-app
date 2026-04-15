@@ -6,6 +6,8 @@ import { PendingActionsBanner } from './PendingActionsBanner';
 import { RoleManagement } from './RoleManagement';
 import { FeeManagement } from './FeeManagement';
 import { TimelockManagement } from './TimelockManagement';
+import { useVaultFlavor } from '../../../lib/vault/flavor';
+import { PendingProposalsPanel } from '../moolah/PendingProposalsPanel';
 
 interface OwnerActionsPanelProps {
   chainId: number;
@@ -16,23 +18,35 @@ interface OwnerActionsPanelProps {
 export function OwnerActionsPanel({ chainId, vaultAddress, isOwner }: OwnerActionsPanelProps) {
   const [expanded, setExpanded] = useState(true);
   const { data: pending, isLoading, refetch } = useVaultPendingState(chainId, vaultAddress);
+  const { data: flavor } = useVaultFlavor(chainId, vaultAddress);
+  const isMoolah = flavor === 'moolahVault';
 
   const handleSuccess = useCallback(() => {
     refetch();
   }, [refetch]);
 
-  if (!isOwner || isLoading || !pending) return null;
+  // Moolah vaults show the Pending Proposals panel to any viewer, regardless
+  // of whether the connected wallet is an admin — transparency over gating.
+  if (!isMoolah && (!isOwner || isLoading || !pending)) return null;
+  if (isMoolah && isLoading) return null;
 
   return (
     <div className="space-y-4">
-      {/* Pending Actions Banner — always visible when there are pending items */}
-      <PendingActionsBanner
-        chainId={chainId}
-        vaultAddress={vaultAddress}
-        pending={pending}
-        isOwner={isOwner}
-        onSuccess={handleSuccess}
-      />
+      {/* MetaMorpho-only: legacy pending actions (submitCap/acceptCap etc.) */}
+      {!isMoolah && pending && (
+        <PendingActionsBanner
+          chainId={chainId}
+          vaultAddress={vaultAddress}
+          pending={pending}
+          isOwner={isOwner}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {/* Moolah-only: TimelockController-scheduled proposals */}
+      {isMoolah && (
+        <PendingProposalsPanel chainId={chainId} vaultAddress={vaultAddress} />
+      )}
 
       {/* Collapsible Owner Section */}
       <div>
@@ -52,29 +66,36 @@ export function OwnerActionsPanel({ chainId, vaultAddress, isOwner }: OwnerActio
             <RoleManagement
               chainId={chainId}
               vaultAddress={vaultAddress}
-              currentCurator={pending.curator}
-              currentFeeRecipient={pending.feeRecipient}
-              currentGuardian={pending.guardian}
+              currentCurator={pending?.curator ?? '0x0000000000000000000000000000000000000000'}
+              currentFeeRecipient={pending?.feeRecipient ?? '0x0000000000000000000000000000000000000000'}
+              currentGuardian={pending?.guardian ?? '0x0000000000000000000000000000000000000000'}
               onSuccess={handleSuccess}
             />
 
-            <FeeManagement
-              chainId={chainId}
-              vaultAddress={vaultAddress}
-              currentFee={pending.fee}
-              currentTimelock={pending.timelock}
-              feeRecipient={pending.feeRecipient}
-              pendingFee={pending.pendingFee}
-              onSuccess={handleSuccess}
-            />
+            {/* Fee + timelock management are MetaMorpho-native. On Moolah
+                these surface through the timelock propose flow — see Stage 5
+                write router + the Moolah role card. */}
+            {!isMoolah && pending && (
+              <>
+                <FeeManagement
+                  chainId={chainId}
+                  vaultAddress={vaultAddress}
+                  currentFee={pending.fee}
+                  currentTimelock={pending.timelock}
+                  feeRecipient={pending.feeRecipient}
+                  pendingFee={pending.pendingFee}
+                  onSuccess={handleSuccess}
+                />
 
-            <TimelockManagement
-              chainId={chainId}
-              vaultAddress={vaultAddress}
-              currentTimelock={pending.timelock}
-              pendingTimelock={pending.pendingTimelock}
-              onSuccess={handleSuccess}
-            />
+                <TimelockManagement
+                  chainId={chainId}
+                  vaultAddress={vaultAddress}
+                  currentTimelock={pending.timelock}
+                  pendingTimelock={pending.pendingTimelock}
+                  onSuccess={handleSuccess}
+                />
+              </>
+            )}
           </div>
         )}
       </div>

@@ -10,6 +10,38 @@ export interface TrackedVault {
   version: VaultVersion;
 }
 
+/**
+ * A TimelockController operation we've scheduled ourselves. Persisted so
+ * the Pending Proposals panel always sees the app's own proposals even when
+ * the RPC prunes older `CallScheduled` logs (frequent on BSC public nodes).
+ *
+ * `opId` is the canonical `hashOperation` bytes32; use it as the key when
+ * merging with on-chain logs to avoid double-counting.
+ */
+export interface ScheduledOp {
+  /** Chain the timelock lives on. */
+  chainId: number;
+  /** The TimelockController address. */
+  timelock: Address;
+  /** The vault the operation targets (only used for grouping in UI). */
+  vault: Address;
+  /** `hashOperation(target, value, data, predecessor, salt)`. */
+  opId: `0x${string}`;
+  target: Address;
+  value: string; // stringified bigint for JSON-safe persistence
+  data: `0x${string}`;
+  predecessor: `0x${string}`;
+  salt: `0x${string}`;
+  /** Delay passed to schedule (seconds). */
+  delay: string;
+  /** Block timestamp of the schedule tx (seconds). */
+  scheduledAt: number;
+  /** Human-readable label for the calldata — best-effort, may be 'Unknown call'. */
+  label: string;
+  /** Schedule tx hash. */
+  txHash?: `0x${string}`;
+}
+
 interface AppState {
   // Tracked vaults (persisted locally via Zustand persist middleware)
   trackedVaults: TrackedVault[];
@@ -39,6 +71,12 @@ interface AppState {
   // UI state
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+
+  // Moolah scheduled timelock operations (persisted per chainId+vault)
+  scheduledOps: ScheduledOp[];
+  addScheduledOp: (op: ScheduledOp) => void;
+  removeScheduledOp: (chainId: number, opId: `0x${string}`) => void;
+  getScheduledOpsForVault: (chainId: number, vault: Address) => ScheduledOp[];
 }
 
 function vaultKey(v: { address: string; chainId: number }): string {
@@ -133,6 +171,27 @@ export const useAppStore = create<AppState>()(
       sidebarCollapsed: false,
       toggleSidebar: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+      // Moolah scheduled ops
+      scheduledOps: [],
+      addScheduledOp: (op) =>
+        set((state) => {
+          const exists = state.scheduledOps.some(
+            (o) => o.chainId === op.chainId && o.opId.toLowerCase() === op.opId.toLowerCase(),
+          );
+          if (exists) return state;
+          return { scheduledOps: [op, ...state.scheduledOps].slice(0, 500) };
+        }),
+      removeScheduledOp: (chainId, opId) =>
+        set((state) => ({
+          scheduledOps: state.scheduledOps.filter(
+            (o) => !(o.chainId === chainId && o.opId.toLowerCase() === opId.toLowerCase()),
+          ),
+        })),
+      getScheduledOpsForVault: (chainId, vault) =>
+        get().scheduledOps.filter(
+          (o) => o.chainId === chainId && o.vault.toLowerCase() === vault.toLowerCase(),
+        ),
     }),
     {
       name: 'morpho-curator-storage',
@@ -141,6 +200,7 @@ export const useAppStore = create<AppState>()(
         dismissedVaults: state.dismissedVaults,
         customRpcUrls: state.customRpcUrls,
         sidebarCollapsed: state.sidebarCollapsed,
+        scheduledOps: state.scheduledOps,
       }),
     },
   ),
