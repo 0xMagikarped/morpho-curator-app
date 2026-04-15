@@ -185,6 +185,143 @@ export const moolahVaultAbi = [
     stateMutability: 'view',
     type: 'function',
   },
+  // ------------------------------------------------------------
+  // Inherited MetaMorpho V1 setters. MoolahVault preserves the MM V1
+  // interface verbatim; we list each one here so the TimeLock decoder
+  // can decode scheduled calls without falling through to the MM V1
+  // ABI (which is scoped to Morpho chains only).
+  // ------------------------------------------------------------
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'loanToken', type: 'address' },
+          { name: 'collateralToken', type: 'address' },
+          { name: 'oracle', type: 'address' },
+          { name: 'irm', type: 'address' },
+          { name: 'lltv', type: 'uint256' },
+        ],
+        name: 'marketParams',
+        type: 'tuple',
+      },
+      { name: 'newSupplyCap', type: 'uint256' },
+    ],
+    name: 'submitCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'loanToken', type: 'address' },
+          { name: 'collateralToken', type: 'address' },
+          { name: 'oracle', type: 'address' },
+          { name: 'irm', type: 'address' },
+          { name: 'lltv', type: 'uint256' },
+        ],
+        name: 'marketParams',
+        type: 'tuple',
+      },
+    ],
+    name: 'acceptCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'id', type: 'bytes32' }],
+    name: 'revokePendingCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newSupplyQueue', type: 'bytes32[]' }],
+    name: 'setSupplyQueue',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'indexes', type: 'uint256[]' }],
+    name: 'updateWithdrawQueue',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        components: [
+          {
+            components: [
+              { name: 'loanToken', type: 'address' },
+              { name: 'collateralToken', type: 'address' },
+              { name: 'oracle', type: 'address' },
+              { name: 'irm', type: 'address' },
+              { name: 'lltv', type: 'uint256' },
+            ],
+            name: 'marketParams',
+            type: 'tuple',
+          },
+          { name: 'assets', type: 'uint256' },
+        ],
+        name: 'allocations',
+        type: 'tuple[]',
+      },
+    ],
+    name: 'reallocate',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFeeRecipient', type: 'address' }],
+    name: 'setFeeRecipient',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newFee', type: 'uint256' }],
+    name: 'setFee',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newCurator', type: 'address' }],
+    name: 'setCurator',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newManager', type: 'address' }],
+    name: 'setManager',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'newAllocator', type: 'address' },
+      { name: 'newIsAllocator', type: 'bool' },
+    ],
+    name: 'setIsAllocator',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newTimelock', type: 'uint256' }],
+    name: 'submitTimelock',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ] as const;
 
 // ============================================================

@@ -45,6 +45,7 @@ export function ProposalContents({ chainId, target, value, data, vaultAddress }:
       chainId={chainId}
       vaultAssetDecimals={assetDecimals}
       vaultAssetSymbol={assetSymbol}
+      snapshotAddress={snapshot?.address ?? vaultAddress}
     />
   );
 }
@@ -54,12 +55,14 @@ function DecodedBlock({
   chainId,
   vaultAssetDecimals,
   vaultAssetSymbol,
+  snapshotAddress,
   depth = 0,
 }: {
   call: DecodedCall;
   chainId: number;
   vaultAssetDecimals?: number;
   vaultAssetSymbol?: string;
+  snapshotAddress?: Address;
   depth?: number;
 }) {
   return (
@@ -80,6 +83,7 @@ function DecodedBlock({
                 allArgs={call.args}
                 chainId={chainId}
                 target={call.target}
+                snapshotAddress={snapshotAddress}
                 vaultAssetDecimals={vaultAssetDecimals}
                 vaultAssetSymbol={vaultAssetSymbol}
               />
@@ -101,6 +105,7 @@ function DecodedBlock({
                 chainId={chainId}
                 vaultAssetDecimals={vaultAssetDecimals}
                 vaultAssetSymbol={vaultAssetSymbol}
+                snapshotAddress={snapshotAddress}
                 depth={depth + 1}
               />
             </div>
@@ -144,6 +149,7 @@ function ArgValue({
   allArgs,
   chainId,
   target,
+  snapshotAddress,
   vaultAssetDecimals,
   vaultAssetSymbol,
 }: {
@@ -152,12 +158,14 @@ function ArgValue({
   allArgs: readonly DecodedArg[];
   chainId: number;
   target: Address;
+  snapshotAddress?: Address;
   vaultAssetDecimals?: number;
   vaultAssetSymbol?: string;
 }) {
   const hint = getArgHint(functionName, arg.name, allArgs, {
     chainId,
     target,
+    snapshotAddress,
     vaultAssetDecimals,
     vaultAssetSymbol,
   });

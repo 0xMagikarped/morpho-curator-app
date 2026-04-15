@@ -48,9 +48,10 @@ export function RolesMoolah({ chainId, vaultAddress }: RolesMoolahProps) {
     );
   }
 
-  const admin = (snapshot.admin && snapshot.admin !== '0x0000000000000000000000000000000000000000')
-    ? snapshot.admin
-    : (vaultAdminFallback ?? snapshot.admin);
+  // `admin` may be null when the vault has no DEFAULT_ADMIN_ROLE member.
+  // Fall back to the Lista-published vaultAdmin from chain config so the
+  // curator can still see the canonical governance address.
+  const admin = snapshot.admin ?? vaultAdminFallback ?? null;
 
   return (
     <Card>
@@ -77,7 +78,11 @@ export function RolesMoolah({ chainId, vaultAddress }: RolesMoolahProps) {
           label="Protocol admin"
           tooltip="Controls the UUPS implementation upgrade. On Lista this is a DAO-controlled Safe, not the vault deployer."
         >
-          <AddressDisplay address={admin} chainId={chainId} />
+          {admin ? (
+            <AddressDisplay address={admin} chainId={chainId} />
+          ) : (
+            <span className="text-[11px] font-mono text-text-tertiary">Not set</span>
+          )}
         </Section>
 
         {/* Curator role */}

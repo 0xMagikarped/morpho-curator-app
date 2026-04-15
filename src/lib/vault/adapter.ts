@@ -69,8 +69,15 @@ export interface VaultSnapshot {
   symbol: string;
   decimals: number;
 
-  /** Protocol admin — vault owner on MetaMorpho, vaultAdmin (DAO Safe) on Moolah. */
-  admin: Address;
+  /**
+   * Protocol admin — vault owner on MetaMorpho, vaultAdmin (DAO Safe) on
+   * Moolah. `null` when no admin detected on-chain — consumers MUST
+   * handle the null case (zero-address is an easy mistake that leaks
+   * into "Not set" UI).
+   */
+  admin: Address | null;
+  /** MetaMorpho-only: pending guardian change, if any. */
+  pendingGuardian?: { value: Address; validAt: bigint };
   /**
    * Curator addresses.
    * - MetaMorpho: `[curator()]` (or empty if zero).
@@ -225,7 +232,7 @@ async function readSnapshotMoolah(
     name,
     symbol,
     decimals,
-    admin: adminMembers[0] ?? ZERO_ADDRESS,
+    admin: adminMembers[0] ?? null,
     curators: curatorMembers,
     managers: managerMembers,
     allocators: uniqueAllocators,
@@ -286,6 +293,15 @@ async function readSnapshotMetaMorphoV1(
       client.readContract({ address: vault, abi: metaMorphoV1Abi, functionName: 'timelock' }).catch(() => 0n) as Promise<bigint>,
     ]);
 
+  // Pending state — MM V1 has vault-level pendingTimelock + pendingGuardian
+  // that the legacy rpcClient helpers already know how to fetch. Populate
+  // the snapshot so UI driven off the adapter doesn't need the legacy path.
+  const { fetchPendingTimelock, fetchPendingGuardian } = await import('../data/rpcClient');
+  const [pendingTimelock, pendingGuardian] = await Promise.all([
+    fetchPendingTimelock(chainId, vault).catch(() => null),
+    fetchPendingGuardian(chainId, vault).catch(() => null),
+  ]);
+
   return {
     flavor: 'metaMorphoV1',
     address: vault,
@@ -294,15 +310,25 @@ async function readSnapshotMetaMorphoV1(
     name,
     symbol,
     decimals,
-    admin: owner,
+    admin: owner === ZERO_ADDRESS ? null : owner,
     curators: curator === ZERO_ADDRESS ? [] : [curator],
     managers: [],
     allocators: [],
     guardians: guardian === ZERO_ADDRESS ? [] : [guardian],
     feeRecipient,
     timelocks: [
-      { label: 'MetaMorpho', address: null, minDelay: timelock },
+      {
+        label: 'MetaMorpho',
+        address: null,
+        minDelay: timelock,
+        pending: pendingTimelock
+          ? { newDelay: pendingTimelock.value, validAt: pendingTimelock.validAt }
+          : undefined,
+      },
     ],
+    pendingGuardian: pendingGuardian
+      ? { value: pendingGuardian.value, validAt: pendingGuardian.validAt }
+      : undefined,
     totalAssets,
     totalSupply,
     fee,

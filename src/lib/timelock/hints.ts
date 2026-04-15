@@ -46,16 +46,38 @@ export interface HintContext {
   chainId: number;
   /** Target contract the call is aimed at. */
   target: Address;
+  /**
+   * The vault whose snapshot drove `vaultAssetDecimals` / `vaultAssetSymbol`.
+   * Set when the surrounding UI knows its page-context vault. We only
+   * apply the decimals hint when `target === snapshotAddress` — a cross-
+   * vault call means we can't trust the page's decimals.
+   */
+  snapshotAddress?: Address;
   /** Vault asset decimals when the target is a MoolahVault we know. */
   vaultAssetDecimals?: number;
   vaultAssetSymbol?: string;
 }
 
+/**
+ * Returns `true` when the snapshot vault's decimals are safe to apply
+ * to the target — i.e. the call is aimed at the same vault whose
+ * snapshot we're rendering. Cross-vault calls (e.g. a proposal on the
+ * curatorTimeLock that targets a *different* vault) have unknown
+ * decimals; we fall back to raw + `(decimals unknown)` rather than
+ * risk a wrong-decode that could mislead a curator into approving a
+ * catastrophic amount.
+ */
+function vaultDecimalsMatchSnapshot(ctx: HintContext): boolean {
+  if (ctx.vaultAssetDecimals == null) return false;
+  if (!ctx.snapshotAddress) return false;
+  return ctx.target.toLowerCase() === ctx.snapshotAddress.toLowerCase();
+}
+
 export const HINTS: Record<string, Record<string, HintFn>> = {
   submitCap: {
     newSupplyCap: (_args, ctx) =>
-      ctx.vaultAssetDecimals != null
-        ? { amount: { decimals: ctx.vaultAssetDecimals, symbol: ctx.vaultAssetSymbol } }
+      vaultDecimalsMatchSnapshot(ctx)
+        ? { amount: { decimals: ctx.vaultAssetDecimals!, symbol: ctx.vaultAssetSymbol } }
         : null,
   },
   setFee: {

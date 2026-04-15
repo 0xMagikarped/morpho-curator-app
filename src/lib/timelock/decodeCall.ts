@@ -10,7 +10,7 @@
  */
 
 import { decodeFunctionData, keccak256, toHex, type Abi, type Address } from 'viem';
-import { KNOWN_ABIS, type KnownAbiEntry } from './abiRegistry';
+import { COLLISION_SELECTORS, KNOWN_ABIS, type KnownAbiEntry } from './abiRegistry';
 
 export interface DecodedArg {
   name: string;
@@ -85,6 +85,10 @@ export function decodeCall(
 ): DecodedCall | null {
   const selector = selectorOf(data);
   if (!selector) return null;
+
+  // Hard stop for known-divergent selectors: we'd rather show an
+  // "Unable to decode" banner than a plausibly-wrong decode.
+  if (COLLISION_SELECTORS.has(selector)) return null;
 
   for (const entry of KNOWN_ABIS) {
     if (!entry.match(target, chainId)) continue;
