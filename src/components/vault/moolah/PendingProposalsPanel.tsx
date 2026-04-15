@@ -128,12 +128,12 @@ function TimelockProposalsSection({
 
 function ProposalRow({
   chainId,
-  vaultAddress,
   timelock,
   proposal,
   onAction,
 }: {
   chainId: number;
+  /** Reserved — currently used by the parent section as a grouping key. */
   vaultAddress: Address;
   timelock: TimelockEntry & { address: Address };
   proposal: TimelockProposal;

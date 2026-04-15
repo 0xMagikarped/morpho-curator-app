@@ -85,15 +85,20 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
     },
   });
 
-  const simData = isMoolah ? moolahSim.data : morphoSim.data;
   const simError = isMoolah ? moolahSim.error : morphoSim.error;
+  const hasSimRequest = isMoolah ? Boolean(moolahSim.data?.request) : Boolean(morphoSim.data?.request);
 
   const { writeContract, data: txHash, isPending, error: writeError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const handleDeploy = () => {
-    if (!simData?.request) return;
-    writeContract(simData.request);
+    if (isMoolah) {
+      if (!moolahSim.data?.request) return;
+      writeContract(moolahSim.data.request);
+    } else {
+      if (!morphoSim.data?.request) return;
+      writeContract(morphoSim.data.request);
+    }
   };
 
   // ------------------------------------------------------------
@@ -177,7 +182,7 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
           <Button
             onClick={handleDeploy}
             disabled={
-              !simData?.request ||
+              !hasSimRequest ||
               isPending ||
               isConfirming ||
               isMismatch ||
