@@ -4,6 +4,7 @@ import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { UtilizationBar } from '../risk/UtilizationBar';
 import { MarketTypeBadge } from '../ui/MarketTypeBadge';
+import { MoolahMarketBadges } from './moolah/MoolahMarketBadges';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi } from '../../lib/hooks/useVault';
 import { formatTokenAmount, formatPercent, truncateAddress, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { getChainConfig } from '../../config/chains';
@@ -133,6 +134,7 @@ export function MarketsTab({ chainId, vaultAddress }: MarketsTabProps) {
                           / {market.loanToken.symbol}
                         </span>
                         <MarketTypeBadge irmAddress={market.params.irm} chainId={chainId} />
+                        <MoolahMarketBadges chainId={chainId} marketId={market.id} />
                       </div>
                     </td>
                     <td className="text-right py-2.5 px-2 text-text-primary font-mono">

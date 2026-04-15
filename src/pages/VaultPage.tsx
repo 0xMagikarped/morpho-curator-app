@@ -18,6 +18,8 @@ import { cn } from '../lib/utils/cn';
 import { getEmergencyRoleLabel } from '../types';
 import { formatApyDisplay, getApyColorClass } from '../lib/utils/format';
 import { isChainDeployed, getChainConfig } from '../config/chains';
+import { ProtocolChip } from '../components/ui/ProtocolChip';
+import { useVaultFlavor } from '../lib/vault/flavor';
 
 type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security';
 
@@ -60,6 +62,7 @@ export function VaultPage() {
 
   const { data: vault, isLoading, error, dataSource } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
+  const { data: vaultFlavor } = useVaultFlavor(chainId, vaultAddress);
   const trackedVaults = useAppStore((s) => s.trackedVaults);
   const addTrackedVault = useAppStore((s) => s.addTrackedVault);
   const removeTrackedVault = useAppStore((s) => s.removeTrackedVault);
@@ -150,9 +153,10 @@ export function VaultPage() {
             {vault?.name ?? (isLoading ? 'Loading...' : 'Vault')}
           </h1>
           {vault && (
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 items-center">
               <Badge variant="info">{chainId}</Badge>
               <Badge>{vault.version.toUpperCase()}</Badge>
+              <ProtocolChip flavor={vaultFlavor} />
               {dataSource === 'rpc' && isApiSupportedChain(chainId) && (
                 <Badge variant="warning" title="API unavailable — data loaded via RPC fallback">RPC</Badge>
               )}
