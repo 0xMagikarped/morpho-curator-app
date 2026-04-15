@@ -17,6 +17,8 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1329: {
     chainId: 1329,
     name: 'SEI',
+    protocol: 'morpho',
+    defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: [
       'https://sei-evm-rpc.publicnode.com',
     ],
@@ -79,6 +81,8 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1: {
     chainId: 1,
     name: 'Ethereum',
+    protocol: 'morpho',
+    defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: ['https://ethereum-rpc.publicnode.com', 'https://eth.llamarpc.com'],
     blockExplorer: 'https://etherscan.io',
     morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
@@ -143,6 +147,8 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   8453: {
     chainId: 8453,
     name: 'Base',
+    protocol: 'morpho',
+    defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: ['https://mainnet.base.org', 'https://base.llamarpc.com'],
     blockExplorer: 'https://basescan.org',
     morphoBlue: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address,
@@ -190,28 +196,71 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   },
 
   // ============================================================
-  // BNB Smart Chain (Chain ID 56) — Lista/Moolah (Morpho Blue fork)
-  // V1 ONLY, NO MORPHO API, NO PUBLIC ALLOCATOR
+  // BNB Smart Chain (Chain ID 56) — Lista DAO Moolah
+  // ============================================================
+  // Moolah is a Morpho Blue + MetaMorpho V1 fork. BNB defaults to
+  // `moolahVault` flavor across the entire app — no vanilla Morpho on BNB.
+  // Addresses verified April 2026 against `lista-dao/moolah` deploy scripts
+  // and `lista-dao/lending-sdk` config. See `docs/bnb-lista-inventory.md`.
   // ============================================================
   56: {
     chainId: 56,
     name: 'BNB Chain',
+    displayName: 'BNB Chain — Lista Moolah',
+    protocol: 'moolah',
+    defaultVaultFlavor: 'moolahVault',
     rpcUrls: [
       'https://bsc.publicnode.com',
       'https://bsc-dataseed1.binance.org',
       'https://bsc-dataseed2.binance.org',
     ],
     blockExplorer: 'https://bscscan.com',
-    // Moolah singleton — use IMPLEMENTATION address for reads.
-    // Proxy 0xf820fB4680712CD7263a0D3D024D5b5aEA82Fd70 is access-controlled and reverts on eth_call.
-    morphoBlue: '0x8f73b65b4caaf64fba2af91cc5d4a2a1318e5d8c' as Address,
+    // Moolah singleton (ERC1967 proxy) — callable for reads and writes.
+    morphoBlue: '0x8F73b65B4caAf64FBA2aF91cC5D4a2A1318E5D8C' as Address,
     deployed: true,
     vaultFactories: {
       v1: '0x2a0Cb6401FD3c6196750dc6b46702040761D9671' as Address, // MoolahVaultFactory
     },
     periphery: {
-      adaptiveCurveIrm: '0x8b7d334d243b74D63C4b963893267A0F5240F990' as Address,
-      fixedRateIrm: ['0x9A7cA2CfB886132B6024789163e770979E4222e1' as Address],
+      // BSC-specific IRMs (previously cross-wired with Ethereum values).
+      adaptiveCurveIrm: '0xFe7dAe87Ebb11a7BEB9F534BB23267992d9cDe7c' as Address,
+      fixedRateIrm: ['0x5F9f9173B405C6CEAfa7f98d09e4B8447e9797E6' as Address],
+    },
+    moolah: {
+      // MarketFactory proxy is OPERATOR-gated and NOT in Lista's public SDK.
+      // Populate via VITE_BNB_MARKET_FACTORY at deploy time. Left undefined here.
+      marketFactory: (import.meta.env?.VITE_BNB_MARKET_FACTORY ?? undefined) as Address | undefined,
+      vaultAllocator: '0x9ECF66f016FCaA853FdA24d223bdb4276E5b524a' as Address,
+      vaultAdmin: '0x07D274a68393E8b8a2CCf19A2ce4Ba3518735253' as Address,
+      vaultImpl: '0xA1f832c7C7ECf91A53b4ff36E0ABdb5133C15982' as Address,
+      brokerRateCalculator: '0xF81A3067ACF683B7f2f40a22bCF17c8310be2330' as Address,
+      fixedRateIrm: '0x5F9f9173B405C6CEAfa7f98d09e4B8447e9797E6' as Address,
+      liquidators: {
+        liquidator: '0x6a87C15598929B2db22cF68a9a0dDE5Bf297a59a' as Address,
+        publicLiquidator: '0x882475d622c687b079f149B69a15683FCbeCC6D9' as Address,
+        brokerLiquidator: '0x3AA647a1e902833b61E503DbBFbc58992daa4868' as Address,
+      },
+      revenue: {
+        revenueDistributor: '0x34B504A5CF0fF41F8A480580533b6Dda687fa3Da' as Address,
+        buyback: '0x3b99A4177E3f430590A8473f353dD87a5a2e1BfC' as Address,
+        autoBuyback: '0xFfd3a57E8DB4f51FA01c72F06Ff30BDFDa9908e6' as Address,
+      },
+      providers: {
+        BNB: '0x367384C54756a25340c63057D87eA22d47Fd5701' as Address,
+        slisBNB: '0x33f7A980a246f9B8FEA2254E3065576E127D4D5f' as Address,
+        smartProvider: '0xcc93cb664Ed2abF4F428440A7868fdc3c30e5a1b' as Address,
+      },
+      roles: {
+        operator: '0x8d388136d578dCD791D081c6042284CED6d9B0c6' as Address,
+        pauser: '0xEEfebb1546d88EA0909435DF6f615084DD3c5Bd8' as Address,
+      },
+      docsUrl: 'https://docs.bsc.lista.org/',
+    },
+    knownVaults: {
+      '0x57134a64b7cd9f9eb72f8255a671f5bf2fe3e2d0': { flavor: 'moolahVault', label: 'Lista DAO BNB Vault' },
+      '0xfa27f172e0b6ebcef9c51abf817e2cb142fbe627': { flavor: 'moolahVault', label: 'Lista USD1 Vault' },
+      '0x02a5ca3a749855d1002a78813e679584a96646d0': { flavor: 'moolahVault', label: 'Re7 USD1' },
+      '0xce51d66343ed1ffaf82432b7436b5a128445ef2b': { flavor: 'moolahVault', label: 'Native BSC USDT' },
     },
     apiSupported: false,
     blockTime: 3_000,
@@ -254,6 +303,8 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   1672: {
     chainId: 1672,
     name: 'Pharos',
+    protocol: 'morpho',
+    defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: ['https://rpc.pharos.xyz'],
     blockExplorer: 'https://pharosscan.xyz',
     morphoBlue: '0x0000000000000000000000000000000000000000' as Address, // NOT YET DEPLOYED — update when contracts ship
@@ -342,4 +393,26 @@ export function getSupportedChainIds(): number[] {
 export function isChainDeployed(chainId: number): boolean {
   const config = CHAIN_CONFIGS[chainId];
   return config != null && config.deployed;
+}
+
+/** Protocol family for a chain — 'morpho' (default) or 'moolah' (BNB/Lista). */
+export function getChainProtocol(chainId: number): 'morpho' | 'moolah' {
+  return CHAIN_CONFIGS[chainId]?.protocol ?? 'morpho';
+}
+
+/**
+ * Pre-detection flavor fallback: known-vault override > chain default > metaMorphoV1.
+ * Used before the on-chain probe in `src/lib/vault/flavor.ts` completes.
+ */
+export function getDefaultVaultFlavor(
+  chainId: number,
+  vaultAddress?: Address,
+): 'metaMorphoV1' | 'moolahVault' {
+  const config = CHAIN_CONFIGS[chainId];
+  if (!config) return 'metaMorphoV1';
+  if (vaultAddress) {
+    const override = config.knownVaults?.[vaultAddress.toLowerCase()];
+    if (override) return override.flavor;
+  }
+  return config.defaultVaultFlavor ?? 'metaMorphoV1';
 }

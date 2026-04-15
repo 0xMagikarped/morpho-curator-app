@@ -4,9 +4,75 @@ import type { Address } from 'viem';
 // Chain Configuration
 // ============================================================
 
+/**
+ * Vault flavor = singleton + vault protocol family.
+ * Branching point for every role read and write path.
+ * - `metaMorphoV1` — Ownable owner/curator/guardian, single vault-level timelock.
+ * - `moolahVault`  — Lista fork: AccessControlEnumerable, two external
+ *   TimelockController contracts (manager + curator), extended surfaces
+ *   (whitelists, providers, brokers, minLoanValue, pausable protocol).
+ */
+export type VaultFlavor = 'metaMorphoV1' | 'moolahVault';
+
+/**
+ * Protocol family for a chain's deployment. Drives chain-level surfaces
+ * (pause banner, market creation path, branding) independent of vault flavor.
+ */
+export type ChainProtocol = 'morpho' | 'moolah';
+
+/** Per-vault override: force a specific flavor regardless of detection. */
+export interface KnownVaultEntry {
+  flavor: VaultFlavor;
+  label?: string;
+}
+
+/** Lista-only contract addresses, grouped so they never leak into Morpho chains. */
+export interface MoolahChainConfig {
+  /** MarketFactory proxy (OPERATOR-gated). Optional because Lista doesn't
+   * publish this address in their SDK; populated via VITE_BNB_MARKET_FACTORY. */
+  marketFactory?: Address;
+  /** Lista PublicAllocator equivalent. */
+  vaultAllocator?: Address;
+  /** Lista DAO Safe — controls singleton UUPS upgrades + vault impl. */
+  vaultAdmin: Address;
+  /** Current shared implementation that MoolahVault proxies delegate to. */
+  vaultImpl: Address;
+  /** Broker rate calculator used for fixed-term markets. */
+  brokerRateCalculator?: Address;
+  /** ALPHA_IRM / FixedRateIRM (fixed-term markets). */
+  fixedRateIrm?: Address;
+  /** Liquidator stack. */
+  liquidators: {
+    liquidator: Address;
+    publicLiquidator: Address;
+    brokerLiquidator: Address;
+  };
+  /** Revenue routing: liquidator → revenueDistributor → buyback/autoBuyback → LISTA. */
+  revenue: {
+    revenueDistributor: Address;
+    buyback: Address;
+    autoBuyback: Address;
+  };
+  /** LST auto-yield providers keyed by symbol. */
+  providers?: Record<string, Address>;
+  /** Role holders. */
+  roles: {
+    operator: Address;
+    pauser: Address;
+  };
+  /** Published docs landing page. */
+  docsUrl?: string;
+}
+
 export interface ChainConfig {
   chainId: number;
   name: string;
+  /** Optional display label (e.g., "BNB Chain — Lista Moolah"). Defaults to `name`. */
+  displayName?: string;
+  /** Protocol family this chain runs. Defaults to 'morpho'. */
+  protocol?: ChainProtocol;
+  /** Vault flavor to assume when detection hasn't run yet (safety net). */
+  defaultVaultFlavor?: VaultFlavor;
   rpcUrls: string[];
   /** Separate RPC for getLogs if the primary RPC doesn't support it (e.g., SEI) */
   eventRpcUrl?: string;
@@ -30,6 +96,10 @@ export interface ChainConfig {
     /** FixedRateIRM contract address(es) — markets using these IRMs are fixed-rate */
     fixedRateIrm?: Address[];
   };
+  /** Lista Moolah addresses. Only populated when `protocol === 'moolah'`. */
+  moolah?: MoolahChainConfig;
+  /** Per-vault flavor overrides (lowercased address → entry). */
+  knownVaults?: Record<string, KnownVaultEntry>;
   /** False if contracts are not yet deployed on this chain (e.g., Pharos). */
   deployed: boolean;
   apiSupported: boolean;
