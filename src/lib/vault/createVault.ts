@@ -7,8 +7,22 @@ import {
   type TransactionReceipt,
   type Address,
 } from 'viem';
-import { metaMorphoFactoryAbi, metaMorphoV1Abi, metaMorphoV2FactoryAbi, metaMorphoV2Abi } from '../contracts/abis';
+import {
+  metaMorphoFactoryAbi,
+  metaMorphoV1Abi,
+  metaMorphoV2FactoryAbi,
+  metaMorphoV2Abi,
+  moolahVaultFactoryAbi,
+  MOOLAH_MIN_TIMELOCK_DELAY,
+} from '../contracts/abis';
 import { getChainConfig } from '../../config/chains';
+
+/** Chains that use the Lista DAO Moolah factory (fork of MetaMorpho). */
+const MOOLAH_CHAIN_IDS = new Set<number>([56]);
+
+export function isMoolahChain(chainId: number): boolean {
+  return MOOLAH_CHAIN_IDS.has(chainId);
+}
 
 // ============================================================
 // Types
@@ -83,6 +97,21 @@ export function computeMarketId(params: MarketParamsStruct): `0x${string}` {
 // ============================================================
 
 export function parseVaultAddressFromReceipt(receipt: TransactionReceipt): `0x${string}` | null {
+  // Try Moolah (BNB) event first, then MetaMorpho — cheap to try both
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: moolahVaultFactoryAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'CreateMoolahVault') {
+        return (decoded.args as { moolahVault: `0x${string}` }).moolahVault;
+      }
+    } catch {
+      // not Moolah event, try next
+    }
+  }
   for (const log of receipt.logs) {
     try {
       const decoded = decodeEventLog({
@@ -95,6 +124,39 @@ export function parseVaultAddressFromReceipt(receipt: TransactionReceipt): `0x${
       }
     } catch {
       // Not our event, skip
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse the full Moolah create result — vault proxy plus manager + curator TimeLocks.
+ * Returns null if the event isn't present (e.g. for non-Moolah chains).
+ */
+export function parseMoolahVaultFromReceipt(receipt: TransactionReceipt):
+  | { vault: `0x${string}`; managerTimeLock: `0x${string}`; curatorTimeLock: `0x${string}` }
+  | null {
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: moolahVaultFactoryAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'CreateMoolahVault') {
+        const args = decoded.args as {
+          moolahVault: `0x${string}`;
+          managerTimeLock: `0x${string}`;
+          curatorTimeLock: `0x${string}`;
+        };
+        return {
+          vault: args.moolahVault,
+          managerTimeLock: args.managerTimeLock,
+          curatorTimeLock: args.curatorTimeLock,
+        };
+      }
+    } catch {
+      // skip
     }
   }
   return null;
@@ -113,6 +175,11 @@ export function buildDeploymentTxSequence(
 
   const factoryAddress = chainConfig.vaultFactories.v1;
   if (!factoryAddress) throw new Error(`No V1 factory on chain ${params.chainId}`);
+
+  // BNB Chain uses the Lista DAO Moolah factory — different signature, different post-deploy model.
+  if (isMoolahChain(params.chainId)) {
+    return buildMoolahDeploymentTxSequence(params, config, factoryAddress);
+  }
 
   const steps: TransactionStep[] = [];
   let stepIndex = 0;
@@ -513,4 +580,76 @@ export function buildV2DeploymentTxSequence(
   }
 
   return steps;
+}
+
+// ============================================================
+// Moolah (BNB) deployment
+// ------------------------------------------------------------
+// Lista's MoolahVaultFactory differs from MetaMorpho V1:
+//   - Single atomic tx creates the vault *and* wires up manager/curator/guardian
+//     via two TimeLock contracts (one per role), each with minDelay == timeLockDelay.
+//   - No post-deploy multicall is needed or possible from the deployer:
+//     the factory revokes its own roles and hands control to the TimeLocks.
+//     Subsequent changes (caps, fees, allocators) must be proposed through the
+//     appropriate TimeLock (curator / manager) — handled in a separate flow.
+//   - Constraint: timeLockDelay >= 86400 (1 day).
+//   - Constraint: asset.decimals() == 18.
+// ============================================================
+
+export interface MoolahCreationParams {
+  chainId: number;
+  /** Address that will hold the MANAGER role (proposes reallocations, similar to V1 allocator). */
+  manager: `0x${string}`;
+  /** Address that will hold the CURATOR role (proposes caps, fees, new markets). */
+  curator: `0x${string}`;
+  /** Address granted CANCELLER_ROLE on both TimeLocks. Zero = no guardian (leaves role unfilled). */
+  guardian: `0x${string}`;
+  /** TimeLock minDelay in seconds, applied to both manager and curator TimeLocks. Must be >= 86400. */
+  timeLockDelay: bigint;
+  /** Vault underlying asset. MUST be an 18-decimal ERC20. */
+  asset: `0x${string}`;
+  name: string;
+  symbol: string;
+}
+
+export function buildMoolahDeploymentTxSequence(
+  params: VaultCreationParams,
+  config: PostDeployConfig,
+  factoryAddress: Address,
+): TransactionStep[] {
+  // Map generic wizard params → Moolah role model.
+  // - manager: first allocator if provided, else owner (manager is closest to V1 allocator)
+  // - curator: explicit curator if set, else owner
+  // - guardian: explicit guardian if set, else owner (avoids leaving CANCELLER_ROLE unfilled)
+  const manager = config.allocators?.[0] ?? params.initialOwner;
+  const curator = config.curator ?? params.initialOwner;
+  const guardian = config.guardian ?? params.initialOwner;
+
+  // Clamp delay to Moolah's hard minimum (1 day).
+  const timeLockDelay =
+    params.initialTimelock < MOOLAH_MIN_TIMELOCK_DELAY
+      ? MOOLAH_MIN_TIMELOCK_DELAY
+      : params.initialTimelock;
+
+  const data = encodeFunctionData({
+    abi: moolahVaultFactoryAbi,
+    functionName: 'createMoolahVault',
+    args: [manager, curator, guardian, timeLockDelay, params.asset, params.name, params.symbol],
+  });
+
+  return [
+    {
+      id: 'step-0',
+      label: 'Deploy Moolah vault via factory',
+      to: factoryAddress,
+      data,
+      status: 'pending',
+      operations: [
+        `Manager: ${manager}`,
+        `Curator: ${curator}`,
+        `Guardian: ${guardian}`,
+        `TimeLock delay: ${formatTimelockDuration(Number(timeLockDelay))}`,
+      ],
+    },
+  ];
 }

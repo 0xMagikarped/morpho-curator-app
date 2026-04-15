@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
 import { createPublicClient, custom, type TransactionReceipt, type Hash, type EIP1193Provider } from 'viem';
-import { mainnet, base } from 'viem/chains';
+import { mainnet, base, bsc } from 'viem/chains';
 import { CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -16,12 +16,14 @@ import {
   parseVaultAddressFromReceipt,
   parseV2VaultAddressFromReceipt,
   feePercentToWad,
+  isMoolahChain,
   type TransactionStep,
   type PostDeployConfig,
   type VaultCreationParams,
   type V2VaultCreationParams,
   type V2PostDeployConfig,
 } from '../../../lib/vault/createVault';
+import { MOOLAH_MIN_TIMELOCK_DELAY } from '../../../lib/contracts/abis';
 import { generateRandomSalt } from '../../../lib/vault/vaultSaltGenerator';
 import { useAppStore } from '../../../store/appStore';
 import type { WizardState } from '../CreateVaultWizard';
@@ -33,7 +35,12 @@ interface DeployStepProps {
 
 type DeployStatus = 'idle' | 'deploying' | 'complete' | 'failed';
 
-const VIEM_CHAINS: Record<number, typeof mainnet | typeof base | typeof sei> = { 1: mainnet, 8453: base, 1329: sei };
+const VIEM_CHAINS: Record<number, typeof mainnet | typeof base | typeof sei | typeof bsc> = {
+  1: mainnet,
+  8453: base,
+  1329: sei,
+  56: bsc,
+};
 
 function getExplorerTxUrl(chainId: number | null, txHash: string): string | null {
   if (!chainId) return null;
@@ -104,6 +111,12 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
 
   const chainConfig = state.chainId ? getChainConfig(state.chainId) : null;
   const isV2 = state.version === 'v2';
+  const isMoolah = state.chainId != null && isMoolahChain(state.chainId) && !isV2;
+
+  // Moolah preflight: asset must be 18-decimal, delay >= 1 day (auto-clamped)
+  const moolahAssetBlocked = isMoolah && state.assetDecimals !== 18;
+  const moolahDelayClamped =
+    isMoolah && BigInt(state.initialTimelockSeconds) < MOOLAH_MIN_TIMELOCK_DELAY;
 
   // Build steps from state
   const buildSteps = useCallback((salt: `0x${string}`) => {
@@ -357,6 +370,32 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
         </p>
       )}
 
+      {/* Moolah-specific preflight */}
+      {isMoolah && status === 'idle' && (
+        <div className="bg-info/10 p-3 text-xs space-y-1 text-text-secondary">
+          <p>
+            <strong>BNB / Lista Moolah:</strong> single atomic deploy. Factory creates two
+            TimeLocks (manager + curator) and revokes its own roles — no post-deploy multicall.
+          </p>
+          <p>
+            Manager/curator/guardian role changes, caps, and fees must be proposed through the
+            respective TimeLock after deploy.
+          </p>
+          {moolahDelayClamped && (
+            <p className="text-warning">
+              Timelock {state.initialTimelockSeconds}s is below Moolah's 86 400 s (1 d) minimum —
+              will be clamped to 1 day at deploy.
+            </p>
+          )}
+          {moolahAssetBlocked && (
+            <p className="text-danger">
+              Asset {state.assetSymbol} has {state.assetDecimals} decimals. Moolah factory rejects
+              any asset whose decimals() != 18. Pick an 18-decimal asset (USDT, USD1, WBNB, lisUSD).
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Vault address */}
       {vaultAddress && (
         <div className="bg-success/15 p-3 text-xs">
@@ -463,8 +502,12 @@ export function DeployStep({ state, onBack }: DeployStepProps) {
             <Button variant="secondary" onClick={onBack}>
               Back
             </Button>
-            <Button onClick={executeSteps} disabled={!walletClient}>
-              {walletClient ? 'Start Deployment' : 'Connect Wallet'}
+            <Button onClick={executeSteps} disabled={!walletClient || moolahAssetBlocked}>
+              {!walletClient
+                ? 'Connect Wallet'
+                : moolahAssetBlocked
+                  ? 'Asset decimals must be 18'
+                  : 'Start Deployment'}
             </Button>
           </>
         )}
