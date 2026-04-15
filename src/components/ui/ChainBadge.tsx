@@ -1,4 +1,5 @@
 import { cn } from '../../lib/utils/cn';
+import { getChainConfig } from '../../config/chains';
 
 const chainColors: Record<number, { dot: string; bg: string; text: string; label: string }> = {
   1329: { dot: 'bg-chain-sei', bg: 'bg-chain-sei/10', text: 'text-chain-sei', label: 'SEI' },
@@ -11,14 +12,24 @@ const chainColors: Record<number, { dot: string; bg: string; text: string; label
 interface ChainBadgeProps {
   chainId: number;
   className?: string;
+  /** Show the protocol suffix — "BNB · LISTA", "ETH · MORPHO", etc. */
+  showProtocol?: boolean;
 }
 
-export function ChainBadge({ chainId, className }: ChainBadgeProps) {
+export function ChainBadge({ chainId, className, showProtocol }: ChainBadgeProps) {
   const config = chainColors[chainId];
+  const chainConfig = getChainConfig(chainId);
+  const suffix =
+    showProtocol && chainConfig?.protocol === 'moolah'
+      ? ' · LISTA'
+      : showProtocol && chainConfig?.protocol === 'morpho'
+        ? ' · MORPHO'
+        : '';
+
   if (!config) {
     return (
       <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-text-secondary bg-bg-hover', className)}>
-        {chainId}
+        {chainId}{suffix}
       </span>
     );
   }
@@ -26,7 +37,7 @@ export function ChainBadge({ chainId, className }: ChainBadgeProps) {
   return (
     <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px]', config.bg, config.text, className)}>
       <span className={cn('w-1.5 h-1.5', config.dot)} />
-      {config.label}
+      {config.label}{suffix}
     </span>
   );
 }

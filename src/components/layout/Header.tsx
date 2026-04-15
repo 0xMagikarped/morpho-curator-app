@@ -19,7 +19,7 @@ export function Header() {
       <div className="flex items-center gap-3">
         {isConnected && chainConfig && (
           <div className="flex items-center gap-2">
-            <ChainBadge chainId={chainId} />
+            <ChainBadge chainId={chainId} showProtocol />
             {!chainConfig.apiSupported && (
               <span className="text-[10px] px-1.5 py-0.5 bg-warning/15 text-warning font-medium">
                 RPC Only
