@@ -539,6 +539,20 @@ export const timelockControllerAbi = [
   },
   {
     inputs: [
+      { name: 'targets', type: 'address[]' },
+      { name: 'values', type: 'uint256[]' },
+      { name: 'payloads', type: 'bytes[]' },
+      { name: 'predecessor', type: 'bytes32' },
+      { name: 'salt', type: 'bytes32' },
+      { name: 'delay', type: 'uint256' },
+    ],
+    name: 'scheduleBatch',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
       { name: 'target', type: 'address' },
       { name: 'value', type: 'uint256' },
       { name: 'payload', type: 'bytes' },
@@ -551,8 +565,28 @@ export const timelockControllerAbi = [
     type: 'function',
   },
   {
+    inputs: [
+      { name: 'targets', type: 'address[]' },
+      { name: 'values', type: 'uint256[]' },
+      { name: 'payloads', type: 'bytes[]' },
+      { name: 'predecessor', type: 'bytes32' },
+      { name: 'salt', type: 'bytes32' },
+    ],
+    name: 'executeBatch',
+    outputs: [],
+    stateMutability: 'payable',
+    type: 'function',
+  },
+  {
     inputs: [{ name: 'id', type: 'bytes32' }],
     name: 'cancel',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newDelay', type: 'uint256' }],
+    name: 'updateDelay',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

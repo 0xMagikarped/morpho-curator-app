@@ -3,10 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useAccount } from 'wagmi';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import type { Address } from 'viem';
-import { Clock, CheckCircle2, XCircle, ChevronRight } from 'lucide-react';
+import { Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { ProposalContents } from './ProposalContents';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Button } from '../../ui/Button';
-import { AddressDisplay } from '../../ui/AddressDisplay';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { getPublicClient } from '../../../lib/data/rpcClient';
 import { useVaultSnapshot, type TimelockEntry } from '../../../lib/vault/adapter';
@@ -128,12 +128,12 @@ function TimelockProposalsSection({
 
 function ProposalRow({
   chainId,
+  vaultAddress,
   timelock,
   proposal,
   onAction,
 }: {
   chainId: number;
-  /** Reserved — currently used by the parent section as a grouping key. */
   vaultAddress: Address;
   timelock: TimelockEntry & { address: Address };
   proposal: TimelockProposal;
@@ -204,16 +204,15 @@ function ProposalRow({
   return (
     <div className="px-3 py-2 bg-bg-hover border border-border-subtle">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[11px] font-mono text-text-primary">
-            <ChevronRight size={11} className="text-text-tertiary" />
-            <span className="truncate">{proposal.label}</span>
-          </div>
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-text-tertiary">
-            <span>→</span>
-            <AddressDisplay address={proposal.target} chainId={chainId} />
-          </div>
-          <div className="mt-1 flex items-center gap-1 text-[10px]">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <ProposalContents
+            chainId={chainId}
+            target={proposal.target}
+            value={proposal.value}
+            data={proposal.data}
+            vaultAddress={vaultAddress}
+          />
+          <div className="flex items-center gap-1 text-[10px]">
             {proposal.isReady ? (
               <>
                 <CheckCircle2 size={10} className="text-success" />
