@@ -47,6 +47,40 @@ export function useMoolahSingletonState(chainId: number | undefined) {
   });
 }
 
+/**
+ * Is the given vault on Lista's vaultBlacklist?
+ * Returns `false` on non-Moolah chains so consumers can render the
+ * "not-blocked" path unconditionally.
+ */
+export function useIsVaultBlacklisted(
+  chainId: number | undefined,
+  vault: Address | undefined,
+) {
+  const config = chainId ? getChainConfig(chainId) : undefined;
+  const singleton = config?.morphoBlue;
+  const isMoolah = config?.protocol === 'moolah';
+
+  return useQuery({
+    queryKey: ['moolah-vault-blacklist', chainId, vault?.toLowerCase()],
+    queryFn: async (): Promise<boolean> => {
+      if (!chainId || !vault || !singleton) return false;
+      const client = getPublicClient(chainId);
+      try {
+        return (await client.readContract({
+          address: singleton,
+          abi: moolahSingletonAbi,
+          functionName: 'vaultBlacklist',
+          args: [vault],
+        })) as boolean;
+      } catch {
+        return false;
+      }
+    },
+    enabled: Boolean(isMoolah && singleton && vault),
+    staleTime: 5 * 60_000,
+  });
+}
+
 export interface MoolahMarketSurfaces {
   marketWhitelistEnabled: boolean;
   /** Provider contract attached to the market, or null. */

@@ -7,6 +7,7 @@ import { MarketsTab } from '../components/vault/MarketsTab';
 import { CapsTab } from '../components/vault/CapsTab';
 import { ReallocateTab } from '../components/vault/ReallocateTab';
 import { GuardianTab } from '../components/vault/GuardianTab';
+import { ProtocolTab } from '../components/vault/ProtocolTab';
 import { V2AdaptersTab } from '../components/vault/V2AdaptersTab';
 import { V2SecurityTab } from '../components/vault/V2SecurityTab';
 import { V2AllocationTab } from '../components/vault/V2AllocationTab';
@@ -20,8 +21,10 @@ import { formatApyDisplay, getApyColorClass } from '../lib/utils/format';
 import { isChainDeployed, getChainConfig } from '../config/chains';
 import { ProtocolChip } from '../components/ui/ProtocolChip';
 import { useVaultFlavor } from '../lib/vault/flavor';
+import { useIsVaultBlacklisted } from '../lib/hooks/useMoolahSingleton';
+import { Lock } from 'lucide-react';
 
-type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security';
+type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security' | 'protocol';
 
 interface TabDef {
   id: TabId;
@@ -30,6 +33,8 @@ interface TabDef {
   requiresRole?: keyof ReturnType<typeof useVaultRole>;
   v1Only?: boolean;
   v2Only?: boolean;
+  /** Only render on chains whose `protocol` field matches one of these values. */
+  protocols?: Array<'morpho' | 'moolah'>;
 }
 
 const TABS: TabDef[] = [
@@ -42,6 +47,7 @@ const TABS: TabDef[] = [
   { id: 'reallocate', label: 'Reallocate', requiresRole: 'isAllocator', v1Only: true },
   { id: 'guardian', label: 'Guardian', requiresRole: 'isEmergencyRole', v1Only: true },
   { id: 'security', label: 'Security', requiresRole: 'isEmergencyRole', v2Only: true },
+  { id: 'protocol', label: 'Protocol', protocols: ['moolah'] },
 ];
 
 export function VaultPage() {
@@ -49,7 +55,7 @@ export function VaultPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const VALID_TABS: TabId[] = ['overview', 'markets', 'caps', 'adapters', 'allocation', 'queues', 'reallocate', 'guardian', 'security'];
+  const VALID_TABS: TabId[] = ['overview', 'markets', 'caps', 'adapters', 'allocation', 'queues', 'reallocate', 'guardian', 'security', 'protocol'];
   const tabParam = searchParams.get('tab') as TabId | null;
   const activeTab: TabId = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'overview';
 
@@ -63,6 +69,8 @@ export function VaultPage() {
   const { data: vault, isLoading, error, dataSource } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
   const { data: vaultFlavor } = useVaultFlavor(chainId, vaultAddress);
+  const { data: isBlacklisted } = useIsVaultBlacklisted(chainId, vaultAddress);
+  const chainConfig = chainId ? getChainConfig(chainId) : undefined;
   const trackedVaults = useAppStore((s) => s.trackedVaults);
   const addTrackedVault = useAppStore((s) => s.addTrackedVault);
   const removeTrackedVault = useAppStore((s) => s.removeTrackedVault);
@@ -185,11 +193,25 @@ export function VaultPage() {
         </Button>
       </div>
 
+      {/* Blacklist banner — writes will revert on-chain. */}
+      {isBlacklisted && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 border border-danger/30 text-xs text-danger">
+          <Lock size={14} className="shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold">Blocked by Lista.</span>{' '}
+            This vault is on the Moolah singleton's vault blacklist.
+            Writes (propose / execute, caps, reallocate) will revert on-chain.
+            Contact Lista DAO to request removal.
+          </div>
+        </div>
+      )}
+
       {/* Tab Navigation */}
       <div className="flex gap-1 border-b border-border-subtle">
         {TABS.map((tab) => {
           if (tab.v2Only && !isV2) return null;
           if (tab.v1Only && isV2) return null;
+          if (tab.protocols && !tab.protocols.includes(chainConfig?.protocol ?? 'morpho')) return null;
 
           const label = isV2 && tab.v2Label ? tab.v2Label : tab.label;
           const hasAccess =
@@ -246,6 +268,9 @@ export function VaultPage() {
         )}
         {activeTab === 'security' && isV2 && (
           <V2SecurityTab chainId={chainId} vaultAddress={vaultAddress} />
+        )}
+        {activeTab === 'protocol' && chainConfig?.protocol === 'moolah' && (
+          <ProtocolTab chainId={chainId} />
         )}
       </div>
     </div>

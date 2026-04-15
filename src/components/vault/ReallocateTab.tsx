@@ -22,6 +22,28 @@ import {
 import { PublicAllocatorPanel } from './PublicAllocatorPanel';
 import { getMarketRateType } from '../../lib/utils/irm';
 import { getChainConfig } from '../../config/chains';
+import { useVaultFlavor } from '../../lib/vault/flavor';
+import { useMoolahSingletonState } from '../../lib/hooks/useMoolahSingleton';
+import { AlertTriangle } from 'lucide-react';
+
+/**
+ * Moolah's `minLoanValue` is an 8-decimal oracle-scaled USD figure (seeded
+ * at 15e8 = $1.50). To decide whether a market's total borrow is below the
+ * anti-dust floor we need to put the borrow in the same 8dp USD scale.
+ * For stablecoin loan tokens (~$1) we assume parity; for anything else we
+ * return null and the warning stays hidden — better silent than wrong.
+ */
+const STABLECOIN_SYMBOLS = new Set(['USDT', 'USD1', 'lisUSD', 'USDC', 'DAI', 'USDe']);
+function borrowToUsd8dpOrNull(
+  assets: bigint,
+  decimals: number,
+  symbol: string,
+): bigint | null {
+  if (!STABLECOIN_SYMBOLS.has(symbol)) return null;
+  // assets * 10^8 / 10^decimals, done without FP.
+  if (decimals >= 8) return assets / 10n ** BigInt(decimals - 8);
+  return assets * 10n ** BigInt(8 - decimals);
+}
 
 interface ReallocateTabProps {
   chainId: number;
@@ -183,6 +205,13 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const sdkSupported = isMorphoSdkSupported(chainId);
   const assetDecimals = vault?.assetInfo.decimals ?? 18;
   const assetSymbol = vault?.assetInfo.symbol ?? '???';
+
+  // Moolah-only: we surface a minLoanValue warning on low-borrow markets.
+  const { data: flavor } = useVaultFlavor(chainId, vaultAddress);
+  const isMoolah = flavor === 'moolahVault';
+  const { data: moolahState } = useMoolahSingletonState(isMoolah ? chainId : undefined);
+  const minLoan8dp = moolahState?.minLoanValue ?? 0n;
+  const minLoanUsdDisplay = minLoan8dp > 0n ? Number(minLoan8dp) / 1e8 : 0;
 
   // Identify the IDLE "market" — it's the allocation entry where utilization is 0%
   // and collateral token is zero address (i.e., no collateral = idle funds)
@@ -504,6 +533,20 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     const isChanged = edit.targetAssets !== edit.currentAssets;
                     const isIdleLocked = edit.isIdle && idleAutoMode;
                     const rateType = !edit.isIdle ? getMarketRateType(edit.irmAddress, chainId) : null;
+                    // Moolah-only: flag markets whose total borrow is below
+                    // `minLoanValue`. Existing borrowers may be liquidatable
+                    // (their per-position debt fails the anti-dust floor).
+                    const borrowUsd8dp =
+                      isMoolah && !edit.isIdle
+                        ? borrowToUsd8dpOrNull(edit.totalBorrowAssets, assetDecimals, assetSymbol)
+                        : null;
+                    const showMinLoanWarning =
+                      isMoolah &&
+                      !edit.isIdle &&
+                      minLoan8dp > 0n &&
+                      borrowUsd8dp !== null &&
+                      edit.totalBorrowAssets > 0n &&
+                      borrowUsd8dp < minLoan8dp;
 
                     return (
                       <tr
@@ -527,6 +570,15 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                             {rateType === 'fixed' && delta < 0n && (
                               <span className="text-[10px] text-warning">
                                 Fixed-rate: only idle liquidity withdrawable
+                              </span>
+                            )}
+                            {showMinLoanWarning && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] text-warning"
+                                title="Moolah enforces a minimum loan value per borrower (anti-dust floor). Existing borrowers below the threshold may be liquidatable until they top up."
+                              >
+                                <AlertTriangle size={9} className="shrink-0" />
+                                Below min loan (${minLoanUsdDisplay.toFixed(2)} threshold). Existing borrowers may be liquidatable.
                               </span>
                             )}
                           </div>

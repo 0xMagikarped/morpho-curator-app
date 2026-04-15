@@ -7,8 +7,10 @@ import { RoleBadge } from '../ui/RoleBadge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { Button } from '../ui/Button';
 import { useVaultInfo, useVaultAllocation, useVaultRole, useVaultPendingActions } from '../../lib/hooks/useVault';
+import { useIsVaultBlacklisted } from '../../lib/hooks/useMoolahSingleton';
 import { formatTokenAmount, formatTokenAmountCompact, formatWadPercent, formatCountdown, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { truncateAddress } from '../../lib/utils/format';
+import { Lock } from 'lucide-react';
 import type { Address } from 'viem';
 
 class VaultCardErrorBoundary extends Component<{ address: string; children: ReactNode }, { error: Error | null }> {
@@ -48,6 +50,7 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
   const { data: vault, isLoading, error } = useVaultInfo(chainId, vaultAddress);
   const { data: allocation } = useVaultAllocation(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
+  const { data: isBlacklisted } = useIsVaultBlacklisted(chainId, vaultAddress);
   const { data: pendingActions } = useVaultPendingActions(
     chainId,
     vaultAddress,
@@ -103,7 +106,7 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
     <Card
       hover
       onClick={() => navigate(`/vault/${chainId}/${vaultAddress}`)}
-      className="space-y-3"
+      className={`space-y-3 ${isBlacklisted ? 'opacity-50 grayscale' : ''}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -111,6 +114,15 @@ function VaultCardInner({ chainId, vaultAddress }: VaultCardProps) {
           <h3 className="text-sm font-semibold text-text-primary">{String(vault.name)}</h3>
           <ChainBadge chainId={chainId} />
           <VersionBadge version={vault.version as 'v1' | 'v2'} />
+          {isBlacklisted && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider bg-danger/15 border border-danger/40 text-danger"
+              title="This vault is blocked from interacting with Lista Moolah markets. All write paths will revert."
+            >
+              <Lock size={8} />
+              Blocked by Lista
+            </span>
+          )}
         </div>
         <div className="flex gap-1">
           {roles.map((r) => (
