@@ -21,14 +21,22 @@ contracts with different semantics. See `CLAUDE.md` and the vault adapter at
 | Moolah singleton (ERC1967 proxy) | `0x8F73b65B4caAf64FBA2aF91cC5D4a2A1318E5D8C` | Morpho Blue fork. Reads + writes. |
 | MoolahVaultFactory (ERC1967 proxy) | `0x2a0Cb6401FD3c6196750dc6b46702040761D9671` | Deploys new MoolahVaults. |
 | MoolahVault shared implementation (18-dec) | `0xA1f832c7C7ECf91A53b4ff36E0ABdb5133C15982` | Current impl used by factory. Older: `0x8F9475F2F5fEcccce21A14971DdE47498C2e51C3`. |
-| MarketFactory (ERC1967 proxy) | **⚠ unverified publicly — see below** | Wires markets to liquidators, providers, IRMs. OPERATOR-gated. |
+| MarketFactory (ERC1967 proxy) | `0xce26859127d236a61f168d2d0905f77d7E286Ab2` | Wires markets to liquidators, providers, IRMs. OPERATOR-gated. |
+| MarketFactory implementation | `0x12bb76cd6a2a1ccf2ac2cff64072fed6d8a128e3` | Used by the proxy above. |
 | VaultAllocator (Lista PublicAllocator) | `0x9ECF66f016FCaA853FdA24d223bdb4276E5b524a` | Cross-vault flash reallocations. |
 
-**MarketFactory proxy**: Lista's public SDK (`lending-sdk/packages/moolah-sdk-core/src/contracts/config.ts`) does **not** expose this address because market creation is operator-gated (Lista team only). The app handles this by:
+**MarketFactory proxy**: Confirmed via `docs.bsc.lista.org/llms-full.txt`
+(table lists `MarketFactory = 0xce268591…E286Ab2` alongside MoolahVaultFactory
+and MoolahVaultManager) and on-chain ERC1967 implementation-slot verification.
+Hardcoded in `src/config/chains.ts` under the BNB entry.
 
-1. Reading `VITE_BNB_MARKET_FACTORY` from the environment at build time.
-2. If unset, the market-creation UI on BNB renders a "MarketFactory not configured" banner and blocks submission.
-3. Probe strategy for future verification: scan `CreateMarket` events on the Moolah singleton for recent blocks — any unique non-EOA `msg.sender` is a candidate; confirm by calling `hasRole(keccak256("OPERATOR"), 0x8d388136d578dCD791D081c6042284CED6d9B0c6)`.
+Resolution path in the app (`src/lib/moolah/resolveMarketFactory.ts`):
+
+1. **Hardcoded config** (fastest, canonical).
+2. **`VITE_BNB_MARKET_FACTORY` env override** (ops flexibility without a rebuild).
+3. **On-chain auto-discovery** (safety net): probes the hinted address with
+   `hasRole(keccak256("OPERATOR"), Lista-operator-Safe)` — if true, the proxy
+   is a MarketFactory. Results cached in localStorage for 30 days.
 
 ## IRMs
 

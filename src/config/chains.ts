@@ -227,9 +227,15 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       fixedRateIrm: ['0x5F9f9173B405C6CEAfa7f98d09e4B8447e9797E6' as Address],
     },
     moolah: {
-      // MarketFactory proxy is OPERATOR-gated and NOT in Lista's public SDK.
-      // Populate via VITE_BNB_MARKET_FACTORY at deploy time. Left undefined here.
-      marketFactory: (import.meta.env?.VITE_BNB_MARKET_FACTORY ?? undefined) as Address | undefined,
+      // MarketFactory proxy — confirmed from Lista's `docs.bsc.lista.org`
+      // (llms-full.txt) + on-chain ERC1967 impl slot verification
+      // (`0x12bb76cd6a2a1ccf2ac2cff64072fed6d8a128e3`). Override via
+      // `VITE_BNB_MARKET_FACTORY` env var; auto-discovery fallback lives in
+      // `src/lib/moolah/resolveMarketFactory.ts` if the address rotates.
+      marketFactory: (
+        import.meta.env?.VITE_BNB_MARKET_FACTORY ??
+        '0xce26859127d236a61f168d2d0905f77d7E286Ab2'
+      ) as Address,
       vaultAllocator: '0x9ECF66f016FCaA853FdA24d223bdb4276E5b524a' as Address,
       vaultAdmin: '0x07D274a68393E8b8a2CCf19A2ce4Ba3518735253' as Address,
       vaultImpl: '0xA1f832c7C7ECf91A53b4ff36E0ABdb5133C15982' as Address,

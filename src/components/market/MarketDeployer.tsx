@@ -2,8 +2,9 @@ import { useMemo } from 'react';
 import type { Address } from 'viem';
 import { keccak256, toHex } from 'viem';
 import { useAccount, useReadContract, useSimulateContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
+import { useMarketFactoryAddress } from '../../hooks/useMarketFactoryAddress';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -28,7 +29,9 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
 
   const isMoolah = chainConfig?.protocol === 'moolah';
-  const moolahMarketFactory = chainConfig?.moolah?.marketFactory;
+  const { address: resolvedFactory, source: factorySource, isLoading: factoryLoading } =
+    useMarketFactoryAddress(isMoolah ? chainId : undefined);
+  const moolahMarketFactory = resolvedFactory ?? undefined;
 
   const marketParams = useMemo(
     () => ({
@@ -106,8 +109,9 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
   // ------------------------------------------------------------
   const moolahBlockedReason: string | null = (() => {
     if (!isMoolah) return null;
+    if (factoryLoading) return null;
     if (!moolahMarketFactory) {
-      return 'MarketFactory not configured. Set `VITE_BNB_MARKET_FACTORY` in the env to Lista\'s MarketFactory proxy address.';
+      return 'Could not resolve the MarketFactory address. Set `VITE_BNB_MARKET_FACTORY` in the env or hardcode it in `src/config/chains.ts`.';
     }
     if (!account) return 'Connect a wallet to check OPERATOR role.';
     if (operatorCheckLoading) return null;
@@ -116,6 +120,20 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
     }
     return null;
   })();
+
+  // ------------------------------------------------------------
+  // Ambient factory-source label (Moolah only)
+  // ------------------------------------------------------------
+  const factorySourceLabel: Record<Exclude<typeof factorySource, null>, string> = {
+    config: 'config',
+    env: 'env',
+    discovered: 'discovered',
+  };
+  const factorySourceTooltip: Record<Exclude<typeof factorySource, null>, string> = {
+    config: 'Hardcoded in chain config.',
+    env: 'Overridden via VITE_BNB_MARKET_FACTORY.',
+    discovered: 'Resolved from on-chain probes. Override via VITE_BNB_MARKET_FACTORY or hardcode in chain config.',
+  };
 
   return (
     <Card>
@@ -201,6 +219,26 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
                   : 'Create Market'}
           </Button>
         </div>
+
+        {/* Ambient factory-source label (Moolah only) */}
+        {isMoolah && moolahMarketFactory && factorySource && (
+          <div
+            className="flex items-center gap-1.5 text-[10px] text-text-tertiary"
+            title={factorySourceTooltip[factorySource]}
+          >
+            <span>Market factory:</span>
+            <a
+              href={`${chainConfig?.blockExplorer}/address/${moolahMarketFactory}`}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-text-secondary hover:text-text-primary inline-flex items-center gap-0.5"
+            >
+              {moolahMarketFactory.slice(0, 6)}…{moolahMarketFactory.slice(-4)}
+              <ExternalLink size={9} />
+            </a>
+            <span>(source: {factorySourceLabel[factorySource]})</span>
+          </div>
+        )}
       </div>
     </Card>
   );
