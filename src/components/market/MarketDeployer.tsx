@@ -69,17 +69,18 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
     },
   });
 
+  const isFixedTerm = data.rateModel === 'fixed' && data.fixedTerm !== undefined;
+
+  // Variable market on Moolah: `createMarket(params, [], [], false, false)`.
   const moolahSim = useSimulateContract({
     address: moolahMarketFactory as Address | undefined,
     abi: moolahMarketFactoryAbi,
     functionName: 'createMarket',
-    // Defaults: no per-market liquidator/supply whitelist; flags off. Broker
-    // (fixed-term) markets require a different call and a follow-up form —
-    // marked as a Stage 7 extension.
     args: [marketParams, [], [], false, false],
     query: {
       enabled: Boolean(
         isMoolah &&
+          !isFixedTerm &&
           moolahMarketFactory &&
           !isMismatch &&
           account &&
@@ -88,16 +89,59 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
     },
   });
 
-  const simError = isMoolah ? moolahSim.error : morphoSim.error;
-  const hasSimRequest = isMoolah ? Boolean(moolahSim.data?.request) : Boolean(morphoSim.data?.request);
+  // Fixed-term market on Moolah: `createFixedTermMarket({ broker, loanToken,
+  // collateralToken, irm, lltv, ratePerSecond, maxRatePerSecond })`.
+  // loanToken / collateralToken are baked into the broker contract; we still
+  // pass them so BscScan's decoder shows intent. Broker owns the canonical
+  // values on-chain.
+  const fixedTermArgs = data.fixedTerm
+    ? ({
+        broker: data.fixedTerm.broker,
+        loanToken: data.loanToken,
+        collateralToken: data.collateralToken,
+        irm: data.fixedTerm.rateCalculator,
+        lltv: data.lltv,
+        ratePerSecond: data.fixedTerm.ratePerSecond,
+        maxRatePerSecond: data.fixedTerm.maxRatePerSecond,
+      } as const)
+    : null;
+  const fixedTermSim = useSimulateContract({
+    address: moolahMarketFactory as Address | undefined,
+    abi: moolahMarketFactoryAbi,
+    functionName: 'createFixedTermMarket',
+    args: fixedTermArgs ? [fixedTermArgs] : undefined,
+    query: {
+      enabled: Boolean(
+        isMoolah &&
+          isFixedTerm &&
+          fixedTermArgs &&
+          moolahMarketFactory &&
+          !isMismatch &&
+          account &&
+          isOperator === true,
+      ),
+    },
+  });
+
+  const simError = isMoolah
+    ? (isFixedTerm ? fixedTermSim.error : moolahSim.error)
+    : morphoSim.error;
+  const hasSimRequest = isMoolah
+    ? (isFixedTerm ? Boolean(fixedTermSim.data?.request) : Boolean(moolahSim.data?.request))
+    : Boolean(morphoSim.data?.request);
 
   const { writeContract, data: txHash, isPending, error: writeError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const handleDeploy = () => {
     if (isMoolah) {
-      if (!moolahSim.data?.request) return;
-      writeContract(moolahSim.data.request);
+      if (isFixedTerm) {
+        if (!fixedTermSim.data?.request) return;
+        writeContract(fixedTermSim.data.request);
+      } else {
+        if (!moolahSim.data?.request) return;
+        writeContract(moolahSim.data.request);
+      }
     } else {
       if (!morphoSim.data?.request) return;
       writeContract(morphoSim.data.request);
@@ -161,10 +205,20 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
 
         {isMoolah && (
           <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary">
-            Markets on Lista are deployed via <span className="font-mono">MarketFactory.createMarket</span>,
-            which wires the market to the full liquidator + provider stack.
-            Fixed-term (broker) markets use <span className="font-mono">createFixedTermMarket</span>
-            — not wired into this form yet.
+            {isFixedTerm ? (
+              <>
+                Fixed-term market via{' '}
+                <span className="font-mono">MarketFactory.createFixedTermMarket</span>.
+                Broker <span className="font-mono text-text-primary">{data.fixedTerm?.brokerLabel}</span>{' '}
+                locks in <span className="font-mono text-text-primary">{data.fixedTerm?.aprPercent.toFixed(2)}%</span> APR
+                (max {((data.fixedTerm?.aprPercent ?? 0) * 2).toFixed(2)}%).
+              </>
+            ) : (
+              <>
+                Variable market via <span className="font-mono">MarketFactory.createMarket</span>,
+                wired to the full liquidator + provider stack.
+              </>
+            )}
           </div>
         )}
 

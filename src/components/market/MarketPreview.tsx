@@ -10,6 +10,77 @@ import { oracleAbi } from '../../lib/contracts/abis';
 import { truncateAddress } from '../../lib/utils/format';
 import type { MarketFormData } from './MarketForm';
 
+/**
+ * Fixed-term preview — a broker + APR summary. No oracle price or
+ * market-id check (createFixedTermMarket computes the ID on-chain).
+ */
+function FixedTermPreview({
+  data,
+  onBack,
+  onDeploy,
+}: {
+  data: MarketFormData;
+  onBack: () => void;
+  onDeploy: () => void;
+}) {
+  const ft = data.fixedTerm;
+  if (!ft) return null;
+  const lltvPercent = ((Number(data.lltv) / 1e18) * 100).toFixed(2);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <span className="inline-flex items-center gap-2">
+            Market Preview
+            <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-[#F0B90B]/10 border border-[#F0B90B]/30 text-[#F0B90B]">
+              Fixed · Broker
+            </span>
+          </span>
+        </CardTitle>
+        <Badge variant="info">Pre-deploy</Badge>
+      </CardHeader>
+      <div className="space-y-3 text-sm">
+        <div>
+          <span className="text-[10px] text-text-tertiary uppercase">Broker</span>
+          <p className="font-mono text-text-primary">
+            {ft.brokerLabel}
+            <span className="text-text-tertiary ml-2 text-xs">{truncateAddress(ft.broker)}</span>
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Target APR</span>
+            <p className="font-mono text-text-primary">{ft.aprPercent.toFixed(2)}%</p>
+          </div>
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Max APR</span>
+            <p className="font-mono text-text-primary">{(ft.aprPercent * 2).toFixed(2)}%</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Rate Calculator</span>
+            <p className="font-mono text-text-primary text-xs">{truncateAddress(ft.rateCalculator)}</p>
+          </div>
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">LLTV</span>
+            <p className="font-mono text-text-primary">{lltvPercent}%</p>
+          </div>
+        </div>
+        <div className="bg-bg-hover p-3 text-[11px] text-text-secondary">
+          Term (7 / 14 / 30 days) is chosen by borrowers at origination.
+          The market ID is minted on-chain by <span className="font-mono">createFixedTermMarket</span>
+          {' '}and reported after deploy.
+        </div>
+        <div className="flex gap-3 pt-2">
+          <Button variant="ghost" onClick={onBack}>Back</Button>
+          <Button onClick={onDeploy} className="flex-1">Deploy Fixed-Term Market</Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 interface MarketPreviewProps {
   data: MarketFormData;
   onBack: () => void;
@@ -20,6 +91,14 @@ export function MarketPreview({ data, onBack, onDeploy }: MarketPreviewProps) {
   const chainId = useChainId();
   const client = usePublicClient();
   const chainConfig = getChainConfig(chainId);
+
+  const isFixedTerm = data.rateModel === 'fixed';
+
+  // Fixed-term markets skip the oracle/price preview — the market ID is
+  // minted by the factory and LLTV/rate are locked by the chosen broker.
+  if (isFixedTerm) {
+    return <FixedTermPreview data={data} onBack={onBack} onDeploy={onDeploy} />;
+  }
 
   const marketId = computeMarketId(data);
 

@@ -63,6 +63,44 @@ Resolution path in the app (`src/lib/moolah/resolveMarketFactory.ts`):
 
 Revenue chain: `Liquidator → ListaRevenueDistributor → BuyBack / AutoBuyBack → LISTA`.
 
+## Fixed-term brokers
+
+Each LendingBroker is deployed per market-pair (loan × collateral × LLTV)
+rather than per term. Supported terms (7 / 14 / 30 days) are **chosen by
+the borrower at origination**, not configured at market creation. The
+`createFixedTermMarket(FixedTermMarketParams)` struct therefore has no
+`term` field — it has `ratePerSecond` + `maxRatePerSecond` (a safety cap,
+typically 2× the target APR).
+
+Registry lives at `src/config/moolah.ts` as `MOOLAH_BROKERS[56]`. Highlights:
+
+| Broker | Loan | Collateral | LLTV | Global cap |
+|---|---|---|---|---|
+| `0x6BAF…9Bc` | lisUSD | WBNB    | 86%  | 100k |
+| `0x0cff…014` | lisUSD | slisBNB | 86%  | 100k |
+| `0x30DD…aE1` | lisUSD | BTCB    | 86%  | 100k |
+| `0xf7c4…f9d` | USD1   | PT-sUSDe | 94.5% | 10M |
+| `0xFA25…6E3` | U      | PT-sUSDe | 94.5% | 5M |
+| `0xa264…2dD` | USDT   | PT-sUSDe | 94.5% | 1M |
+| `0x41E2…981` | USD1   | BTCB    | 86%  | 10M |
+| `0xF07b…9d2` | USD1   | slisBNB | 86%  | 10M |
+| `0xFEb7…f69` | U      | BTCB    | 86%  | 100M |
+| `0xDf05…628` | U      | slisBNB | 86%  | 100M |
+| `0xa94d…3d` | USDT   | BTCB    | 86%  | 1M |
+| `0xf950…34F` | USDT   | slisBNB | 86%  | 1M |
+| `0x52ee…864` | U      | USDe    | 91.5% | 75M |
+| `0xFDFc…e72` | USD1   | USDe    | 91.5% | 75M |
+| `0x07b7…D74` | USDT   | USDe    | 91.5% | 75M |
+| `0x3350…b94` | U      | sUSDe   | 91.5% | 75M |
+| `0xCA59…5B3` | USD1   | sUSDe   | 91.5% | 75M |
+| `0x306b…D7` | USDT   | sUSDe   | 91.5% | 75M |
+| `0x1Fa2…b54` | WBNB   | slisBNB | 96.5% | 1M |
+
+**RateCalculator (shared across all brokers)**: `0xF81A3067ACF683B7f2f40a22bCF17c8310be2330`
+
+See `src/config/moolah.ts` for the machine-readable registry; update that
+file when Lista adds new pairs.
+
 ## Providers (auto-yield collateral)
 
 | Contract | Address | Used by |

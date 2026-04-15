@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { isAddress, type Address } from 'viem';
 import { useChainId, usePublicClient } from 'wagmi';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
@@ -6,11 +6,33 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { getChainConfig } from '../../config/chains';
 import { erc20Abi } from '../../lib/contracts/abis';
+import {
+  getBrokers,
+  getDefaultRateCalculator,
+  aprPercentToRatePerSecond,
+  type BrokerInfo,
+} from '../../config/moolah';
 
 interface TokenMeta {
   name: string;
   symbol: string;
   decimals: number;
+}
+
+export type RateModel = 'variable' | 'fixed';
+
+/**
+ * Fixed-term data is optional — only populated when `rateModel === 'fixed'`.
+ * Matches Moolah's `FixedTermMarketParams` struct one-to-one.
+ */
+export interface FixedTermData {
+  broker: Address;
+  rateCalculator: Address;
+  ratePerSecond: bigint;
+  maxRatePerSecond: bigint;
+  /** Non-authoritative — the form's human-entered APR % for display. */
+  aprPercent: number;
+  brokerLabel: string;
 }
 
 export interface MarketFormData {
@@ -21,6 +43,8 @@ export interface MarketFormData {
   lltv: bigint;
   loanTokenMeta: TokenMeta | null;
   collateralTokenMeta: TokenMeta | null;
+  rateModel: RateModel;
+  fixedTerm?: FixedTermData;
 }
 
 interface MarketFormProps {
@@ -53,6 +77,34 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
   const [collatMeta, setCollatMeta] = useState<TokenMeta | null>(null);
   const [loadingLoan, setLoadingLoan] = useState(false);
   const [loadingCollat, setLoadingCollat] = useState(false);
+
+  // -- Fixed-term (Moolah only) --------------------------------------------
+  const isMoolah = chainConfig?.protocol === 'moolah';
+  const brokers = useMemo(() => (chainId ? getBrokers(chainId) : []), [chainId]);
+  const fixedTermAvailable = isMoolah && brokers.length > 0;
+
+  const [rateModel, setRateModel] = useState<RateModel>('variable');
+  const [brokerAddress, setBrokerAddress] = useState<Address | ''>('');
+  const [aprPercent, setAprPercent] = useState<string>('5');
+  const [infoDismissed, setInfoDismissed] = useState(
+    typeof window !== 'undefined' &&
+      window.localStorage.getItem('moolah:fixedTermInfoDismissed') === '1',
+  );
+
+  // Auto-switch back to variable if the curator changes chain away from Moolah
+  useEffect(() => {
+    if (!fixedTermAvailable && rateModel === 'fixed') setRateModel('variable');
+  }, [fixedTermAvailable, rateModel]);
+
+  const selectedBroker: BrokerInfo | null = useMemo(() => {
+    if (rateModel !== 'fixed' || !brokerAddress) return null;
+    return brokers.find((b) => b.address.toLowerCase() === brokerAddress.toLowerCase()) ?? null;
+  }, [rateModel, brokerAddress, brokers]);
+
+  const rateCalculator = useMemo(
+    () => (chainId ? getDefaultRateCalculator(chainId) : null),
+    [chainId],
+  );
 
   // Update IRM when chain changes
   useEffect(() => {
@@ -114,19 +166,70 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
     return () => clearTimeout(timer);
   }, [collateralToken, client]);
 
-  const lltv = useCustomLltv
-    ? BigInt(Math.round(parseFloat(customLltv || '0') * 1e16)) * 100n
-    : BigInt(lltvPreset);
+  const lltv = useMemo(() => {
+    // Fixed-term: LLTV is locked by the broker.
+    if (rateModel === 'fixed' && selectedBroker) {
+      return BigInt(Math.round(selectedBroker.lltvPercent * 1e18));
+    }
+    return useCustomLltv
+      ? BigInt(Math.round(parseFloat(customLltv || '0') * 1e16)) * 100n
+      : BigInt(lltvPreset);
+  }, [rateModel, selectedBroker, useCustomLltv, customLltv, lltvPreset]);
 
-  const isValid =
+  // APR → bigint (WAD per second). Max rate defaults to 2× the target APR
+  // (Lista's convention — keeps the borrower from being gouged if rate drifts).
+  const aprNumber = parseFloat(aprPercent || '0');
+  const ratePerSecond = useMemo(() => aprPercentToRatePerSecond(aprNumber), [aprNumber]);
+  const maxRatePerSecond = useMemo(() => aprPercentToRatePerSecond(aprNumber * 2), [aprNumber]);
+
+  const isVariableValid =
     isAddress(loanToken) &&
     isAddress(collateralToken) &&
     isAddress(oracle) &&
     isAddress(irm) &&
     lltv > 0n;
 
+  const isFixedValid =
+    selectedBroker !== null &&
+    rateCalculator !== null &&
+    aprNumber > 0 &&
+    aprNumber <= 100 &&
+    ratePerSecond > 0n;
+
+  const isValid = rateModel === 'variable' ? isVariableValid : isFixedValid;
+
   const handleSubmit = () => {
     if (!isValid) return;
+
+    // Fixed-term path: broker drives loan/collateral/LLTV; oracle is
+    // unused (createFixedTermMarket doesn't take one); IRM = rateCalculator.
+    if (rateModel === 'fixed' && selectedBroker && rateCalculator) {
+      const loanAddr = chainConfig?.stablecoins.find(
+        (t) => t.symbol.toLowerCase() === selectedBroker.loanSymbol.toLowerCase(),
+      )?.address ?? (chainConfig?.nativeToken.symbol.toLowerCase() === selectedBroker.loanSymbol.toLowerCase()
+        ? chainConfig?.nativeToken.wrapped
+        : undefined);
+      onSubmit({
+        loanToken: (loanAddr ?? '0x0000000000000000000000000000000000000000') as Address,
+        collateralToken: '0x0000000000000000000000000000000000000000' as Address,
+        oracle: '0x0000000000000000000000000000000000000000' as Address,
+        irm: rateCalculator.address,
+        lltv,
+        loanTokenMeta: null,
+        collateralTokenMeta: null,
+        rateModel: 'fixed',
+        fixedTerm: {
+          broker: selectedBroker.address,
+          rateCalculator: rateCalculator.address,
+          ratePerSecond,
+          maxRatePerSecond,
+          aprPercent: aprNumber,
+          brokerLabel: selectedBroker.label,
+        },
+      });
+      return;
+    }
+
     onSubmit({
       loanToken: loanToken as Address,
       collateralToken: collateralToken as Address,
@@ -135,7 +238,15 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
       lltv,
       loanTokenMeta: loanMeta,
       collateralTokenMeta: collatMeta,
+      rateModel: 'variable',
     });
+  };
+
+  const dismissInfoPanel = () => {
+    try {
+      window.localStorage.setItem('moolah:fixedTermInfoDismissed', '1');
+    } catch { /* localStorage disabled */ }
+    setInfoDismissed(true);
   };
 
   const inputClass =
@@ -149,6 +260,139 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
       </CardHeader>
 
       <div className="space-y-4">
+        {/* Rate model toggle (Moolah only) */}
+        {fixedTermAvailable && (
+          <div>
+            <label className="text-xs text-text-tertiary uppercase block mb-1">Rate model</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRateModel('variable')}
+                className={`flex-1 px-3 py-2 text-sm border transition-colors ${
+                  rateModel === 'variable'
+                    ? 'border-accent-primary bg-accent-primary-muted text-text-primary'
+                    : 'border-border-default bg-bg-hover text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                Variable
+                <span className="text-[10px] text-text-tertiary block">AdaptiveCurveIRM</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRateModel('fixed')}
+                className={`flex-1 px-3 py-2 text-sm border transition-colors ${
+                  rateModel === 'fixed'
+                    ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-text-primary'
+                    : 'border-border-default bg-bg-hover text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                Fixed term
+                <span className="text-[10px] text-text-tertiary block">Broker</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {rateModel === 'fixed' && !infoDismissed && (
+          <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary space-y-1">
+            <div>
+              Fixed-term markets lock borrowers in at a fixed APR for a
+              specific term (Lista supports 7 / 14 / 30 days, chosen by the
+              borrower at origination). Unlike variable markets, the rate
+              does not track utilization.
+            </div>
+            <div>
+              Early repayment incurs a penalty. At maturity, open positions
+              auto-convert to variable-rate accounting. Size caps with the
+              full term in mind — a 30-day term means withdrawals can be
+              delayed up to 30 days if utilization is high.
+            </div>
+            <button
+              type="button"
+              onClick={dismissInfoPanel}
+              className="text-[10px] text-text-tertiary hover:text-text-primary underline"
+            >
+              Got it, don't show again
+            </button>
+          </div>
+        )}
+
+        {rateModel === 'fixed' && (
+          <div className="space-y-3 border border-[#F0B90B]/20 p-3 bg-[#F0B90B]/[0.02]">
+            {/* Broker picker */}
+            <div>
+              <label className="text-xs text-text-tertiary uppercase block mb-1">Broker (market pair)</label>
+              <select
+                value={brokerAddress}
+                onChange={(e) => setBrokerAddress(e.target.value as Address)}
+                className={`${inputClass} appearance-none`}
+              >
+                <option value="">— Select a broker —</option>
+                {brokers.map((b) => (
+                  <option key={b.address} value={b.address}>
+                    {b.label} · LLTV {(b.lltvPercent * 100).toFixed(1)}%
+                    {b.capHumanReadable ? ` · cap ${b.capHumanReadable}` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedBroker && (
+                <div className="text-[10px] text-text-tertiary mt-1 font-mono">
+                  Broker: {selectedBroker.address.slice(0, 8)}…{selectedBroker.address.slice(-6)}
+                </div>
+              )}
+            </div>
+
+            {/* Rate calculator (read-only — only one deployed) */}
+            <div>
+              <label className="text-xs text-text-tertiary uppercase block mb-1">Rate calculator</label>
+              {rateCalculator ? (
+                <div className="px-3 py-2 bg-bg-hover border border-border-subtle text-[12px] font-mono">
+                  {rateCalculator.label}
+                  <span className="ml-2 text-text-tertiary">
+                    {rateCalculator.address.slice(0, 8)}…{rateCalculator.address.slice(-6)}
+                  </span>
+                </div>
+              ) : (
+                <div className="text-[11px] text-warning">No rate calculator registered for this chain.</div>
+              )}
+            </div>
+
+            {/* APR input */}
+            <div>
+              <label className="text-xs text-text-tertiary uppercase block mb-1">
+                Target APR (% fixed)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={aprPercent}
+                  onChange={(e) => setAprPercent(e.target.value)}
+                  className={`${inputClass} w-32`}
+                />
+                <span className="text-sm text-text-secondary">%</span>
+              </div>
+              <div className="text-[10px] text-text-tertiary mt-0.5">
+                Borrowers lock this rate for their chosen term. Max rate (safety cap) = 2× target = {(aprNumber * 2).toFixed(2)}%.
+              </div>
+            </div>
+
+            {/* Summary */}
+            {selectedBroker && aprNumber > 0 && (
+              <div className="text-[11px] text-text-secondary">
+                Borrowers will lock in <span className="font-mono text-text-primary">{aprNumber.toFixed(2)}%</span> APR
+                on a <span className="font-mono text-text-primary">{selectedBroker.label}</span> position,
+                up to LLTV <span className="font-mono text-text-primary">{(selectedBroker.lltvPercent * 100).toFixed(1)}%</span>.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Variable-rate fields (hidden when fixed-term is active) */}
+        {rateModel === 'variable' && <>
+
         {/* Loan Token */}
         <div>
           <label className="text-xs text-text-tertiary uppercase block mb-1">Loan Token</label>
@@ -278,6 +522,8 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
             </div>
           )}
         </div>
+
+        </>}
 
         <Button onClick={handleSubmit} disabled={!isValid} className="w-full">
           Preview Market

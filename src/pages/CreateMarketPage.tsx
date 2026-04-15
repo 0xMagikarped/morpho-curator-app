@@ -15,7 +15,13 @@ export function CreateMarketPage() {
     setStep('preview');
   };
 
-  const marketId = formData ? computeMarketId(formData) : null;
+  // Fixed-term markets: the ID is minted by the factory at deploy time
+  // (the createFixedTermMarket inputs differ from computeMarketId's), so we
+  // pass a zero placeholder — the deployer reads from the returned value.
+  const marketId =
+    formData && formData.rateModel !== 'fixed'
+      ? computeMarketId(formData)
+      : ('0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`);
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
@@ -34,7 +40,7 @@ export function CreateMarketPage() {
           onDeploy={() => setStep('deploy')}
         />
       )}
-      {step === 'deploy' && formData && marketId && (
+      {step === 'deploy' && formData && (
         <MarketDeployer
           data={formData}
           marketId={marketId}
