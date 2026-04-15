@@ -293,7 +293,134 @@ export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address
   if (version === 'v2') {
     return fetchV2VaultInfo(client, chainId, vaultAddress, ZERO);
   }
+
+  // Prefer the Moolah path when the chain default says so. Keeps BNB users
+  // from hitting the MetaMorpho V1 read-sequence (which returns zeros for
+  // curator/guardian/timelock on AccessControl-based vaults).
+  const { detectVaultFlavor } = await import('../vault/flavor');
+  const flavor = await detectVaultFlavor(client, chainId, vaultAddress);
+  if (flavor === 'moolahVault') {
+    return fetchMoolahVaultInfoLegacy(client, chainId, vaultAddress, ZERO);
+  }
   return fetchV1VaultInfo(client, chainId, vaultAddress, ZERO);
+}
+
+/**
+ * Fetch a Moolah vault and shape it to the legacy `VaultInfoV1` structure so
+ * the existing UI keeps working. Role mapping:
+ *   - owner       = first DEFAULT_ADMIN_ROLE member (Lista vaultAdmin)
+ *   - curator     = first CURATOR_ROLE member (the curatorTimeLock contract)
+ *   - guardian    = first CANCELLER_ROLE holder across either timelock
+ *   - timelock    = curatorTimeLock.getMinDelay() (Moolah has two — we expose
+ *                   the stricter-facing one here; `VaultSnapshot` carries both)
+ *
+ * New Moolah-aware components should use `useVaultSnapshot` instead.
+ */
+async function fetchMoolahVaultInfoLegacy(
+  client: PublicClient,
+  chainId: number,
+  vaultAddress: Address,
+  ZERO: Address,
+) {
+  const { moolahVaultAbi, timelockControllerAbi } = await import('../contracts/moolahAbis');
+  const { keccak256, toHex } = await import('viem');
+
+  const MANAGER_ROLE = keccak256(toHex('MANAGER'));
+  const CURATOR_ROLE = keccak256(toHex('CURATOR'));
+  const ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
+  const PROPOSER_ROLE = keccak256(toHex('PROPOSER_ROLE'));
+  const CANCELLER_ROLE = keccak256(toHex('CANCELLER_ROLE'));
+
+  async function firstRoleMember(target: Address, abi: typeof moolahVaultAbi | typeof timelockControllerAbi, role: `0x${string}`): Promise<Address | null> {
+    try {
+      const count = (await client.readContract({ address: target, abi, functionName: 'getRoleMemberCount', args: [role] } as never)) as bigint;
+      if (count === 0n) return null;
+      return (await client.readContract({ address: target, abi, functionName: 'getRoleMember', args: [role, 0n] } as never)) as Address;
+    } catch {
+      return null;
+    }
+  }
+
+  const [name, symbol, asset, totalAssets, totalSupply, feeRecipient, fee, admin, curator, manager] = await Promise.all([
+    safeRead<string>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'name' }),
+    safeRead<string>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'symbol' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'asset' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'totalAssets' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'totalSupply' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'feeRecipient' }),
+    safeRead<bigint>(client, { address: vaultAddress, abi: moolahVaultAbi, functionName: 'fee' }),
+    firstRoleMember(vaultAddress, moolahVaultAbi, ADMIN_ROLE),
+    firstRoleMember(vaultAddress, moolahVaultAbi, CURATOR_ROLE),
+    firstRoleMember(vaultAddress, moolahVaultAbi, MANAGER_ROLE),
+  ]);
+
+  if (!name) throw new Error(`Moolah vault ${vaultAddress}: name() failed`);
+  if (!asset || asset === ZERO) throw new Error(`Moolah vault ${vaultAddress}: returned zero asset`);
+
+  const [curatorDelay, curatorCanceller, managerCanceller] = await Promise.all([
+    curator
+      ? (client.readContract({ address: curator, abi: timelockControllerAbi, functionName: 'getMinDelay' }).catch(() => 0n) as Promise<bigint>)
+      : Promise.resolve(0n),
+    curator ? firstRoleMember(curator, timelockControllerAbi, CANCELLER_ROLE) : Promise.resolve(null),
+    manager ? firstRoleMember(manager, timelockControllerAbi, CANCELLER_ROLE) : Promise.resolve(null),
+  ]);
+
+  // Legacy shape expects a single guardian; Moolah has cancellers on both
+  // timelocks so we pick the curator's (the stricter path).
+  const guardian = curatorCanceller ?? managerCanceller ?? ZERO;
+
+  // `PROPOSER_ROLE` on the managerTimeLock drives reallocator gating — surface
+  // as legacy `allocators[]` for the existing useVaultRole hook.
+  let allocators: Address[] = [];
+  if (manager) {
+    try {
+      const count = (await client.readContract({
+        address: manager,
+        abi: timelockControllerAbi,
+        functionName: 'getRoleMemberCount',
+        args: [PROPOSER_ROLE],
+      })) as bigint;
+      allocators = (await Promise.all(
+        Array.from({ length: Number(count) }, (_, i) =>
+          client.readContract({
+            address: manager,
+            abi: timelockControllerAbi,
+            functionName: 'getRoleMember',
+            args: [PROPOSER_ROLE, BigInt(i)],
+          }) as Promise<Address>,
+        ),
+      )) as Address[];
+    } catch {
+      allocators = [];
+    }
+  }
+
+  return {
+    address: vaultAddress,
+    chainId,
+    name: name || 'Unnamed Vault',
+    symbol: symbol ?? '',
+    asset,
+    morphoBlue: getChainConfig(chainId)?.morphoBlue ?? ZERO,
+    owner: admin ?? ZERO,
+    pendingOwner: ZERO, // Moolah has no single-owner transfer flow
+    curator: curator ?? ZERO,
+    allocators,
+    timelock: curatorDelay,
+    fee: fee ?? 0n,
+    feeRecipient: feeRecipient ?? ZERO,
+    totalAssets: totalAssets ?? 0n,
+    totalSupply: totalSupply ?? 0n,
+    lastTotalAssets: 0n,
+    version: 'v1' as const,
+    guardian,
+    apy: null,
+    netApy: null,
+    totalAssetsUsd: null,
+    pnl: null,
+    pnlUsd: null,
+    historicalSharePrice: null,
+  };
 }
 
 /** Fetch V1 MetaMorpho vault info */
