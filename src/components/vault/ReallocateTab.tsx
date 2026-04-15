@@ -23,7 +23,7 @@ import { PublicAllocatorPanel } from './PublicAllocatorPanel';
 import { getMarketRateType } from '../../lib/utils/irm';
 import { getChainConfig } from '../../config/chains';
 import { useVaultFlavor } from '../../lib/vault/flavor';
-import { useMoolahSingletonState } from '../../lib/hooks/useMoolahSingleton';
+import { useIsVaultBlacklisted, useMoolahSingletonState } from '../../lib/hooks/useMoolahSingleton';
 import { AlertTriangle } from 'lucide-react';
 
 /**
@@ -212,6 +212,16 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const { data: moolahState } = useMoolahSingletonState(isMoolah ? chainId : undefined);
   const minLoan8dp = moolahState?.minLoanValue ?? 0n;
   const minLoanUsdDisplay = minLoan8dp > 0n ? Number(minLoan8dp) / 1e8 : 0;
+
+  // Safety gates — mirror useVaultWrite (reallocate uses a separate SDK hook).
+  const { data: isBlacklisted } = useIsVaultBlacklisted(chainId, vaultAddress);
+  const isPaused = Boolean(moolahState?.isPaused);
+  const writeDisabled = Boolean(isBlacklisted) || isPaused;
+  const writeDisabledTooltip = isBlacklisted
+    ? 'Vault blocked by Lista. Writes will revert on-chain.'
+    : isPaused
+      ? 'Moolah protocol is paused. Writes will revert.'
+      : null;
 
   // Identify the IDLE "market" — it's the allocation entry where utilization is 0%
   // and collateral token is zero address (i.e., no collateral = idle funds)
@@ -485,7 +495,13 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   }
 
   const canSimulate = hasChanges && sdkSupported && !isSimulating;
-  const canExecute = isBalanced && hasChanges && capViolations.length === 0 && !isMismatch && !catcherAtCap;
+  const canExecute =
+    isBalanced &&
+    hasChanges &&
+    capViolations.length === 0 &&
+    !isMismatch &&
+    !catcherAtCap &&
+    !writeDisabled;
 
   return (
     <div className="space-y-4">
@@ -493,6 +509,11 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
         <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
           <span className="text-xs text-warning">Wallet is on the wrong network. Switch to continue.</span>
           <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch Network</Button>
+        </div>
+      )}
+      {writeDisabled && writeDisabledTooltip && (
+        <div className="px-3 py-2 bg-danger/10 border border-danger/30 text-[11px] text-danger">
+          <span className="font-semibold">Writes disabled.</span> {writeDisabledTooltip}
         </div>
       )}
       <Card>
@@ -782,6 +803,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                 onClick={handleExecute}
                 disabled={!canExecute}
                 loading={isPending || isConfirming}
+                title={writeDisabled ? writeDisabledTooltip ?? undefined : undefined}
               >
                 {isPending ? 'Signing...' : isConfirming ? 'Confirming...' : 'Execute Reallocation'}
               </Button>

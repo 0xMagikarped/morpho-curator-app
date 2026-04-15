@@ -67,7 +67,8 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     [allocation],
   );
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
-  const { submit, mode, isPending, isConfirming, isSuccess } = useVaultWrite(chainId, vaultAddress);
+  const { submit, mode, isPending, isConfirming, isSuccess, disabled: writeDisabled, disabledTooltip } =
+    useVaultWrite(chainId, vaultAddress);
   const isMoolah = mode === 'timelocked';
 
   // Compute discovered market IDs that are NOT already in vault queues
@@ -316,6 +317,13 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         )}
       </div>
 
+      {/* Write-disabled banner (blacklist / pause) */}
+      {writeDisabled && disabledTooltip && (
+        <div className="px-3 py-2 bg-danger/10 border border-danger/30 text-[11px] text-danger">
+          <span className="font-semibold">Writes disabled.</span> {disabledTooltip}
+        </div>
+      )}
+
       {/* Moolah propose-mode note */}
       {isMoolah && (
         <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary">
@@ -370,8 +378,9 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                         <Button
                           size="sm"
                           onClick={() => handleAcceptCap(item)}
-                          disabled={isMismatch || isPending || isConfirming}
+                          disabled={isMismatch || isPending || isConfirming || writeDisabled}
                           loading={isPending || isConfirming}
+                          title={writeDisabled ? disabledTooltip ?? undefined : undefined}
                         >
                           {isMoolah ? 'Propose Accept' : 'Accept'}
                         </Button>
@@ -381,8 +390,9 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                           size="sm"
                           variant="danger"
                           onClick={() => handleRevokeCap(pc.marketId!)}
-                          disabled={isMismatch || isPending || isConfirming}
+                          disabled={isMismatch || isPending || isConfirming || writeDisabled}
                           loading={isPending || isConfirming}
+                          title={writeDisabled ? disabledTooltip ?? undefined : undefined}
                         >
                           {isMoolah ? 'Propose Revoke' : 'Revoke'}
                         </Button>
@@ -460,6 +470,8 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                       isPending={isPending}
                       isConfirming={isConfirming}
                       isMoolah={isMoolah}
+                      writeDisabled={writeDisabled}
+                      writeDisabledTooltip={disabledTooltip}
                       newCapValue={newCapValue}
                       onToggleExpand={() => {
                         setExpandedMarket(isExpanded ? null : item.marketId);
@@ -508,6 +520,8 @@ function MarketRow({
   isPending,
   isConfirming,
   isMoolah,
+  writeDisabled,
+  writeDisabledTooltip,
   newCapValue,
   onToggleExpand,
   onCapValueChange,
@@ -524,6 +538,8 @@ function MarketRow({
   isPending: boolean;
   isConfirming: boolean;
   isMoolah: boolean;
+  writeDisabled: boolean;
+  writeDisabledTooltip: string | null;
   newCapValue: string;
   onToggleExpand: () => void;
   onCapValueChange: (v: string) => void;
@@ -616,8 +632,9 @@ function MarketRow({
                     e.stopPropagation();
                     onSubmitCap();
                   }}
-                  disabled={!newCapValue || isMismatch || isPending || isConfirming}
+                  disabled={!newCapValue || isMismatch || isPending || isConfirming || writeDisabled}
                   loading={isPending || isConfirming}
+                  title={writeDisabled ? writeDisabledTooltip ?? undefined : undefined}
                 >
                   {isMoolah
                     ? (item.status === 'available' ? 'Propose Cap (Add Market)' : 'Propose Cap Change')

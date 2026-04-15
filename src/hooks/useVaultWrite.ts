@@ -14,7 +14,7 @@
  * so buttons can render "Submit" vs "Propose".
  */
 
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import type { Address } from 'viem';
 import { useGuardedWriteContract } from './useGuardedWriteContract';
@@ -22,7 +22,22 @@ import { useVaultSnapshot } from '../lib/vault/adapter';
 import { prepareWrite, type PreparedWrite, type WriteIntent } from '../lib/vault/writes';
 import { getPublicClient } from '../lib/data/rpcClient';
 import { timelockControllerAbi } from '../lib/contracts/moolahAbis';
+import {
+  useIsVaultBlacklisted,
+  useMoolahSingletonState,
+} from '../lib/hooks/useMoolahSingleton';
 import { useAppStore } from '../store/appStore';
+
+/**
+ * Reason a write is blocked at the hook layer. Consumers render the
+ * matching tooltip / inline warning and disable their buttons.
+ */
+export type WriteDisabledReason = 'blacklisted' | 'paused' | null;
+
+const DISABLED_TOOLTIP: Record<Exclude<WriteDisabledReason, null>, string> = {
+  blacklisted: 'Vault blocked by Lista. Writes will revert on-chain.',
+  paused: 'Moolah protocol is paused. Writes will revert.',
+};
 
 export interface UseVaultWriteResult {
   submit: (intent: WriteIntent) => Promise<void>;
@@ -36,6 +51,15 @@ export interface UseVaultWriteResult {
   error: Error | null;
   walletError: string | null;
   reset: () => void;
+  /** True when the vault is blacklisted or the protocol is paused. */
+  disabled: boolean;
+  /** Why `disabled` is true — used by the caller to pick the right tooltip. */
+  disabledReason: WriteDisabledReason;
+  /** Canonical tooltip text to render on disabled buttons. */
+  disabledTooltip: string | null;
+  /** Component-level breakdown (exposed so UIs can render multiple warnings). */
+  isBlacklisted: boolean;
+  isPaused: boolean;
 }
 
 export function useVaultWrite(
@@ -54,6 +78,19 @@ export function useVaultWrite(
   } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
   const addScheduledOp = useAppStore((s) => s.addScheduledOp);
+
+  // Safety gates — never silently allow a write that the protocol will reject.
+  const { data: isBlacklistedRaw } = useIsVaultBlacklisted(chainId, vaultAddress);
+  const { data: moolahState } = useMoolahSingletonState(chainId);
+  const isBlacklisted = Boolean(isBlacklistedRaw);
+  const isPaused = Boolean(moolahState?.isPaused);
+  const disabledReason: WriteDisabledReason = isBlacklisted
+    ? 'blacklisted'
+    : isPaused
+      ? 'paused'
+      : null;
+  const disabled = disabledReason !== null;
+  const disabledTooltip = disabledReason ? DISABLED_TOOLTIP[disabledReason] : null;
 
   const [pendingOp, setPendingOp] = useState<PreparedWrite | null>(null);
 
@@ -99,6 +136,10 @@ export function useVaultWrite(
   const submit = useCallback(
     async (intent: WriteIntent) => {
       if (!chainId || !vaultAddress) return;
+      // Final safety gate — the UI SHOULD have disabled the button already,
+      // but if something slips through (programmatic invocation, stale
+      // state), refuse to broadcast a tx that would revert on-chain.
+      if (disabled) return;
       const client = getPublicClient(chainId);
       const prepared = await prepareWrite(vaultAddress, intent, snapshot ?? null, client);
 
@@ -131,15 +172,18 @@ export function useVaultWrite(
         chainId,
       });
     },
-    [chainId, vaultAddress, snapshot, writeContract],
+    [chainId, vaultAddress, snapshot, writeContract, disabled],
   );
 
-  const mode: UseVaultWriteResult['mode'] =
-    snapshot == null
-      ? 'unknown'
-      : snapshot.flavor === 'moolahVault'
-        ? 'timelocked'
-        : 'direct';
+  const mode: UseVaultWriteResult['mode'] = useMemo(
+    () =>
+      snapshot == null
+        ? 'unknown'
+        : snapshot.flavor === 'moolahVault'
+          ? 'timelocked'
+          : 'direct',
+    [snapshot],
+  );
 
   const reset = useCallback(() => {
     setPendingOp(null);
@@ -157,5 +201,10 @@ export function useVaultWrite(
     error: (error as Error) ?? null,
     walletError,
     reset,
+    disabled,
+    disabledReason,
+    disabledTooltip,
+    isBlacklisted,
+    isPaused,
   };
 }

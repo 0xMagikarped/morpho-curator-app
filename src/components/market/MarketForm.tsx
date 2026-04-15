@@ -8,6 +8,7 @@ import { getChainConfig } from '../../config/chains';
 import { erc20Abi } from '../../lib/contracts/abis';
 import {
   getBrokers,
+  getBrokersForLoanSymbol,
   getDefaultRateCalculator,
   aprPercentToRatePerSecond,
   type BrokerInfo,
@@ -82,6 +83,15 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
   const isMoolah = chainConfig?.protocol === 'moolah';
   const brokers = useMemo(() => (chainId ? getBrokers(chainId) : []), [chainId]);
   const fixedTermAvailable = isMoolah && brokers.length > 0;
+  /**
+   * Broker dropdown is filtered by the form's loan-token symbol. A
+   * curator picking USD1 never sees the WBNB/lisUSD broker, eliminating
+   * a class of guaranteed-revert mistakes.
+   */
+  const brokersForLoan = useMemo(() => {
+    if (!chainId || !loanMeta?.symbol) return [];
+    return getBrokersForLoanSymbol(chainId, loanMeta.symbol);
+  }, [chainId, loanMeta?.symbol]);
 
   const [rateModel, setRateModel] = useState<RateModel>('variable');
   const [brokerAddress, setBrokerAddress] = useState<Address | ''>('');
@@ -95,6 +105,16 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
   useEffect(() => {
     if (!fixedTermAvailable && rateModel === 'fixed') setRateModel('variable');
   }, [fixedTermAvailable, rateModel]);
+
+  // Clear the broker selection if the loan token changed + the selected
+  // broker isn't valid for the new symbol.
+  useEffect(() => {
+    if (!brokerAddress) return;
+    const stillValid = brokersForLoan.some(
+      (b) => b.address.toLowerCase() === brokerAddress.toLowerCase(),
+    );
+    if (!stillValid) setBrokerAddress('');
+  }, [brokerAddress, brokersForLoan]);
 
   const selectedBroker: BrokerInfo | null = useMemo(() => {
     if (rateModel !== 'fixed' || !brokerAddress) return null;
@@ -189,14 +209,38 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
     isAddress(irm) &&
     lltv > 0n;
 
+  /**
+   * Per DC2 the factory enforces 18-dec on both sides of a fixed-term
+   * market. We preflight client-side so the curator doesn't burn a
+   * simulation on a guaranteed revert.
+   */
+  const fixedDecimalsOk =
+    loanMeta?.decimals === 18 && collatMeta?.decimals === 18;
+
   const isFixedValid =
     selectedBroker !== null &&
     rateCalculator !== null &&
     aprNumber > 0 &&
     aprNumber <= 100 &&
-    ratePerSecond > 0n;
+    ratePerSecond > 0n &&
+    fixedDecimalsOk;
 
   const isValid = rateModel === 'variable' ? isVariableValid : isFixedValid;
+
+  const fixedInvalidReason =
+    rateModel !== 'fixed'
+      ? null
+      : !loanMeta || !collatMeta
+        ? 'Loan and collateral tokens must be set first.'
+        : !fixedDecimalsOk
+          ? 'Fixed-term markets require 18-decimal tokens on both sides.'
+          : brokersForLoan.length === 0
+            ? `No brokers registered for ${loanMeta.symbol}. Switch to Variable rate.`
+            : !selectedBroker
+              ? 'Select a broker.'
+              : aprNumber <= 0 || aprNumber > 100
+                ? 'APR must be between 0% and 100%.'
+                : null;
 
   const handleSubmit = () => {
     if (!isValid) return;
@@ -319,21 +363,32 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
 
         {rateModel === 'fixed' && (
           <div className="space-y-3 border border-[#F0B90B]/20 p-3 bg-[#F0B90B]/[0.02]">
-            {/* Broker picker */}
+            {/* Broker picker — filtered by the form's loan-token symbol */}
             <div>
               <label className="text-xs text-text-tertiary uppercase block mb-1">Broker (market pair)</label>
               <select
                 value={brokerAddress}
                 onChange={(e) => setBrokerAddress(e.target.value as Address)}
                 className={`${inputClass} appearance-none`}
+                disabled={!loanMeta || brokersForLoan.length === 0}
               >
-                <option value="">— Select a broker —</option>
-                {brokers.map((b) => (
-                  <option key={b.address} value={b.address}>
-                    {b.label} · LLTV {(b.lltvPercent * 100).toFixed(1)}%
-                    {b.capHumanReadable ? ` · cap ${b.capHumanReadable}` : ''}
+                {!loanMeta ? (
+                  <option value="">Select loan token first</option>
+                ) : brokersForLoan.length === 0 ? (
+                  <option value="">
+                    No brokers registered for {loanMeta.symbol}. Variable rate only.
                   </option>
-                ))}
+                ) : (
+                  <>
+                    <option value="">— Select a broker —</option>
+                    {brokersForLoan.map((b) => (
+                      <option key={b.address} value={b.address}>
+                        {b.label} · LLTV {(b.lltvPercent * 100).toFixed(1)}%
+                        {b.capHumanReadable ? ` · cap ${b.capHumanReadable}` : ''}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
               {selectedBroker && (
                 <div className="text-[10px] text-text-tertiary mt-1 font-mono">
@@ -525,6 +580,9 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
 
         </>}
 
+        {rateModel === 'fixed' && fixedInvalidReason && (
+          <p className="text-[11px] text-warning">{fixedInvalidReason}</p>
+        )}
         <Button onClick={handleSubmit} disabled={!isValid} className="w-full">
           Preview Market
         </Button>

@@ -42,7 +42,8 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
 
   const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
 
-  const { submit, mode, isPending, isConfirming, isSuccess } = useVaultWrite(chainId, vaultAddress);
+  const { submit, mode, isPending, isConfirming, isSuccess, disabled: writeDisabled, disabledTooltip } =
+    useVaultWrite(chainId, vaultAddress);
   const isMoolah = mode === 'timelocked';
 
   const [editingSupply, setEditingSupply] = useState(false);
@@ -306,6 +307,13 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
         </div>
       )}
 
+      {/* Write-disabled banner (blacklist / pause) */}
+      {writeDisabled && disabledTooltip && (
+        <div className="px-3 py-2 bg-danger/10 border border-danger/30 text-[11px] text-danger">
+          <span className="font-semibold">Writes disabled.</span> {disabledTooltip}
+        </div>
+      )}
+
       {/* Moolah propose-mode note */}
       {isMoolah && (
         <div className="px-3 py-2 bg-[#F0B90B]/5 border border-[#F0B90B]/20 text-[11px] text-text-secondary">
@@ -400,8 +408,9 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
               <Button
                 size="sm"
                 onClick={saveSupplyQueue}
-                disabled={!supplyChanged || isMismatch || isPending || isConfirming}
+                disabled={!supplyChanged || isMismatch || isPending || isConfirming || writeDisabled}
                 loading={isPending || isConfirming}
+                title={writeDisabled ? disabledTooltip ?? undefined : undefined}
               >
                 Save Supply Queue
               </Button>
@@ -466,8 +475,9 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
               <Button
                 size="sm"
                 onClick={saveWithdrawQueue}
-                disabled={!withdrawChanged || isMismatch || isPending || isConfirming}
+                disabled={!withdrawChanged || isMismatch || isPending || isConfirming || writeDisabled}
                 loading={isPending || isConfirming}
+                title={writeDisabled ? disabledTooltip ?? undefined : undefined}
               >
                 Save Withdraw Queue
               </Button>
