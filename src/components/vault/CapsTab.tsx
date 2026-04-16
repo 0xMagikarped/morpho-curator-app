@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import type { Address } from 'viem';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { isHex, type Address } from 'viem';
 import { useQueryClient } from '@tanstack/react-query';
 import { useVaultWrite } from '../../hooks/useVaultWrite';
-import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle } from 'lucide-react';
+import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle, Plus } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -10,6 +10,7 @@ import { ProgressBar } from '../ui/ProgressBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
+import { fetchMarketParams, fetchTokenInfo } from '../../lib/data/rpcClient';
 import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { vaultKeys } from '../../lib/queryKeys';
@@ -90,6 +91,79 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const [newCapValue, setNewCapValue] = useState('');
   const [nowSeconds, setNowSeconds] = useState(() => BigInt(Math.floor(Date.now() / 1000)));
   const [statusFilter, setStatusFilter] = useState<MarketStatus | 'all'>('all');
+
+  // Manual "Add market by ID" — lets the curator paste a bytes32 market
+  // ID instead of relying on the scanner to discover it.
+  const [manualMarketId, setManualMarketId] = useState('');
+  const [manualMarketLoading, setManualMarketLoading] = useState(false);
+  const [manualMarketError, setManualMarketError] = useState<string | null>(null);
+  const [manualMarkets, setManualMarkets] = useState<MarketLifecycleItem[]>([]);
+
+  const handleAddManualMarket = useCallback(async () => {
+    const id = manualMarketId.trim();
+    if (!id || !isHex(id) || id.length !== 66) {
+      setManualMarketError('Enter a valid 32-byte market ID (0x…, 66 chars).');
+      return;
+    }
+    if (!chainId) return;
+    // Already in the list?
+    if (lifecycleItems.some((li) => li.marketId.toLowerCase() === id.toLowerCase()) ||
+        manualMarkets.some((m) => m.marketId.toLowerCase() === id.toLowerCase())) {
+      setManualMarketError('Market already in the list.');
+      return;
+    }
+    setManualMarketError(null);
+    setManualMarketLoading(true);
+    try {
+      const params = await fetchMarketParams(chainId, id as `0x${string}`);
+      const ZERO = '0x0000000000000000000000000000000000000000' as Address;
+      if (params.loanToken === ZERO) {
+        setManualMarketError('Market ID not found on-chain (loanToken is zero).');
+        setManualMarketLoading(false);
+        return;
+      }
+      const [loanToken, collateralToken] = await Promise.all([
+        fetchTokenInfo(chainId, params.loanToken).catch(() => ({ symbol: '???', decimals: 18, name: '???' })),
+        fetchTokenInfo(chainId, params.collateralToken).catch(() => ({ symbol: '???', decimals: 18, name: '???' })),
+      ]);
+      setManualMarkets((prev) => [
+        ...prev,
+        {
+          marketId: id,
+          status: 'available' as MarketStatus,
+          label: `${collateralToken.symbol} / ${loanToken.symbol}`,
+          collateralSymbol: collateralToken.symbol,
+          loanSymbol: loanToken.symbol,
+          irmAddress: params.irm as `0x${string}`,
+          lltv: Number(params.lltv) / 1e18,
+          supplyCap: 0n,
+          supplyAssets: 0n,
+          capUsedPct: 0,
+          discoveredMarket: {
+            chainId,
+            marketId: id as `0x${string}`,
+            loanToken: params.loanToken,
+            collateralToken: params.collateralToken,
+            oracle: params.oracle,
+            irm: params.irm,
+            lltv: params.lltv.toString(),
+            discoveredAtBlock: 0,
+            loanTokenSymbol: loanToken.symbol,
+            loanTokenDecimals: loanToken.decimals,
+            collateralTokenSymbol: collateralToken.symbol,
+            collateralTokenDecimals: collateralToken.decimals,
+          } as MarketRecord,
+        },
+      ]);
+      setManualMarketId('');
+    } catch (err) {
+      setManualMarketError(
+        err instanceof Error ? err.message : 'Failed to read market params from on-chain.',
+      );
+    }
+    setManualMarketLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualMarketId, chainId, manualMarkets]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -225,15 +299,24 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     return items;
   }, [markets, allocation, allChainMarkets, vaultAssetLower, existingMarketIds, pendingCapsByMarket, discoveredStatusMap]);
 
+  // Merge manually-added markets (by ID) with scanner-discovered ones.
+  // Dedup by marketId so a manual add that the scanner later discovers
+  // doesn't appear twice.
+  const allItems = useMemo(() => {
+    const ids = new Set(lifecycleItems.map((li) => li.marketId.toLowerCase()));
+    const unique = manualMarkets.filter((m) => !ids.has(m.marketId.toLowerCase()));
+    return [...lifecycleItems, ...unique];
+  }, [lifecycleItems, manualMarkets]);
+
   const filteredItems = statusFilter === 'all'
-    ? lifecycleItems
-    : lifecycleItems.filter((item) => item.status === statusFilter);
+    ? allItems
+    : allItems.filter((item) => item.status === statusFilter);
 
   const statusCounts = useMemo(() => {
     const counts: Record<MarketStatus, number> = { available: 0, pending: 0, enabled: 0, in_supply_queue: 0 };
-    for (const item of lifecycleItems) counts[item.status]++;
+    for (const item of allItems) counts[item.status]++;
     return counts;
-  }, [lifecycleItems]);
+  }, [allItems]);
 
   // ---- Handlers ----
 
@@ -339,7 +422,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
       {/* Pending Caps Alert — includes both vault queue pending caps and discovered market pending caps */}
       {(() => {
         // Combine pending caps from vault queues + discovered markets
-        const allPendingItems = lifecycleItems.filter((li) => li.status === 'pending');
+        const allPendingItems = allItems.filter((li) => li.status === 'pending');
         if (allPendingItems.length === 0) return null;
         return (
           <Card className="border-warning/20">
@@ -408,13 +491,43 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
         );
       })()}
 
+      {/* Add market by ID */}
+      {canSubmit && (
+        <div className="flex items-end gap-2">
+          <div className="flex-1 min-w-0">
+            <label className="text-[10px] text-text-tertiary uppercase tracking-wider block mb-1">
+              <Plus size={10} className="inline mr-1" />
+              Add market by ID
+            </label>
+            <input
+              type="text"
+              value={manualMarketId}
+              onChange={(e) => { setManualMarketId(e.target.value); setManualMarketError(null); }}
+              placeholder="0x… (32-byte market ID)"
+              className="w-full bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary min-w-0 focus:outline-none focus:border-border-focus"
+            />
+          </div>
+          <Button
+            size="sm"
+            onClick={handleAddManualMarket}
+            disabled={!manualMarketId.trim() || manualMarketLoading}
+            loading={manualMarketLoading}
+          >
+            Look up
+          </Button>
+        </div>
+      )}
+      {manualMarketError && (
+        <p className="text-[10px] text-danger -mt-2">{manualMarketError}</p>
+      )}
+
       {/* Market Lifecycle Table */}
       <Card>
         <CardHeader>
           <CardTitle>Market Supply Caps</CardTitle>
           <div className="flex gap-1">
             {(['all', 'in_supply_queue', 'enabled', 'pending', 'available'] as const).map((filter) => {
-              const count = filter === 'all' ? lifecycleItems.length : statusCounts[filter];
+              const count = filter === 'all' ? allItems.length : statusCounts[filter];
               if (count === 0 && filter !== 'all') return null;
               return (
                 <button
