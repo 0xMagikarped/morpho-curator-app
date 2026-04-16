@@ -11,6 +11,7 @@
  * the chain config always wins — it's the curator's manual override.
  */
 
+import { useCallback } from 'react';
 import { type Address, type PublicClient } from 'viem';
 import { useQuery } from '@tanstack/react-query';
 import type { VaultFlavor } from '../../types';
@@ -93,13 +94,22 @@ export function useVaultFlavor(
   // A previously-tracked vault carries a flavor tag set at deploy / track
   // time. If present, we use it to seed `placeholderData` so consumers
   // render the correct layout immediately without waiting for the probe.
-  const trackedFlavor = useAppStore((s) => {
-    if (!chainId || !vault) return undefined;
-    const lower = vault.toLowerCase();
-    return s.trackedVaults.find(
-      (v) => v.chainId === chainId && v.address.toLowerCase() === lower,
-    )?.flavor;
-  });
+  //
+  // The selector is memoized to avoid Zustand re-subscribing on every
+  // render (inline selectors have a new identity each time, which can
+  // trigger sync re-render cycles in React 19 + Zustand v5).
+  const selectorKey = chainId && vault ? `${chainId}:${vault.toLowerCase()}` : '';
+  const trackedFlavorSelector = useCallback(
+    (s: { trackedVaults: Array<{ chainId: number; address: string; flavor?: VaultFlavor }> }) => {
+      if (!selectorKey) return undefined;
+      const [cid, lower] = selectorKey.split(':');
+      return s.trackedVaults.find(
+        (v) => v.chainId === Number(cid) && v.address.toLowerCase() === lower,
+      )?.flavor;
+    },
+    [selectorKey],
+  );
+  const trackedFlavor = useAppStore(trackedFlavorSelector);
 
   return useQuery({
     queryKey: ['vault-flavor', chainId, vault?.toLowerCase()],
