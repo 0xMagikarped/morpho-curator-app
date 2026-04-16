@@ -73,29 +73,32 @@ export function OwnerActionsPanel({ chainId, vaultAddress, isOwner }: OwnerActio
               onSuccess={handleSuccess}
             />
 
-            {/* Fee + timelock management are MetaMorpho-native. On Moolah
-                these surface through the timelock propose flow — see Stage 5
-                write router + the Moolah role card. */}
-            {!isMoolah && pending && (
-              <>
-                <FeeManagement
-                  chainId={chainId}
-                  vaultAddress={vaultAddress}
-                  currentFee={pending.fee}
-                  currentTimelock={pending.timelock}
-                  feeRecipient={pending.feeRecipient}
-                  pendingFee={pending.pendingFee}
-                  onSuccess={handleSuccess}
-                />
+            {/* Fee management — shown on both MetaMorpho and Moolah.
+                On Moolah, FeeManagement uses useVaultWrite to route
+                setFee/setFeeRecipient through the curatorTimeLock. */}
+            {pending && (
+              <FeeManagement
+                chainId={chainId}
+                vaultAddress={vaultAddress}
+                currentFee={pending.fee}
+                currentTimelock={pending.timelock}
+                feeRecipient={pending.feeRecipient}
+                pendingFee={pending.pendingFee}
+                onSuccess={handleSuccess}
+              />
+            )}
 
-                <TimelockManagement
-                  chainId={chainId}
-                  vaultAddress={vaultAddress}
-                  currentTimelock={pending.timelock}
-                  pendingTimelock={pending.pendingTimelock}
-                  onSuccess={handleSuccess}
-                />
-              </>
+            {/* Timelock management is MetaMorpho-native (submitTimelock /
+                acceptTimelock). On Moolah, the delay is controlled via
+                updateDelay on the TimeLock contracts. */}
+            {!isMoolah && pending && (
+              <TimelockManagement
+                chainId={chainId}
+                vaultAddress={vaultAddress}
+                currentTimelock={pending.timelock}
+                pendingTimelock={pending.pendingTimelock}
+                onSuccess={handleSuccess}
+              />
             )}
           </div>
         )}

@@ -1,9 +1,12 @@
-import { useMemo } from 'react';
-import type { Address } from 'viem';
+import { useMemo, useState } from 'react';
+import { isAddress, type Address } from 'viem';
 import { Shield, Clock, Layers, CheckCircle2, XCircle, Info } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
+import { Button } from '../../ui/Button';
 import { AddressDisplay } from '../../ui/AddressDisplay';
 import { useVaultSnapshot, type TimelockEntry } from '../../../lib/vault/adapter';
+import { useVaultWrite } from '../../../hooks/useVaultWrite';
+import { useVaultPermissions } from '../../../hooks/useVaultPermissions';
 import { getChainConfig } from '../../../config/chains';
 
 interface RolesMoolahProps {
@@ -128,6 +131,9 @@ export function RolesMoolah({ chainId, vaultAddress }: RolesMoolahProps) {
           </p>
         </div>
 
+        {/* Propose actions — visible to proposers */}
+        <MoolahRoleActions chainId={chainId} vaultAddress={vaultAddress} />
+
         {/* Protocol status */}
         <div className="pt-3 border-t border-border-subtle">
           <div className="flex items-center gap-1.5 mb-1.5">
@@ -232,6 +238,103 @@ function RoleSection({
           ) : null}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Propose actions — lets Moolah proposers submit allocator / curator changes
+ * through the write router (which schedules on the correct TimeLock).
+ */
+function MoolahRoleActions({
+  chainId,
+  vaultAddress,
+}: {
+  chainId: number;
+  vaultAddress: Address;
+}) {
+  const permissions = useVaultPermissions(chainId, vaultAddress);
+  const {
+    submit, isPending, isConfirming, isSuccess,
+    disabled: writeDisabled, disabledTooltip, invalidReason, mode,
+  } = useVaultWrite(chainId, vaultAddress);
+
+  const [allocatorAddr, setAllocatorAddr] = useState('');
+  const [allocatorGrant, setAllocatorGrant] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const isMoolah = mode === 'timelocked';
+
+  if (!permissions.canManage && !permissions.canCurate && !permissions.isAdmin) {
+    return null;
+  }
+
+  const isBusy = isPending || isConfirming;
+
+  const handleAllocator = () => {
+    setError(null);
+    if (!isAddress(allocatorAddr)) { setError('Invalid address'); return; }
+    void submit({ kind: 'setIsAllocator', addr: allocatorAddr as Address, isAllocator: allocatorGrant });
+    setAllocatorAddr('');
+  };
+
+  return (
+    <div className="pt-3 border-t border-border-subtle space-y-3">
+      <p className="text-[10px] text-text-tertiary uppercase tracking-wider">Propose changes</p>
+
+      {writeDisabled && disabledTooltip && (
+        <div className="px-2 py-1.5 bg-danger/10 border border-danger/30 text-[10px] text-danger">
+          {disabledTooltip}
+        </div>
+      )}
+
+      {/* Set allocator — manager TL proposer */}
+      {(permissions.canManage || permissions.isAdmin) && (
+        <div>
+          <span className="text-xs text-text-secondary font-medium">
+            {isMoolah ? 'Propose Allocator' : 'Set Allocator'}
+          </span>
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              type="text"
+              value={allocatorAddr}
+              onChange={(e) => setAllocatorAddr(e.target.value)}
+              placeholder="0x… allocator address"
+              className="flex-1 min-w-0 bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary focus:outline-none focus:border-border-focus"
+            />
+            <Button
+              size="sm"
+              onClick={() => { setAllocatorGrant(true); handleAllocator(); }}
+              disabled={!allocatorAddr || isBusy || writeDisabled}
+              loading={isBusy}
+              title={writeDisabled ? disabledTooltip ?? undefined : undefined}
+            >
+              {isMoolah ? 'Propose Grant' : 'Grant'}
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => { setAllocatorGrant(false); handleAllocator(); }}
+              disabled={!allocatorAddr || isBusy || writeDisabled}
+              loading={isBusy}
+              title={writeDisabled ? disabledTooltip ?? undefined : undefined}
+            >
+              {isMoolah ? 'Propose Revoke' : 'Revoke'}
+            </Button>
+          </div>
+          <p className="text-[10px] text-text-tertiary mt-1">
+            {isMoolah ? 'Scheduled via managerTimeLock.' : 'Grant or revoke allocator role.'}
+          </p>
+        </div>
+      )}
+
+      {isSuccess && (
+        <div className="bg-success/10 border border-success/20 px-2 py-1.5 text-[10px] text-success">
+          {isMoolah ? 'Proposal scheduled. Check Pending Proposals.' : 'Role updated.'}
+        </div>
+      )}
+
+      {error && <p className="text-[10px] text-danger">{error}</p>}
+      {invalidReason && <p className="text-[10px] text-danger">{invalidReason}</p>}
     </div>
   );
 }
