@@ -74,14 +74,22 @@ function TimelockProposalsSection({
   vaultAddress: Address;
   timelock: TimelockEntry & { address: Address };
 }) {
-  const scheduledOps = useAppStore((s) =>
-    s.scheduledOps.filter(
-      (o) =>
-        o.chainId === chainId &&
-        o.timelock.toLowerCase() === timelock.address.toLowerCase(),
-    ),
-  );
+  // Read the raw array from Zustand (stable reference when the slice
+  // hasn't changed), then filter in component scope via useMemo. Putting
+  // `.filter()` inside the selector created a new array on every
+  // `getSnapshot` call → `useSyncExternalStore` saw a different reference
+  // → re-render → infinite loop (React error #185).
+  const allScheduledOps = useAppStore((s) => s.scheduledOps);
   const removeScheduledOp = useAppStore((s) => s.removeScheduledOp);
+  const scheduledOps = useMemo(
+    () =>
+      allScheduledOps.filter(
+        (o) =>
+          o.chainId === chainId &&
+          o.timelock.toLowerCase() === timelock.address.toLowerCase(),
+      ),
+    [allScheduledOps, chainId, timelock.address],
+  );
 
   // Pass the full local seeds (with authoritative salt) to the fetcher so
   // external ops can be distinguished and gated on Execute.
