@@ -215,15 +215,9 @@ function makeSalt(intent: WriteIntent, vault: Address): `0x${string}` {
  * Parse a revert / simulation error into a short human-readable string.
  * Viem wraps chain errors in nested causes; pick the first useful one.
  */
-function parseSimulationError(err: unknown): string {
-  if (!err) return 'Simulation failed.';
-  const e = err as { shortMessage?: string; message?: string; cause?: { shortMessage?: string; message?: string } };
-  const short = e.shortMessage ?? e.cause?.shortMessage;
-  if (short) return short;
-  const full = e.message ?? e.cause?.message ?? String(err);
-  // Trim stack traces / RPC boilerplate.
-  return full.split('\n')[0]?.slice(0, 160) ?? 'Simulation failed.';
-}
+// parseSimulationError was here — removed because simulation preflight
+// is skipped for timelocked writes (the only current codepath). If
+// direct-write preflight is ever re-enabled, re-add the parser.
 
 export type PreparedWrite =
   | {
@@ -313,26 +307,13 @@ export async function prepareWrite(
   const salt = makeSalt(intent, vault);
   const delay = timelockEntry.minDelay;
 
-  // Simulation preflight: run the inner call against the target BEFORE
-  // scheduling. If Moolah has renamed a selector or the curator's inputs
-  // are bad, we catch it now — not after a 1-day timelock delay.
-  // Skipped when no client (unit-test path) or for `setTimelockDelay`
-  // where the inner call is `updateDelay` on the timelock itself, which
-  // only the timelock can call (and thus always reverts under
-  // `eth_call`).
-  if (client && intent.kind !== 'setTimelockDelay') {
-    try {
-      await client.call({
-        to: target,
-        data: calldata,
-      });
-    } catch (err) {
-      return {
-        type: 'invalid',
-        reason: parseSimulationError(err),
-      };
-    }
-  }
+  // NOTE: we intentionally skip the simulation preflight for timelocked
+  // writes. The inner calldata targets the vault, which enforces role
+  // checks on msg.sender. Under eth_call the sender is the curator's
+  // wallet (or 0x0), NOT the TimeLock — so role-gated functions like
+  // setFee / setIsAllocator always revert in simulation even when the
+  // calldata is correct. The real execution happens when the TimeLock
+  // calls the vault as msg.sender, which passes the on-chain check.
 
   // Hash the operation on-chain when a client is available — guarantees we
   // match OZ's keccak across versions (v4 vs v5).
