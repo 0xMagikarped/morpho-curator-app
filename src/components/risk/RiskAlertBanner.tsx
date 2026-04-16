@@ -1,9 +1,6 @@
+import { useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { RiskAlert } from '../../lib/risk/riskTypes';
-
-interface RiskAlertBannerProps {
-  alerts: RiskAlert[];
-  maxShow?: number;
-}
 
 const SEVERITY_STYLES = {
   critical: 'bg-danger/15 border-danger/20 text-danger',
@@ -17,33 +14,48 @@ const SEVERITY_ICONS = {
   info: 'i',
 };
 
-export function RiskAlertBanner({ alerts, maxShow = 3 }: RiskAlertBannerProps) {
+interface RiskAlertBannerProps {
+  alerts: RiskAlert[];
+  maxShow?: number; // kept for API compat but no longer used
+}
+
+export function RiskAlertBanner({ alerts }: RiskAlertBannerProps) {
+  const [expanded, setExpanded] = useState(false);
+
   if (alerts.length === 0) return null;
 
   const topSeverity = alerts[0].severity;
-  const shown = alerts.slice(0, maxShow);
-  const remaining = alerts.length - shown.length;
 
   return (
-    <div className={`border p-3 text-xs space-y-1.5 ${SEVERITY_STYLES[topSeverity]}`}>
-      <div className="flex items-center justify-between">
+    <div className={`border text-xs ${SEVERITY_STYLES[topSeverity]}`}>
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="w-full flex items-center justify-between px-3 py-2 cursor-pointer hover:opacity-80 transition-opacity"
+      >
         <span className="font-medium">
           {alerts.length} alert{alerts.length !== 1 ? 's' : ''}
         </span>
-      </div>
-      {shown.map((alert) => (
-        <div key={alert.id} className="flex items-center gap-2">
-          <span className="font-mono">{SEVERITY_ICONS[alert.severity]}</span>
-          <span>{alert.title}</span>
-          {alert.description && (
-            <span className="text-text-tertiary ml-auto truncate max-w-[200px]">
-              {alert.description}
-            </span>
-          )}
+        <ChevronDown
+          size={14}
+          className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1">
+          {alerts.map((alert) => (
+            <div key={alert.id} className="flex items-center gap-2">
+              <span className="font-mono shrink-0">{SEVERITY_ICONS[alert.severity]}</span>
+              <span>{alert.title}</span>
+              {alert.description && (
+                <span className="text-text-tertiary ml-auto truncate max-w-[200px]">
+                  {alert.description}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
-      ))}
-      {remaining > 0 && (
-        <p className="text-text-tertiary">+{remaining} more</p>
       )}
     </div>
   );
