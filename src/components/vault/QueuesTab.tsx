@@ -5,7 +5,8 @@ import { ArrowRightLeft } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
-import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
+import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount } from '../../lib/utils/format';
@@ -21,7 +22,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading } = useVaultMarketsFromApi(chainId, vaultAddress);
-  const role = useVaultRole(chainId, vaultAddress);
+  const permissions = useVaultPermissions(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const { data: allChainMarkets } = useMarketScanner(chainId);
 
@@ -51,7 +52,9 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
 
   const decimals = vault?.assetInfo.decimals ?? 18;
   const assetSymbol = vault?.assetInfo.symbol ?? '';
-  const canEdit = role.isAllocator || role.isOwner;
+  // Queues are curator-scope on Moolah (proposed via curatorTimeLock).
+  // On MetaMorpho, allocator or owner can reorder queues.
+  const canEdit = permissions.canCurate || permissions.isAllocator || permissions.isAdmin;
 
   // Build market lookup from API data
   const marketLookup = useMemo(() => {

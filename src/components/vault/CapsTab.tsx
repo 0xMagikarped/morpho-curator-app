@@ -8,6 +8,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
+import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
 import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
@@ -57,6 +58,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const role = useVaultRole(chainId, vaultAddress);
+  const permissions = useVaultPermissions(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
   const { data: allChainMarkets, error: scannerError } = useMarketScanner(chainId);
@@ -285,7 +287,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     );
   }
 
-  const canSubmit = role.isCurator || role.isOwner;
+  const canSubmit = permissions.canCurate || permissions.isAdmin;
   const timelockSeconds = vault ? Number(vault.timelock) : 0;
   const isZeroTimelock = timelockSeconds === 0;
 
@@ -385,7 +387,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                           {isMoolah ? 'Propose Accept' : 'Accept'}
                         </Button>
                       )}
-                      {role.isEmergencyRole && pc.marketId && (
+                      {(permissions.canCancel || role.isEmergencyRole) && pc.marketId && (
                         <Button
                           size="sm"
                           variant="danger"

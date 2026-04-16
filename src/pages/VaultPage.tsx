@@ -13,6 +13,7 @@ import { V2SecurityTab } from '../components/vault/V2SecurityTab';
 import { V2AllocationTab } from '../components/vault/V2AllocationTab';
 import { QueuesTab } from '../components/vault/QueuesTab';
 import { useVaultInfo, useVaultRole } from '../lib/hooks/useVault';
+import { useVaultPermissions } from '../hooks/useVaultPermissions';
 import { isApiSupportedChain } from '../lib/data/morphoApi';
 import { useAppStore } from '../store/appStore';
 import { cn } from '../lib/utils/cn';
@@ -68,6 +69,7 @@ export function VaultPage() {
 
   const { data: vault, isLoading, error, dataSource } = useVaultInfo(chainId, vaultAddress);
   const role = useVaultRole(chainId, vaultAddress);
+  const permissions = useVaultPermissions(chainId, vaultAddress);
   const { data: vaultFlavor } = useVaultFlavor(chainId, vaultAddress);
   const { data: isBlacklisted } = useIsVaultBlacklisted(chainId, vaultAddress);
   const chainConfig = chainId ? getChainConfig(chainId) : undefined;
@@ -214,10 +216,19 @@ export function VaultPage() {
           if (tab.protocols && !tab.protocols.includes(chainConfig?.protocol ?? 'morpho')) return null;
 
           const label = isV2 && tab.v2Label ? tab.v2Label : tab.label;
-          const hasAccess =
-            !tab.requiresRole ||
-            role[tab.requiresRole] ||
-            role.isOwner;
+          // On Moolah, always show role-gated tabs (read-only if no
+          // permission). Proposers need to SEE caps/queues to know what
+          // to propose. On MetaMorpho, keep the old hide-when-no-role UX.
+          const isMoolahChain = chainConfig?.protocol === 'moolah';
+          const hasAccess = isMoolahChain
+            ? !tab.requiresRole ||
+              (tab.requiresRole === 'isCurator' && (permissions.canCurate || permissions.isAdmin)) ||
+              (tab.requiresRole === 'isAllocator' && (permissions.isAllocator || permissions.canManage || permissions.isAdmin)) ||
+              (tab.requiresRole === 'isEmergencyRole' && (permissions.canCancel || permissions.isAdmin)) ||
+              role.isOwner
+            : !tab.requiresRole ||
+              role[tab.requiresRole] ||
+              role.isOwner;
 
           return (
             <button

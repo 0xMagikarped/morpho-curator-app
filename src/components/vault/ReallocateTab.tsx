@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole } from '../../lib/hooks/useVault';
+import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { formatTokenAmount, parseTokenAmount, formatApyDisplay, getApyColorClass } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { isMorphoSdkSupported } from '../../lib/morpho/sdk-config';
@@ -199,6 +200,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const { isMismatch, requestSwitch } = useChainGuard(chainId);
   const role = useVaultRole(chainId, vaultAddress);
+  const permissions = useVaultPermissions(chainId, vaultAddress);
   const { data: allocation, isLoading: allocLoading, error: allocError } = useVaultAllocation(chainId, vaultAddress);
   const { data: markets, isLoading: marketsLoading, error: marketsError } = useVaultMarketsFromApi(chainId, vaultAddress);
   const { reallocate, isPending, isConfirming, isSuccess, error: txError, reset: resetTx } = useReallocate(vaultAddress, chainId);
@@ -490,7 +492,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   }
 
   // Role guard
-  if (!role.isAllocator && !role.isOwner) {
+  if (!role.isAllocator && !role.isOwner && !permissions.canManage) {
     return (
       <Card className="py-8 text-center">
         <p className="text-text-tertiary text-sm">

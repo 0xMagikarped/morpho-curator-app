@@ -25,8 +25,9 @@ export function OwnerActionsPanel({ chainId, vaultAddress, isOwner }: OwnerActio
     refetch();
   }, [refetch]);
 
-  // Moolah vaults show the Pending Proposals panel to any viewer, regardless
-  // of whether the connected wallet is an admin — transparency over gating.
+  // On MetaMorpho: show only to owner. On Moolah: show to everyone —
+  // Pending Proposals + role card are read-useful. Write buttons inside
+  // gate on permissions.canPropose individually.
   if (!isMoolah && (!isOwner || isLoading || !pending)) return null;
   if (isMoolah && isLoading) return null;
 
