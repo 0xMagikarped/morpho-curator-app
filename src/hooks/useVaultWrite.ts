@@ -99,9 +99,15 @@ export function useVaultWrite(
   const disabledTooltip = disabledReason ? DISABLED_TOOLTIP[disabledReason] : null;
 
   const [pendingOp, setPendingOp] = useState<PreparedWrite | null>(null);
+  // Track which tx hash we've already handled so the success effect fires
+  // exactly once — prevents the infinite loop where `onSuccess` triggers a
+  // parent re-render that gives us a new `onSuccess` reference (React error
+  // #185: max update depth exceeded).
+  const [handledHash, setHandledHash] = useState<`0x${string}` | undefined>(undefined);
 
   useEffect(() => {
-    if (isSuccess) {
+    if (isSuccess && hash && hash !== handledHash) {
+      setHandledHash(hash);
       // Record the Moolah-scheduled op locally so the panel always sees it,
       // even if the RPC prunes the log window.
       if (pendingOp?.type === 'timelocked' && chainId && vaultAddress) {
@@ -124,7 +130,7 @@ export function useVaultWrite(
       setPendingOp(null);
       onSuccess?.();
     }
-  }, [isSuccess, pendingOp, chainId, vaultAddress, hash, addScheduledOp, onSuccess]);
+  }, [isSuccess, hash, handledHash, pendingOp, chainId, vaultAddress, addScheduledOp, onSuccess]);
 
   const describe = useCallback(
     async (intent: WriteIntent): Promise<PreparedWrite | null> => {

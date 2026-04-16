@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { isHex, type Address } from 'viem';
 import { useAccount, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
+
 import { keccak256, toHex } from 'viem';
 import { AlertTriangle, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { ProposalContents } from './ProposalContents';
@@ -251,13 +252,18 @@ function ProposalRow({
   const { writeContract: writeCancel, data: cancelHash, isPending: cancelPending } = useGuardedWriteContract();
   const { isLoading: execConfirming, isSuccess: execSuccess } = useWaitForTransactionReceipt({ hash: execHash });
   const { isLoading: cancelConfirming, isSuccess: cancelSuccess } = useWaitForTransactionReceipt({ hash: cancelHash });
-
-  if ((execSuccess || cancelSuccess)) {
-    queueMicrotask(() => {
+  // Track which hash we've already handled so the callback fires exactly
+  // once — onAction() → refetch() → re-render → execSuccess still true →
+  // infinite loop if unchecked (React error #185).
+  const [handledTx, setHandledTx] = useState<`0x${string}` | null>(null);
+  useEffect(() => {
+    const doneHash = (execSuccess && execHash) || (cancelSuccess && cancelHash) || null;
+    if (doneHash && doneHash !== handledTx) {
+      setHandledTx(doneHash);
       removeScheduledOp(chainId, proposal.opId);
       onAction();
-    });
-  }
+    }
+  }, [execSuccess, cancelSuccess, execHash, cancelHash, handledTx, chainId, proposal.opId, removeScheduledOp, onAction]);
 
   const handleExecute = () => {
     if (!saltResolved) return;
