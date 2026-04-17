@@ -35,9 +35,11 @@ import {
   encodeFunctionData,
   keccak256,
   parseAbiParameters,
+  toHex,
   type Address,
   type PublicClient,
 } from 'viem';
+import type { VaultFlavor } from '../../types';
 import { metaMorphoV1Abi } from '../contracts/abis';
 import { timelockControllerAbi } from '../contracts/moolahAbis';
 import type { VaultSnapshot } from './adapter';
@@ -83,32 +85,110 @@ export type WriteIntent =
       }>;
     };
 
-/** Which timelock a given intent routes through on Moolah. */
+/**
+ * Which timelock a given intent routes through on Moolah.
+ *
+ * IMPORTANT: MoolahVault's role model differs from MetaMorpho V1:
+ *   - CURATOR role → setCap (instant, one step — no submitCap/acceptCap)
+ *   - MANAGER role → setFee, setFeeRecipient, grantRole(ALLOCATOR)
+ *   - ALLOCATOR role → setSupplyQueue, updateWithdrawQueue, reallocate (DIRECT call, no timelock)
+ *
+ * Verified against lista-dao/moolah MoolahVault.sol (2026-04-17).
+ */
 const INTENT_TIMELOCK: Record<WriteIntentKind, 'curator' | 'manager' | 'direct'> = {
   setCap: 'curator',
-  acceptCap: 'curator',
+  acceptCap: 'curator',       // Moolah: acceptCap doesn't exist; setCap is instant
   removeCap: 'curator',
-  setSupplyQueue: 'curator',
-  updateWithdrawQueue: 'curator',
-  setFeeRecipient: 'curator',
-  setFee: 'curator',
+  setSupplyQueue: 'direct',   // Moolah: ALLOCATOR role, called directly
+  updateWithdrawQueue: 'direct', // Moolah: ALLOCATOR role, called directly
+  setFeeRecipient: 'manager', // Moolah: MANAGER role
+  setFee: 'manager',          // Moolah: MANAGER role
   setCurator: 'curator',
   setManager: 'curator',
   setTimelockDelay: 'curator',
-  setIsAllocator: 'manager',
-  // Direct: see the comment at the top of this file.
-  reallocate: 'direct',
+  setIsAllocator: 'manager',  // Moolah: MANAGER is admin of ALLOCATOR
+  reallocate: 'direct',       // Moolah: ALLOCATOR role, called directly
 };
 
-function encodeVaultCall(intent: WriteIntent): `0x${string}` {
+// OZ AccessControl ABI — for grantRole / revokeRole on MoolahVault
+const accessControlAbi = [
+  {
+    inputs: [
+      { name: 'role', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    name: 'grantRole',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'role', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    name: 'revokeRole',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+// MoolahVault setCap ABI — different from MetaMorpho's submitCap
+const moolahSetCapAbi = [
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'loanToken', type: 'address' },
+          { name: 'collateralToken', type: 'address' },
+          { name: 'oracle', type: 'address' },
+          { name: 'irm', type: 'address' },
+          { name: 'lltv', type: 'uint256' },
+        ],
+        name: 'marketParams',
+        type: 'tuple',
+      },
+      { name: 'newSupplyCap', type: 'uint256' },
+    ],
+    name: 'setCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+/** keccak256("ALLOCATOR") — the role constant on MoolahVault. */
+const MOOLAH_ALLOCATOR_ROLE = keccak256(toHex('ALLOCATOR'));
+
+function encodeVaultCall(intent: WriteIntent, flavor: VaultFlavor): `0x${string}` {
+  const isMoolah = flavor === 'moolahVault';
+
   switch (intent.kind) {
     case 'setCap':
+      // Moolah: setCap (instant, one step). MetaMorpho: submitCap (two-step with timelock).
+      if (isMoolah) {
+        return encodeFunctionData({
+          abi: moolahSetCapAbi,
+          functionName: 'setCap',
+          args: [intent.marketParams, intent.newSupplyCap],
+        });
+      }
       return encodeFunctionData({
         abi: metaMorphoV1Abi,
         functionName: 'submitCap',
         args: [intent.marketParams, intent.newSupplyCap],
       });
     case 'acceptCap':
+      // Moolah: setCap is instant — no accept step. Encode as setCap with 0 cap
+      // as a safety fallback; the UI should not show an Accept button on Moolah.
+      if (isMoolah) {
+        return encodeFunctionData({
+          abi: moolahSetCapAbi,
+          functionName: 'setCap',
+          args: [intent.marketParams, 0n],
+        });
+      }
       return encodeFunctionData({
         abi: metaMorphoV1Abi,
         functionName: 'acceptCap',
@@ -151,7 +231,6 @@ function encodeVaultCall(intent: WriteIntent): `0x${string}` {
         args: [intent.newCurator],
       });
     case 'setManager':
-      // MoolahVault-only; MetaMorpho doesn't have this. Route only on Moolah.
       return encodeFunctionData({
         abi: [
           {
@@ -166,14 +245,21 @@ function encodeVaultCall(intent: WriteIntent): `0x${string}` {
         args: [intent.newManager],
       });
     case 'setIsAllocator':
+      // Moolah: use OZ grantRole/revokeRole with the ALLOCATOR role constant.
+      // MetaMorpho: use setIsAllocator(addr, bool).
+      if (isMoolah) {
+        return encodeFunctionData({
+          abi: accessControlAbi,
+          functionName: intent.isAllocator ? 'grantRole' : 'revokeRole',
+          args: [MOOLAH_ALLOCATOR_ROLE, intent.addr],
+        });
+      }
       return encodeFunctionData({
         abi: metaMorphoV1Abi,
         functionName: 'setIsAllocator',
         args: [intent.addr, intent.isAllocator],
       });
     case 'setTimelockDelay':
-      // `updateDelay` on OZ TimelockController — not a vault call. The write
-      // router handles this at a higher level (target = timelock itself).
       return encodeFunctionData({
         abi: [
           {
@@ -293,10 +379,7 @@ export async function prepareWrite(
     throw new Error(`prepareWrite: Moolah vault is missing its ${routing}TimeLock`);
   }
 
-  const calldata =
-    intent.kind === 'setTimelockDelay'
-      ? encodeVaultCall(intent) // target is the timelock itself
-      : encodeVaultCall(intent);
+  const calldata = encodeVaultCall(intent, 'moolahVault');
 
   // For `setTimelockDelay`, OZ's `updateDelay` must be called BY the timelock
   // on itself — schedule it with target = timelock address.
