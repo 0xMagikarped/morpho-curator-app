@@ -41,7 +41,7 @@ export const sei: Chain = {
 export const pharos: Chain = {
   id: 1672,
   name: 'Pharos',
-  nativeCurrency: { name: 'Pharos', symbol: 'PHRS', decimals: 18 },
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
     default: {
       http: ['https://rpc.pharos.xyz'],

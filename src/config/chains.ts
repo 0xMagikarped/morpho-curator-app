@@ -306,20 +306,28 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   // CONTRACTS NOT YET DEPLOYED — fill addresses when morpho-org/sdks ships Pharos support
   // Track: https://github.com/morpho-org/sdks → packages/blue-sdk/src/addresses.ts
   // ============================================================
+  // ============================================================
+  // Pharos Mainnet (Chain ID 1672) — Morpho V2 (Vault V2 + Adapters)
+  // Addresses from morpho-org/sdks addresses.ts, verified April 2026.
+  // ============================================================
   1672: {
     chainId: 1672,
     name: 'Pharos',
     protocol: 'morpho',
-    // No live contracts yet; leave the flavor undefined so callers have
-    // to reach for the null-safe default handler instead of silently
-    // assuming metaMorphoV1.
-    defaultVaultFlavor: undefined,
+    defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: ['https://rpc.pharos.xyz'],
     blockExplorer: 'https://pharosscan.xyz',
-    morphoBlue: '0x0000000000000000000000000000000000000000' as Address, // NOT YET DEPLOYED — update when contracts ship
-    deployed: false,
-    vaultFactories: {},
-    periphery: {},
+    morphoBlue: '0x18573fA18fd17dDfD790B4a5B5b2977aad3b4Efb' as Address,
+    deployed: true,
+    vaultFactories: {
+      v2: '0x8E01ed1E1A41029b3137FcE9Aa880c0A54827498' as Address,
+    },
+    periphery: {
+      adaptiveCurveIrm: '0xD5E02889C13230458506CC842347c4E62F8cDF3a' as Address,
+      bundler3: '0x3c90c09F8c5d927a117F681fB924952DbbD99120' as Address,
+      v2AdapterRegistry: '0xbe858d729548eB49BbFA05Acd3674ca8cdaAdD4b' as Address,
+      morphoMarketV1AdapterV2Factory: '0xe510e1fcC429943cA3455A7bfBD79f0307Cd8403' as Address,
+    },
     apiSupported: false,
     blockTime: 2_000,
     finality: 'probabilistic',
@@ -328,14 +336,14 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       sstoreCost: 20_000,
     },
     nativeToken: {
-      symbol: 'PHRS',
+      symbol: 'ETH',
       decimals: 18,
-      wrapped: '0x0000000000000000000000000000000000000000' as Address, // Placeholder — update when WPHRS is deployed
+      wrapped: '0x52C48d4213107b20bC583832b0d951FB9CA8F0B0' as Address,
     },
     stablecoins: [],
-    oracleProviders: [],
+    oracleProviders: ['chainlink-push'],
     deploymentBlock: 0,
-    verified: false,
+    verified: true,
     scanner: {
       batchSize: 5_000,
       pollIntervalMs: 5_000,
