@@ -459,7 +459,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
                       </p>
                     </div>
                     <div className="flex gap-2">
-                      {isReady && canSubmit && (
+                      {isReady && (
                         <Button
                           size="sm"
                           onClick={() => handleAcceptCap(item)}
