@@ -217,16 +217,22 @@ function ProposalRow({
   const { address: account } = useAccount();
   const removeScheduledOp = useAppStore((s) => s.removeScheduledOp);
 
-  // External proposals: salt unknown. Curator may paste it manually.
+  // External proposals: salt unknown. We first try zero salt (the OZ /
+  // Gnosis Safe default), then let the curator paste manually.
+  const ZERO_SALT = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
   const [pastedSalt, setPastedSalt] = useState<string>('');
   const pastedSaltValid =
     isHex(pastedSalt) && (pastedSalt.length === 66); // 0x + 64 hex chars
+  // For external proposals: default to zero salt (most common), allow override.
   const effectiveSalt: `0x${string}` = proposal.saltKnown
     ? proposal.salt
     : pastedSaltValid
       ? (pastedSalt as `0x${string}`)
-      : proposal.salt;
-  const saltResolved = proposal.saltKnown || pastedSaltValid;
+      : ZERO_SALT;
+  // Always allow execute attempt — zero salt is the right default for
+  // externally-scheduled ops (Safe, CLI, etherscan). If it's wrong the
+  // pre-flight check below catches it before the wallet signs.
+  const saltResolved = true;
 
   // Enumerated cancellers come from the snapshot. When enumeration is
   // empty but a wallet is connected, fall back to a direct `hasRole` probe
@@ -273,8 +279,75 @@ function ProposalRow({
     }
   }, [execSuccess, cancelSuccess, execHash, cancelHash, handledTx, chainId, proposal.opId, removeScheduledOp, onAction]);
 
-  const handleExecute = () => {
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+
+  const handleExecute = async () => {
     if (!saltResolved) return;
+    setPreflightError(null);
+
+    // Pre-flight: verify the operation exists and is ready on-chain BEFORE
+    // sending the tx. This catches salt mismatches, predecessor issues, and
+    // stale state — surfacing a clear error instead of an opaque "#1002".
+    try {
+      const client = getPublicClient(chainId);
+      // Compute the opId the same way OZ does: hash(target, value, data, predecessor, salt)
+      const preflightOpId = await client.readContract({
+        address: timelock.address,
+        abi: timelockControllerAbi,
+        functionName: 'hashOperation',
+        args: [
+          proposal.target,
+          proposal.value,
+          proposal.data,
+          proposal.predecessor,
+          effectiveSalt,
+        ],
+      }) as `0x${string}`;
+
+      const [isOp, isReady] = await Promise.all([
+        client.readContract({
+          address: timelock.address,
+          abi: timelockControllerAbi,
+          functionName: 'isOperation',
+          args: [preflightOpId],
+        }) as Promise<boolean>,
+        client.readContract({
+          address: timelock.address,
+          abi: timelockControllerAbi,
+          functionName: 'isOperationReady',
+          args: [preflightOpId],
+        }) as Promise<boolean>,
+      ]);
+
+      if (!isOp) {
+        setPreflightError(
+          `Operation not found on-chain (computed id: ${preflightOpId.slice(0, 10)}…). ` +
+          `The salt may not match — the original schedule used a different salt than "${effectiveSalt.slice(0, 10)}…". ` +
+          (proposal.saltKnown
+            ? 'This proposal was submitted from this app — try clearing localStorage and re-discovering.'
+            : 'Try pasting the correct salt from the original scheduling tool.'),
+        );
+        return;
+      }
+      if (!isReady) {
+        const ts = await client.readContract({
+          address: timelock.address,
+          abi: timelockControllerAbi,
+          functionName: 'getTimestamp',
+          args: [preflightOpId],
+        }) as bigint;
+        if (ts === 1n) {
+          setPreflightError('Operation already executed.');
+        } else {
+          setPreflightError(`Operation exists but is not ready yet (readyAt: ${ts}).`);
+        }
+        return;
+      }
+    } catch (err) {
+      // Pre-flight RPC failed — let the wallet handle it (it'll simulate).
+      console.warn('[execute preflight] RPC check failed:', err);
+    }
+
     writeExec({
       address: timelock.address,
       abi: timelockControllerAbi,
@@ -354,29 +427,39 @@ function ProposalRow({
             )}
           </div>
           {!proposal.saltKnown && !proposal.isExpired && (
-            <div className="flex items-center gap-1.5 pt-1">
-              <input
-                type="text"
-                value={pastedSalt}
-                onChange={(e) => setPastedSalt(e.target.value.trim())}
-                placeholder="0x… (32-byte salt from the original scheduler)"
-                className="flex-1 min-w-0 bg-bg-surface border border-border-default px-2 py-1 text-[10px] text-text-primary font-mono placeholder-text-tertiary focus:outline-none focus:border-border-focus"
-              />
-              {pastedSalt && !pastedSaltValid && (
-                <span className="text-[9px] text-danger shrink-0">Invalid bytes32</span>
-              )}
-              {pastedSaltValid && (
-                <span className="text-[9px] text-success shrink-0">Salt ok</span>
-              )}
+            <div className="pt-1 space-y-1">
+              <p className="text-[9px] text-text-tertiary">
+                External proposal — executing with zero salt (default). Override below if needed:
+              </p>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={pastedSalt}
+                  onChange={(e) => { setPastedSalt(e.target.value.trim()); setPreflightError(null); }}
+                  placeholder="0x… (override salt if zero doesn't work)"
+                  className="flex-1 min-w-0 bg-bg-surface border border-border-default px-2 py-1 text-[10px] text-text-primary font-mono placeholder-text-tertiary focus:outline-none focus:border-border-focus"
+                />
+                {pastedSalt && !pastedSaltValid && (
+                  <span className="text-[9px] text-danger shrink-0">Invalid bytes32</span>
+                )}
+                {pastedSaltValid && (
+                  <span className="text-[9px] text-success shrink-0">Using custom salt</span>
+                )}
+              </div>
+            </div>
+          )}
+          {preflightError && (
+            <div className="mt-1 px-2 py-1.5 bg-danger/10 border border-danger/30 text-[10px] text-danger">
+              {preflightError}
             </div>
           )}
         </div>
         <div className="flex flex-col gap-1.5 shrink-0">
-          {!proposal.isExpired && (proposal.isReady || !proposal.saltKnown) ? (
+          {!proposal.isExpired && proposal.isReady ? (
             <Button
               size="sm"
               onClick={handleExecute}
-              disabled={!canExecute || execBusy || !saltResolved || !proposal.isReady}
+              disabled={!canExecute || execBusy}
               loading={execBusy}
               title={execBlockedReason}
             >

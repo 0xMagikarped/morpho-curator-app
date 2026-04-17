@@ -193,6 +193,22 @@ function ArgValue({
     return <AmountValue raw={arg.value} decimals={hint.amount.decimals} symbol={hint.amount.symbol} />;
   }
 
+  // Percent (WAD) — must check BEFORE the regex fallback because arg
+  // names like "newFee" match /fee/i and would hit "decimals unknown".
+  if (hint?.kind === 'percentWad' && typeof arg.value === 'bigint') {
+    return <span className="font-mono text-text-primary">{(Number(arg.value) / 1e16).toFixed(2)}%</span>;
+  }
+
+  // Delay seconds — also before the regex fallback.
+  if (hint?.kind === 'delaySeconds' && typeof arg.value === 'bigint') {
+    return (
+      <span className="font-mono text-text-primary">
+        {humanizeSeconds(arg.value)}
+        <span className="text-text-tertiary ml-1">({arg.value.toString()}s)</span>
+      </span>
+    );
+  }
+
   // Token amount without hint — show raw + uncertainty marker
   if (
     typeof arg.value === 'bigint' &&
@@ -205,21 +221,6 @@ function ArgValue({
         <span className="text-warning text-[9px]" title="Decimals unknown — value shown raw">
           (decimals unknown)
         </span>
-      </span>
-    );
-  }
-
-  // Percent (WAD)
-  if (hint?.kind === 'percentWad' && typeof arg.value === 'bigint') {
-    return <span className="font-mono text-text-primary">{(Number(arg.value) / 1e16).toFixed(2)}%</span>;
-  }
-
-  // Delay seconds
-  if (hint?.kind === 'delaySeconds' && typeof arg.value === 'bigint') {
-    return (
-      <span className="font-mono text-text-primary">
-        {humanizeSeconds(arg.value)}
-        <span className="text-text-tertiary ml-1">({arg.value.toString()}s)</span>
       </span>
     );
   }
