@@ -84,6 +84,12 @@ export const HINTS: Record<string, Record<string, HintFn>> = {
   setFee: {
     newFee: () => ({ kind: 'percentWad' }),
   },
+  grantRole: {
+    role: () => ({ kind: 'bytes' }),
+  },
+  revokeRole: {
+    role: () => ({ kind: 'bytes' }),
+  },
   setTimelock: {
     newTimelock: () => ({ kind: 'delaySeconds' }),
   },

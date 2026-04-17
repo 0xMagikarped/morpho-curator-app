@@ -9,10 +9,22 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle, ExternalLink } from 'lucide-react';
-import type { Address } from 'viem';
+import { keccak256, toHex, type Address } from 'viem';
 import { decodeCall, type DecodedArg, type DecodedCall } from '../../../lib/timelock/decodeCall';
 import { getArgHint, resolveAddressLabel } from '../../../lib/timelock/hints';
 import { getChainConfig } from '../../../config/chains';
+
+/** Map well-known OZ / Moolah role hashes to human labels. */
+const KNOWN_ROLE_HASHES: Record<string, string> = {
+  [keccak256(toHex('ALLOCATOR')).toLowerCase()]: 'ALLOCATOR',
+  [keccak256(toHex('MANAGER')).toLowerCase()]: 'MANAGER',
+  [keccak256(toHex('CURATOR')).toLowerCase()]: 'CURATOR',
+  [keccak256(toHex('BOT')).toLowerCase()]: 'BOT',
+  [keccak256(toHex('PROPOSER_ROLE')).toLowerCase()]: 'PROPOSER_ROLE',
+  [keccak256(toHex('EXECUTOR_ROLE')).toLowerCase()]: 'EXECUTOR_ROLE',
+  [keccak256(toHex('CANCELLER_ROLE')).toLowerCase()]: 'CANCELLER_ROLE',
+  ['0x0000000000000000000000000000000000000000000000000000000000000000']: 'DEFAULT_ADMIN_ROLE',
+};
 import { useVaultSnapshot } from '../../../lib/vault/adapter';
 
 interface ProposalContentsProps {
@@ -225,14 +237,22 @@ function ArgValue({
     );
   }
 
-  // Market ID (bytes32)
+  // Market ID / Role hash (bytes32)
   if (arg.type === 'bytes32' && typeof arg.value === 'string') {
     const v = arg.value as string;
+    const roleLabel = KNOWN_ROLE_HASHES[v.toLowerCase()];
     return (
       <span className="font-mono text-text-primary">
-        {v.slice(0, 10)}…{v.slice(-8)}
+        {roleLabel ? (
+          <span className="text-accent-primary">{roleLabel}</span>
+        ) : (
+          <>{v.slice(0, 10)}…{v.slice(-8)}</>
+        )}
         {hint?.kind === 'marketId' && (
           <span className="text-text-tertiary ml-1">(market ID)</span>
+        )}
+        {roleLabel && (
+          <span className="text-text-tertiary ml-1">(role)</span>
         )}
       </span>
     );

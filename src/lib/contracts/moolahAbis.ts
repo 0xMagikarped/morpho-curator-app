@@ -185,6 +185,49 @@ export const moolahVaultAbi = [
     stateMutability: 'view',
     type: 'function',
   },
+  // OZ AccessControl writes — used by the TimeLock to grant/revoke
+  // ALLOCATOR and other roles on the vault.
+  {
+    inputs: [
+      { name: 'role', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    name: 'grantRole',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'role', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    name: 'revokeRole',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // MoolahVault setCap — instant, single-step (no submitCap/acceptCap)
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'loanToken', type: 'address' },
+          { name: 'collateralToken', type: 'address' },
+          { name: 'oracle', type: 'address' },
+          { name: 'irm', type: 'address' },
+          { name: 'lltv', type: 'uint256' },
+        ],
+        name: 'marketParams',
+        type: 'tuple',
+      },
+      { name: 'newSupplyCap', type: 'uint256' },
+    ],
+    name: 'setCap',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
   // ------------------------------------------------------------
   // Inherited MetaMorpho V1 setters. MoolahVault preserves the MM V1
   // interface verbatim; we list each one here so the TimeLock decoder
