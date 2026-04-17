@@ -41,7 +41,10 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'markets', label: 'Markets' },
-  { id: 'caps', label: 'Caps', requiresRole: 'isCurator' },
+  // Caps is always visible — allocators need to see caps for reallocation
+  // limits, and any role can accept pending caps after timelock. Write
+  // buttons inside are gated by permissions.canCurate.
+  { id: 'caps', label: 'Caps' },
   { id: 'adapters', label: 'Adapters', v2Only: true },
   { id: 'allocation', label: 'Allocation', v2Only: true },
   { id: 'queues', label: 'Queues', requiresRole: 'isAllocator', v1Only: true },
