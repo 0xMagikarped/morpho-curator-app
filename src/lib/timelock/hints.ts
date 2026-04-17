@@ -81,6 +81,13 @@ export const HINTS: Record<string, Record<string, HintFn>> = {
         ? { amount: { decimals: ctx.vaultAssetDecimals!, symbol: ctx.vaultAssetSymbol } }
         : null,
   },
+  // Moolah uses setCap (instant) instead of submitCap (two-step).
+  setCap: {
+    newSupplyCap: (_args, ctx) =>
+      vaultDecimalsMatchSnapshot(ctx)
+        ? { amount: { decimals: ctx.vaultAssetDecimals!, symbol: ctx.vaultAssetSymbol } }
+        : null,
+  },
   setFee: {
     newFee: () => ({ kind: 'percentWad' }),
   },
