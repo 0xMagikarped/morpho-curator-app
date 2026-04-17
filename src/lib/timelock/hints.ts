@@ -74,19 +74,34 @@ function vaultDecimalsMatchSnapshot(ctx: HintContext): boolean {
   return ctx.target.toLowerCase() === ctx.snapshotAddress.toLowerCase();
 }
 
+/**
+ * Resolve the best-known asset decimals for a cap-amount hint.
+ * Uses the snapshot when available + matches the target. Falls back to
+ * 18 on Moolah chains (factory enforces 18-dec assets). Returns null
+ * only when we genuinely can't determine decimals (MetaMorpho with no
+ * snapshot loaded + cross-vault target).
+ */
+function capDecimalsHint(ctx: HintContext): ArgHint | null {
+  // Ideal: snapshot loaded and target matches the page vault.
+  if (vaultDecimalsMatchSnapshot(ctx)) {
+    return { amount: { decimals: ctx.vaultAssetDecimals!, symbol: ctx.vaultAssetSymbol } };
+  }
+  // Fallback: Moolah factory enforces 18-decimal assets on all vaults.
+  // Safe to assume 18 even when the snapshot hasn't loaded yet.
+  const config = getChainConfig(ctx.chainId);
+  if (config?.protocol === 'moolah') {
+    return { amount: { decimals: 18, symbol: ctx.vaultAssetSymbol } };
+  }
+  return null;
+}
+
 export const HINTS: Record<string, Record<string, HintFn>> = {
   submitCap: {
-    newSupplyCap: (_args, ctx) =>
-      vaultDecimalsMatchSnapshot(ctx)
-        ? { amount: { decimals: ctx.vaultAssetDecimals!, symbol: ctx.vaultAssetSymbol } }
-        : null,
+    newSupplyCap: (_args, ctx) => capDecimalsHint(ctx),
   },
   // Moolah uses setCap (instant) instead of submitCap (two-step).
   setCap: {
-    newSupplyCap: (_args, ctx) =>
-      vaultDecimalsMatchSnapshot(ctx)
-        ? { amount: { decimals: ctx.vaultAssetDecimals!, symbol: ctx.vaultAssetSymbol } }
-        : null,
+    newSupplyCap: (_args, ctx) => capDecimalsHint(ctx),
   },
   setFee: {
     newFee: () => ({ kind: 'percentWad' }),
