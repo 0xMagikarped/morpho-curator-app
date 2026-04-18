@@ -40,8 +40,13 @@ const sei = defineChain({
 const pharos = defineChain({
   id: 1672,
   name: 'Pharos',
-  nativeCurrency: { name: 'Pharos', symbol: 'PHRS', decimals: 18 },
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: { default: { http: ['https://rpc.pharos.xyz'] } },
+  contracts: {
+    multicall3: {
+      address: '0xcA11bde05977b3631167028862bE2a173976CA11',
+    },
+  },
   testnet: false,
 });
 

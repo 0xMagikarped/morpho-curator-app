@@ -55,7 +55,8 @@ export function useRegistryStatus(vaultAddress: `0x${string}`, chainId: number) 
     ],
     query: {
       enabled: !!vaultAddress,
-      staleTime: 5 * 60 * 1000,
+      staleTime: 10_000,
+      refetchInterval: 10_000, // Poll every 10s so we catch on-chain changes quickly
     },
   });
 

@@ -50,6 +50,11 @@ export const pharos: Chain = {
   blockExplorers: {
     default: { name: 'PharosScan', url: 'https://pharosscan.xyz' },
   },
+  contracts: {
+    multicall3: {
+      address: '0xcA11bde05977b3631167028862bE2a173976CA11',
+    },
+  },
   testnet: false,
 };
 
