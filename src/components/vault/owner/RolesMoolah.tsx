@@ -261,6 +261,7 @@ function MoolahRoleActions({
 
   const [allocatorAddr, setAllocatorAddr] = useState('');
   const [allocatorGrant, setAllocatorGrant] = useState(true);
+  const [delayDays, setDelayDays] = useState('');
   const [error, setError] = useState<string | null>(null);
   const isMoolah = mode === 'timelocked';
 
@@ -323,6 +324,45 @@ function MoolahRoleActions({
           </div>
           <p className="text-[10px] text-text-tertiary mt-1">
             {isMoolah ? 'Scheduled via managerTimeLock.' : 'Grant or revoke allocator role.'}
+          </p>
+        </div>
+      )}
+
+      {/* Update timelock delay — proposer on either TL */}
+      {isMoolah && (permissions.canManage || permissions.canCurate || permissions.isAdmin) && (
+        <div>
+          <span className="text-xs text-text-secondary font-medium">
+            Propose Delay Change
+          </span>
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={delayDays}
+              onChange={(e) => setDelayDays(e.target.value)}
+              placeholder="days (min 1)"
+              className="w-28 bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary focus:outline-none focus:border-border-focus"
+            />
+            <span className="text-xs text-text-tertiary">day(s)</span>
+            <Button
+              size="sm"
+              onClick={() => {
+                setError(null);
+                const days = parseInt(delayDays);
+                if (!days || days < 1) { setError('Minimum delay is 1 day.'); return; }
+                void submit({ kind: 'setTimelockDelay', newDelaySeconds: BigInt(days * 86400) });
+                setDelayDays('');
+              }}
+              disabled={!delayDays || isBusy || writeDisabled}
+              loading={isBusy}
+              title={writeDisabled ? disabledTooltip ?? undefined : undefined}
+            >
+              Propose
+            </Button>
+          </div>
+          <p className="text-[10px] text-text-tertiary mt-1">
+            Schedules updateDelay on the curatorTimeLock. Minimum 1 day (Lista rule).
           </p>
         </div>
       )}
