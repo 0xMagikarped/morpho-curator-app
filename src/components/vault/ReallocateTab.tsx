@@ -319,28 +319,59 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     return allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]).marketId;
   })();
 
-  // Balance check
-  const totalWithdrawn = allocationEditsWithIdle.reduce(
+  // Balance check — auto-round dust imbalance onto the catcher market
+  // when there's no IDLE to absorb it. The on-chain reallocate call uses
+  // MAX_UINT256 for the catcher so it absorbs dust anyway, but the UI's
+  // balance check is strict. Rounding the display target avoids a confusing
+  // "Imbalanced by <0.01" warning on a tx that would succeed.
+  const dustThreshold = 10n ** BigInt(Math.max(0, assetDecimals - 2)); // < 0.01 of the asset
+  const rawWithdrawn = allocationEditsWithIdle.reduce(
     (s, e) => s + (e.targetAssets < e.currentAssets ? e.currentAssets - e.targetAssets : 0n),
     0n,
   );
-  const totalSupplied = allocationEditsWithIdle.reduce(
+  const rawSupplied = allocationEditsWithIdle.reduce(
+    (s, e) => s + (e.targetAssets > e.currentAssets ? e.targetAssets - e.currentAssets : 0n),
+    0n,
+  );
+  const rawImbalance = rawWithdrawn > rawSupplied ? rawWithdrawn - rawSupplied : rawSupplied - rawWithdrawn;
+  const noIdle = !idleMarketId || !allocationEditsWithIdle.some((e) => e.isIdle && e.targetAssets > 0n);
+  const shouldAutoRound = noIdle && rawImbalance > 0n && rawImbalance <= dustThreshold && effectiveCatcher;
+
+  // If auto-rounding, adjust the catcher's target to absorb the dust.
+  const finalEdits = useMemo(() => {
+    if (!shouldAutoRound || !effectiveCatcher) return allocationEditsWithIdle;
+    return allocationEditsWithIdle.map((e) => {
+      if (e.marketId !== effectiveCatcher) return e;
+      // If withdrawn > supplied, catcher needs to receive more (round target up).
+      // If supplied > withdrawn, catcher is receiving too much (round target down).
+      const adj = rawWithdrawn > rawSupplied
+        ? e.targetAssets + rawImbalance
+        : e.targetAssets - rawImbalance;
+      return { ...e, targetAssets: adj > 0n ? adj : 0n };
+    });
+  }, [allocationEditsWithIdle, shouldAutoRound, effectiveCatcher, rawWithdrawn, rawSupplied, rawImbalance]);
+
+  const totalWithdrawn = finalEdits.reduce(
+    (s, e) => s + (e.targetAssets < e.currentAssets ? e.currentAssets - e.targetAssets : 0n),
+    0n,
+  );
+  const totalSupplied = finalEdits.reduce(
     (s, e) => s + (e.targetAssets > e.currentAssets ? e.targetAssets - e.currentAssets : 0n),
     0n,
   );
   const isBalanced = totalWithdrawn === totalSupplied;
-  const hasChanges = allocationEditsWithIdle.some((e) => e.targetAssets !== e.currentAssets);
+  const hasChanges = finalEdits.some((e) => e.targetAssets !== e.currentAssets);
   const imbalanceAmount = totalWithdrawn > totalSupplied ? totalWithdrawn - totalSupplied : totalSupplied - totalWithdrawn;
 
   // Validations
-  const capViolations = allocationEditsWithIdle
+  const capViolations = finalEdits
     .filter((e) => e.targetAssets > e.cap && e.cap > 0n)
     .map((e) => ({ label: e.label, target: e.targetAssets, cap: e.cap }));
 
   // Warn if the catcher market's target is at its cap — MAX_UINT256 dust absorption
   // will push it over the cap and revert with InconsistentReallocation or SupplyCapExceeded
   const catcherAtCap = (() => {
-    const ce = allocationEditsWithIdle.find((e) => e.marketId === effectiveCatcher);
+    const ce = finalEdits.find((e) => e.marketId === effectiveCatcher);
     if (!ce || ce.cap === 0n) return false;
     return ce.targetAssets >= ce.cap;
   })();
@@ -349,22 +380,22 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
   const projectedApy = useMemo(() => {
     if (!hasChanges || totalAllocated === 0n) return null;
     let weightedSum = 0;
-    for (const e of allocationEditsWithIdle) {
+    for (const e of finalEdits) {
       const weight = Number(e.targetAssets) / Number(totalAllocated);
       weightedSum += weight * e.supplyApy;
     }
     return weightedSum;
-  }, [allocationEditsWithIdle, hasChanges, totalAllocated]);
+  }, [finalEdits, hasChanges, totalAllocated]);
 
   const currentWeightedApy = useMemo(() => {
     if (totalAllocated === 0n) return null;
     let weightedSum = 0;
-    for (const e of allocationEditsWithIdle) {
+    for (const e of finalEdits) {
       const weight = Number(e.currentAssets) / Number(totalAllocated);
       weightedSum += weight * e.supplyApy;
     }
     return weightedSum;
-  }, [allocationEditsWithIdle, totalAllocated]);
+  }, [finalEdits, totalAllocated]);
 
   const handleTargetChange = useCallback((marketId: string, value: bigint) => {
     setEdits((prev) => {
@@ -395,7 +426,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
 
   const handleSimulate = () => {
     if (!hasChanges || !sdkSupported) return;
-    const changes: AllocationChange[] = allocationEditsWithIdle
+    const changes: AllocationChange[] = finalEdits
       .filter((e) => e.targetAssets !== e.currentAssets)
       .map((e) => ({
         marketId: e.marketId as MarketId,
@@ -408,7 +439,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     if (!isBalanced || !hasChanges || !markets) return;
 
     // Safety: if manually selected catcher is a withdrawal market, override to auto-select
-    const catcherEdit = allocationEditsWithIdle.find((e) => e.marketId === effectiveCatcher);
+    const catcherEdit = finalEdits.find((e) => e.marketId === effectiveCatcher);
     const safeCatcher = (catcherEdit && catcherEdit.targetAssets < catcherEdit.currentAssets)
       ? null // force auto-selection below
       : effectiveCatcher;
@@ -418,7 +449,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     const changedAllocations: MarketAllocationArg[] = [];
     let catcherParams: MarketAllocationArg | null = null;
 
-    for (const e of allocationEditsWithIdle) {
+    for (const e of finalEdits) {
       const market = markets.find((m) => m.id === e.marketId);
       if (!market) continue;
 
@@ -437,7 +468,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
 
     // Build current assets map for ordering
     const currentAssetsMap = new Map<string, bigint>();
-    for (const e of allocationEditsWithIdle) {
+    for (const e of finalEdits) {
       const market = markets.find((m) => m.id === e.marketId);
       if (market) {
         const key = `${market.params.loanToken}-${market.params.collateralToken}-${market.params.oracle}-${market.params.irm}-${market.params.lltv}`;
@@ -533,7 +564,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
           </div>
         </CardHeader>
 
-        {allocationEditsWithIdle.length === 0 ? (
+        {finalEdits.length === 0 ? (
           <p className="text-text-tertiary text-sm py-4">No markets to reallocate.</p>
         ) : (
           <div className="space-y-3">
@@ -555,7 +586,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {allocationEditsWithIdle.map((edit) => {
+                  {finalEdits.map((edit) => {
                     const delta = edit.targetAssets - edit.currentAssets;
                     const overCap = edit.cap > 0n && edit.targetAssets > edit.cap;
                     const isCatcher = edit.marketId === effectiveCatcher;
@@ -842,7 +873,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
           isCurator={role.isCurator}
           assetSymbol={vault.assetInfo.symbol}
           assetDecimals={vault.assetInfo.decimals}
-          markets={allocationEditsWithIdle.map((e) => ({
+          markets={finalEdits.map((e) => ({
             marketId: e.marketId,
             label: e.label,
             currentSupply: e.currentAssets,
