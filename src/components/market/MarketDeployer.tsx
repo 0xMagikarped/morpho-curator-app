@@ -18,11 +18,12 @@ interface MarketDeployerProps {
   data: MarketFormData;
   marketId: `0x${string}`;
   onBack: () => void;
+  onSeed?: () => void;
 }
 
 const OPERATOR_ROLE = keccak256(toHex('OPERATOR'));
 
-export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) {
+export function MarketDeployer({ data, marketId, onBack, onSeed }: MarketDeployerProps) {
   const chainId = useChainId();
   const chainConfig = getChainConfig(chainId);
   const { address: account } = useAccount();
@@ -242,10 +243,15 @@ export function MarketDeployer({ data, marketId, onBack }: MarketDeployerProps) 
         )}
 
         {isSuccess && txHash && (
-          <div className="bg-success/10 border border-success/20 px-3 py-2 space-y-1">
+          <div className="bg-success/10 border border-success/20 px-3 py-2 space-y-2">
             <p className="text-xs text-success">Market deployed successfully!</p>
             <p className="text-xs text-text-secondary font-mono">Tx: {txHash}</p>
             <p className="text-xs text-text-secondary font-mono">Market ID: {marketId}</p>
+            {onSeed && data.rateModel !== 'fixed' && (
+              <Button size="sm" onClick={onSeed} className="mt-1">
+                Seed Market at 90% Utilization
+              </Button>
+            )}
           </div>
         )}
 

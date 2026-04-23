@@ -1,6 +1,8 @@
 const CHAIN_NAME_MAP: Record<number, string> = {
   1: 'ethereum',
+  56: 'bsc',
   1329: 'sei',
+  1672: 'pharos',
   8453: 'base',
 };
 

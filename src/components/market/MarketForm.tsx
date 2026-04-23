@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { getChainConfig } from '../../config/chains';
 import { erc20Abi } from '../../lib/contracts/abis';
+import { useLltvDiscovery } from '../../hooks/useLltvDiscovery';
 import {
   getBrokers,
   getBrokersForLoanSymbol,
@@ -52,19 +53,11 @@ interface MarketFormProps {
   onSubmit: (data: MarketFormData) => void;
 }
 
-const LLTV_PRESETS = [
-  { label: '94.5%', value: 945000000000000000n, desc: 'Stablecoin' },
-  { label: '91.5%', value: 915000000000000000n, desc: 'High' },
-  { label: '86.0%', value: 860000000000000000n, desc: 'Standard' },
-  { label: '80.0%', value: 800000000000000000n, desc: 'Medium' },
-  { label: '77.0%', value: 770000000000000000n, desc: 'Conservative' },
-  { label: '62.5%', value: 625000000000000000n, desc: 'Low' },
-];
-
 export function MarketForm({ onSubmit }: MarketFormProps) {
   const chainId = useChainId();
   const client = usePublicClient();
   const chainConfig = getChainConfig(chainId);
+  const { presets: lltvPresets, isLoading: lltvLoading } = useLltvDiscovery(chainId);
 
   const [loanToken, setLoanToken] = useState('');
   const [collateralToken, setCollateralToken] = useState('');
@@ -530,21 +523,33 @@ export function MarketForm({ onSubmit }: MarketFormProps) {
           {!useCustomLltv ? (
             <div className="space-y-2">
               <div className="grid grid-cols-3 gap-2">
-                {LLTV_PRESETS.map((p) => (
-                  <button
-                    key={p.label}
-                    onClick={() => setLltvPreset(p.value.toString())}
-                    className={`px-3 py-2 text-sm border transition-colors ${
-                      lltvPreset === p.value.toString()
-                        ? 'border-accent-primary bg-accent-primary-muted text-text-primary'
-                        : 'border-border-default bg-bg-hover text-text-secondary hover:text-text-primary'
-                    }`}
-                  >
-                    <span className="font-medium">{p.label}</span>
-                    <span className="text-[10px] text-text-tertiary block">{p.desc}</span>
-                  </button>
-                ))}
+                {lltvPresets.map((p) => {
+                  const isDisabled = p.enabled === false;
+                  return (
+                    <button
+                      key={p.label}
+                      onClick={() => !isDisabled && setLltvPreset(p.value.toString())}
+                      disabled={isDisabled}
+                      title={isDisabled ? 'Not enabled on this chain' : p.desc}
+                      className={`px-3 py-2 text-sm border transition-colors ${
+                        isDisabled
+                          ? 'border-border-default bg-bg-hover text-text-tertiary opacity-40 cursor-not-allowed'
+                          : lltvPreset === p.value.toString()
+                            ? 'border-accent-primary bg-accent-primary-muted text-text-primary'
+                            : 'border-border-default bg-bg-hover text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      <span className="font-medium">{p.label}</span>
+                      <span className="text-[10px] text-text-tertiary block">
+                        {isDisabled ? 'Not enabled' : p.desc}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+              {lltvLoading && (
+                <p className="text-[10px] text-text-tertiary">Checking on-chain LLTV availability...</p>
+              )}
               <button
                 onClick={() => setUseCustomLltv(true)}
                 className="text-xs text-info hover:text-info/80"

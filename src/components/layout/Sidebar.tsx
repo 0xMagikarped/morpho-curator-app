@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, Vault, PlusCircle, Settings, PanelLeftClose, PanelLeft, FlaskConical, Search, Rocket } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Vault, PlusCircle, Settings, PanelLeftClose, PanelLeft, FlaskConical, Search, Rocket, Droplets } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { cn } from '../../lib/utils/cn';
 import { ChainBadge } from '../ui/ChainBadge';
@@ -10,6 +10,7 @@ const navItems = [
   { path: '/markets', label: 'Markets', icon: BarChart3 },
   { path: '/create', label: 'Create Vault', icon: PlusCircle, accent: true },
   { path: '/market/create', label: 'Create Market', icon: FlaskConical },
+  { path: '/market/seed', label: 'Seed Market', icon: Droplets },
   { path: '/oracle/decode', label: 'Oracle Decoder', icon: Search },
   { path: '/oracle/deploy', label: 'Oracle Deployer', icon: Rocket },
   { path: '/settings', label: 'Settings', icon: Settings },

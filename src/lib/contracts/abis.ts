@@ -788,6 +788,13 @@ export const erc20Abi = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }],
+    name: 'allowance',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const;
 
 // ============================================================
@@ -831,6 +838,58 @@ export const morphoBlueExtendedAbi = [
       { name: 'assetsSupplied', type: 'uint256' },
       { name: 'sharesSupplied', type: 'uint256' },
     ],
+  },
+  {
+    name: 'supplyCollateral', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'marketParams', type: 'tuple',
+        components: [
+          { name: 'loanToken', type: 'address' },
+          { name: 'collateralToken', type: 'address' },
+          { name: 'oracle', type: 'address' },
+          { name: 'irm', type: 'address' },
+          { name: 'lltv', type: 'uint256' },
+        ],
+      },
+      { name: 'assets', type: 'uint256' },
+      { name: 'onBehalf', type: 'address' },
+      { name: 'data', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'borrow', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'marketParams', type: 'tuple',
+        components: [
+          { name: 'loanToken', type: 'address' },
+          { name: 'collateralToken', type: 'address' },
+          { name: 'oracle', type: 'address' },
+          { name: 'irm', type: 'address' },
+          { name: 'lltv', type: 'uint256' },
+        ],
+      },
+      { name: 'assets', type: 'uint256' },
+      { name: 'shares', type: 'uint256' },
+      { name: 'onBehalf', type: 'address' },
+      { name: 'receiver', type: 'address' },
+    ],
+    outputs: [
+      { name: 'assetsBorrowed', type: 'uint256' },
+      { name: 'sharesBorrowed', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'isLltvEnabled', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'lltv', type: 'uint256' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'isIrmEnabled', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'irm', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
   },
 ] as const;
 

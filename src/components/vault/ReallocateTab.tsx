@@ -319,12 +319,10 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     return allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]).marketId;
   })();
 
-  // Balance check — auto-round dust imbalance onto the catcher market
-  // when there's no IDLE to absorb it. The on-chain reallocate call uses
-  // MAX_UINT256 for the catcher so it absorbs dust anyway, but the UI's
-  // balance check is strict. Rounding the display target avoids a confusing
-  // "Imbalanced by <0.01" warning on a tx that would succeed.
-  const dustThreshold = 10n ** BigInt(Math.max(0, assetDecimals - 2)); // < 0.01 of the asset
+  // Balance check — auto-round imbalance onto the catcher market.
+  // The on-chain reallocate call uses MAX_UINT256 for the catcher so it
+  // absorbs any remainder. We mirror that here so the UI doesn't show a
+  // confusing "Imbalanced" warning on a tx that will succeed.
   const rawWithdrawn = allocationEditsWithIdle.reduce(
     (s, e) => s + (e.targetAssets < e.currentAssets ? e.currentAssets - e.targetAssets : 0n),
     0n,
@@ -334,10 +332,9 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     0n,
   );
   const rawImbalance = rawWithdrawn > rawSupplied ? rawWithdrawn - rawSupplied : rawSupplied - rawWithdrawn;
-  const noIdle = !idleMarketId || !allocationEditsWithIdle.some((e) => e.isIdle && e.targetAssets > 0n);
-  const shouldAutoRound = noIdle && rawImbalance > 0n && rawImbalance <= dustThreshold && effectiveCatcher;
+  const shouldAutoRound = rawImbalance > 0n && !!effectiveCatcher;
 
-  // If auto-rounding, adjust the catcher's target to absorb the dust.
+  // If auto-rounding, adjust the catcher's target to absorb the imbalance.
   const finalEdits = useMemo(() => {
     if (!shouldAutoRound || !effectiveCatcher) return allocationEditsWithIdle;
     return allocationEditsWithIdle.map((e) => {

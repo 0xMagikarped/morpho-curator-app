@@ -139,6 +139,7 @@ function App() {
                   <Route path="/markets" element={<Suspense fallback={<PageLoader />}><MarketsPage /></Suspense>} />
                   <Route path="/create" element={<Suspense fallback={<PageLoader />}><CreateVaultPage /></Suspense>} />
                   <Route path="/market/create" element={<Suspense fallback={<PageLoader />}><CreateMarketPage /></Suspense>} />
+                  <Route path="/market/seed" element={<Suspense fallback={<PageLoader />}><CreateMarketPage /></Suspense>} />
                   <Route path="/oracle/decode" element={<Suspense fallback={<PageLoader />}><OracleDecoderPage /></Suspense>} />
                   <Route path="/oracle/deploy" element={<Suspense fallback={<PageLoader />}><OracleDeployerPage /></Suspense>} />
                   <Route path="/settings" element={<Suspense fallback={<PageLoader />}><SettingsPage /></Suspense>} />
