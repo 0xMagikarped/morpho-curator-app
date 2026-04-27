@@ -319,10 +319,12 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     return allocationEditsWithIdle.reduce((max, e) => e.targetAssets > max.targetAssets ? e : max, allocationEditsWithIdle[0]).marketId;
   })();
 
-  // Balance check — auto-round imbalance onto the catcher market.
+  // Balance check — auto-round imbalance onto supply markets.
   // The on-chain reallocate call uses MAX_UINT256 for the catcher so it
   // absorbs any remainder. We mirror that here so the UI doesn't show a
   // confusing "Imbalanced" warning on a tx that will succeed.
+  // Rounding respects supply caps: the catcher absorbs what it can, then
+  // overflow spills into other supply markets with cap headroom.
   const rawWithdrawn = allocationEditsWithIdle.reduce(
     (s, e) => s + (e.targetAssets < e.currentAssets ? e.currentAssets - e.targetAssets : 0n),
     0n,
@@ -332,21 +334,57 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     0n,
   );
   const rawImbalance = rawWithdrawn > rawSupplied ? rawWithdrawn - rawSupplied : rawSupplied - rawWithdrawn;
-  const shouldAutoRound = rawImbalance > 0n && !!effectiveCatcher;
 
-  // If auto-rounding, adjust the catcher's target to absorb the imbalance.
+  // If auto-rounding, adjust targets to absorb the imbalance while respecting caps.
   const finalEdits = useMemo(() => {
-    if (!shouldAutoRound || !effectiveCatcher) return allocationEditsWithIdle;
-    return allocationEditsWithIdle.map((e) => {
-      if (e.marketId !== effectiveCatcher) return e;
-      // If withdrawn > supplied, catcher needs to receive more (round target up).
-      // If supplied > withdrawn, catcher is receiving too much (round target down).
-      const adj = rawWithdrawn > rawSupplied
-        ? e.targetAssets + rawImbalance
-        : e.targetAssets - rawImbalance;
-      return { ...e, targetAssets: adj > 0n ? adj : 0n };
-    });
-  }, [allocationEditsWithIdle, shouldAutoRound, effectiveCatcher, rawWithdrawn, rawSupplied, rawImbalance]);
+    if (rawImbalance === 0n) return allocationEditsWithIdle;
+
+    const isWithdrawalHeavy = rawWithdrawn > rawSupplied;
+
+    // Withdrawal-heavy: supply markets need to receive more → round targets up (capped).
+    // Supply-heavy: supply markets are receiving too much → round targets down.
+    if (isWithdrawalHeavy) {
+      // Distribute the shortage across supply markets, catcher first, then others by headroom.
+      let remaining = rawImbalance;
+      const adjusted = allocationEditsWithIdle.map((e) => ({ ...e }));
+
+      // Build priority list: catcher first, then other supply markets sorted by cap headroom
+      const supplyIndices = adjusted
+        .map((e, i) => ({ i, isCatcher: e.marketId === effectiveCatcher, headroom: e.cap > 0n ? e.cap - e.targetAssets : BigInt(Number.MAX_SAFE_INTEGER) }))
+        .filter((x) => adjusted[x.i].targetAssets >= adjusted[x.i].currentAssets && x.headroom > 0n)
+        .sort((a, b) => (a.isCatcher ? -1 : b.isCatcher ? 1 : Number(b.headroom - a.headroom)));
+
+      for (const { i, headroom } of supplyIndices) {
+        if (remaining <= 0n) break;
+        // cap = 0 means unlimited
+        const canAbsorb = adjusted[i].cap > 0n ? (headroom < remaining ? headroom : remaining) : remaining;
+        adjusted[i] = { ...adjusted[i], targetAssets: adjusted[i].targetAssets + canAbsorb };
+        remaining -= canAbsorb;
+      }
+
+      return adjusted;
+    } else {
+      // Supply-heavy: reduce the catcher's target (never below current)
+      let remaining = rawImbalance;
+      const adjusted = allocationEditsWithIdle.map((e) => ({ ...e }));
+
+      // Reduce catcher first, then other supply markets
+      const supplyIndices = adjusted
+        .map((e, i) => ({ i, isCatcher: e.marketId === effectiveCatcher }))
+        .filter((x) => adjusted[x.i].targetAssets > adjusted[x.i].currentAssets)
+        .sort((a, b) => (a.isCatcher ? -1 : b.isCatcher ? 1 : 0));
+
+      for (const { i } of supplyIndices) {
+        if (remaining <= 0n) break;
+        const excess = adjusted[i].targetAssets - adjusted[i].currentAssets;
+        const canReduce = excess < remaining ? excess : remaining;
+        adjusted[i] = { ...adjusted[i], targetAssets: adjusted[i].targetAssets - canReduce };
+        remaining -= canReduce;
+      }
+
+      return adjusted;
+    }
+  }, [allocationEditsWithIdle, effectiveCatcher, rawWithdrawn, rawSupplied, rawImbalance]);
 
   const totalWithdrawn = finalEdits.reduce(
     (s, e) => s + (e.targetAssets < e.currentAssets ? e.currentAssets - e.targetAssets : 0n),
