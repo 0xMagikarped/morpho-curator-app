@@ -86,3 +86,66 @@ change.** The working tree also shows `CLAUDE.md`, `src/components/vault/PublicA
 `src/lib/hooks/usePublicAllocator.ts` modified — these were **dirty before this session**
 (present in the session-start `git status`), are **not part of PR 1**, and were **not staged
 or committed**. They must not be bundled into this PR's commit (global rule #3).
+
+---
+
+## PR 2 — simulate-before-write guard
+
+- **Branch:** `fix/audit-02-simulate-guard` (off `main` @ `537c792`, PR 1 merged)
+- **Audit finding:** `audits/AUDIT_2026-05-16.md` §5 / D4 (writes broadcast with no
+  `simulateContract` preflight; reverts opaque). Builds on PR 1's D5 error ABIs.
+- **Date:** 2026-05-17
+
+### Approach (user-approved: A — auto-simulate inside the hook)
+Every contract write (~26 consumer files, ~40 call sites) already funnels through the single
+`useGuardedWriteContract`. The preflight is implemented **once in that hook**, so all sites
+become fail-closed with **zero call-site edits**. The "blocked until simulate-succeeded-for-
+these-args" invariant holds by construction (simulation is bound to the exact args of each
+call — no stale-simulation TOCTOU window). No PR-2 split needed. Decode idiom reuses
+`useReallocate.ts` (`BaseError.walk` → `ContractFunctionRevertedError.data.errorName`); RPC
+client reuses `getPublicClient` (`src/lib/data/rpcClient.ts`). No new deps.
+
+### Files changed (`git diff main --stat`)
+Modified (tracked): `src/hooks/useGuardedWriteContract.ts` +143 (core: `simulate`,
+`simulateError`, `isSimulating`, fail-closed `writeContract`/`writeContractAsync`, decoder),
+`src/hooks/useVaultWrite.ts` +11 (plumb combined `error` = `simulateError ?? writeError` +
+expose `simulateError`; extend `UseVaultWriteResult`), `src/components/vault/CapsTab.tsx` +19
+(render one decoded-revert banner; previously rendered no write error at all).
+New (untracked): `src/hooks/__tests__/useGuardedWriteContract.simulate.test.tsx` (146 LOC),
+`audits/_followups.md` (17 LOC).
+
+### Tests (`useGuardedWriteContract.simulate.test.tsx`) — fail on `main`, pass on branch
+Establishes the first wagmi/`renderHook` harness (mocks `wagmi` + `getPublicClient`):
+1. **simulate-success → write proceeds** — `simulateContract` called once, wagmi
+   `writeContract` called exactly once, `simulateError === null`.
+2. **known revert → BLOCKED** — encoded `AboveMaxTimelock` → wagmi `writeContract` NOT
+   called, `simulateError.errorName === 'AboveMaxTimelock'`, message contains it.
+3. **unknown selector → BLOCKED fail-closed** — `0xdeadbeef` → not called,
+   `errorName === null`, `raw === '0xdeadbeef'`.
+4. **`writeContractAsync` rejects** on preflight revert (`AlreadyPending`) — awaiting callers
+   (`useSetCaps`/`useAllocateV2`) reject and do not proceed.
+5. **DOM render** — decoded `errorName` (`MarketNotCreated`) appears via Testing Library.
+
+### Verification
+- **Fail-on-`main` demonstrated:** `git stash` of the 3 tracked files (→ `main` state) →
+  suite = **5 failed (5) + 1 error** (old hook has no preflight; `writeContract` dispatches
+  immediately, no `simulateError`). `git stash pop` → **5 passed**.
+- `npm run test:run` → **91 passed** (6 files; was 86 — +5, 0 skipped).
+- `npx tsc -b` → **0 errors** (after extending `UseVaultWriteResult` with `simulateError`).
+- `npm run build` → **success** (pre-existing chunk-size warning only).
+- `git diff main --stat` → only the 3 files above. PA `stash@{0}: pre-pr2-pa-feature`
+  verified **intact** after the fail-demo stash/pop.
+
+### Scope-compliance self-audit
+**PASS with one disclosed test deviation.** Only the 3 planned files modified + 2 planned new
+files. **Not touched:** any ABI file (PR 1 territory), any new component, the other ~25
+consumer error surfaces (deferred → `audits/_followups.md`), the 3 raw
+`walletClient.sendTransaction` paths, gas/chain/transport config, CSP/`vercel.json` (PR 3),
+`tsconfig`/`eslint`/`package.json`/CI, the stashed PA pair, `chore/document-defi-data-skill`.
+**Deviation (disclosed per "report faithfully"):** the approved plan's test #4 said
+`render(<CapsTab/>)`. Implemented instead as a minimal in-test fixture component consuming the
+**real** `useGuardedWriteContract`. Rationale: CapsTab is 781 LOC with ~10 unrelated data
+hooks; mounting it would test CapsTab's wiring (and require heavy mocking) rather than the
+guard's hook→DOM contract. The fixture is a stronger, less brittle unit of the actual
+behaviour; CapsTab's one-line `simulateError` passthrough is covered by `tsc` + `build` + the
+explicit banner JSX. Net: a test-quality improvement, not a scope change.

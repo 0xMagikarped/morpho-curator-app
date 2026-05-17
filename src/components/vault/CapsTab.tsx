@@ -70,7 +70,7 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
     [allocation],
   );
   const { data: pendingActions } = useVaultPendingActions(chainId, vaultAddress, marketIds);
-  const { submit, mode, isPending, isConfirming, isSuccess, disabled: writeDisabled, disabledTooltip } =
+  const { submit, mode, isPending, isConfirming, isSuccess, disabled: writeDisabled, disabledTooltip, simulateError } =
     useVaultWrite(chainId, vaultAddress);
   const isMoolah = mode === 'timelocked';
 
@@ -406,6 +406,23 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
       {writeDisabled && disabledTooltip && (
         <div className="px-3 py-2 bg-danger/10 border border-danger/30 text-[11px] text-danger">
           <span className="font-semibold">Writes disabled.</span> {disabledTooltip}
+        </div>
+      )}
+
+      {/* Decoded preflight-revert banner (audit D4/D5 — PR 2).
+          The simulation blocked the wallet popup; show the named reason. */}
+      {simulateError && (
+        <div
+          role="alert"
+          className="px-3 py-2 bg-danger/10 border border-danger/30 text-[11px] text-danger max-h-24 overflow-y-auto"
+        >
+          <span className="font-semibold">Transaction would revert:</span>{' '}
+          <span className="font-mono">{simulateError.errorName ?? 'unknown error'}</span>
+          {simulateError.errorName && simulateError.shortMessage
+            ? <> — {simulateError.shortMessage}</>
+            : simulateError.raw
+              ? <> (selector <span className="font-mono">{simulateError.raw.slice(0, 10)}</span>)</>
+              : null}
         </div>
       )}
 

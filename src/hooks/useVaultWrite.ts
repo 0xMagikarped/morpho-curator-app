@@ -17,7 +17,7 @@
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import type { Address } from 'viem';
-import { useGuardedWriteContract } from './useGuardedWriteContract';
+import { useGuardedWriteContract, type DecodedSimError } from './useGuardedWriteContract';
 import { useVaultSnapshot } from '../lib/vault/adapter';
 import { prepareWrite, type PreparedWrite, type WriteIntent } from '../lib/vault/writes';
 import { getPublicClient } from '../lib/data/rpcClient';
@@ -49,6 +49,9 @@ export interface UseVaultWriteResult {
   isConfirming: boolean;
   isSuccess: boolean;
   error: Error | null;
+  /** Decoded preflight-revert detail (audit D4/D5). Set when simulateContract
+   *  blocked the write; `errorName`/`args` resolved against the PR-1 ABIs. */
+  simulateError: DecodedSimError | null;
   walletError: string | null;
   reset: () => void;
   /** True when the vault is blacklisted or the protocol is paused. */
@@ -79,6 +82,7 @@ export function useVaultWrite(
     data: hash,
     isPending,
     error,
+    simulateError,
     walletError,
     reset: resetWrite,
   } = useGuardedWriteContract();
@@ -211,7 +215,10 @@ export function useVaultWrite(
     isPending,
     isConfirming,
     isSuccess,
-    error: (error as Error) ?? null,
+    // Decoded preflight revert takes priority over the wagmi write error
+    // (mirrors useReallocate's `simulationError ?? writeError`).
+    error: simulateError ? new Error(simulateError.message) : (error as Error) ?? null,
+    simulateError,
     walletError,
     reset,
     disabled,
