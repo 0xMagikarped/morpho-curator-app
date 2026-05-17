@@ -149,3 +149,91 @@ hooks; mounting it would test CapsTab's wiring (and require heavy mocking) rathe
 guard's hook→DOM contract. The fixture is a stronger, less brittle unit of the actual
 behaviour; CapsTab's one-line `simulateError` passthrough is covered by `tsc` + `build` + the
 explicit banner JSX. Net: a test-quality improvement, not a scope change.
+
+---
+
+## PR 3 — Enforce CSP + add HSTS + complete connect-src
+
+- **Branch:** `fix/audit-03-csp-hsts` (off `main` @ `3b75a0f`)
+- **Audit finding:** `audits/AUDIT_2026-05-16.md` §4 — CSP Report-Only (not enforced),
+  incomplete `connect-src`, no HSTS; + MEDIUM `script-src 'unsafe-eval'`, no Permissions-Policy.
+- **Date:** 2026-05-17
+
+### vercel.json changes
+1. Header key `Content-Security-Policy-Report-Only` → **`Content-Security-Policy`** (enforced).
+2. `script-src 'self' 'unsafe-eval'` → **`script-src 'self'`**. Justified by bundle grep:
+   `dist/assets/*.js` had **0** `eval(` and **0** `new Function(`; the only `WebAssembly`
+   tokens (5) are inert string refs in the Sentry vendor chunk — no real instantiation, so no
+   `'wasm-unsafe-eval'` needed.
+3. **connect-src completed** (was breaking BNB/Pharos/DefiLlama/Sentry once enforced).
+4. Added `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`.
+5. Added `Permissions-Policy: camera=(), microphone=(), geolocation=(), usb=(), payment=()`.
+6. Untouched (separate audit rows, no bundling): dead `/api/` rewrite, COOP/COEP,
+   `style-src 'unsafe-inline'`, `img-src https:`, `/assets/*` cache rule.
+
+### Final connect-src allowlist + provenance (the substantive deliverable)
+Sources: (a) `src/config/wagmi.ts` fallback transports; (b) `src/config/chains.ts` `rpcUrls`
+(the `getPublicClient` path — used by the data layer and PR-1/2 simulate; DISTINCT from (a));
+(c) browser `fetch` data APIs; (d) bundled `viem/chains` defaults (defensive);
+(e) WalletConnect/Reown.
+
+| Host | Why |
+|---|---|
+| `'self'` | app origin |
+| `https://*.publicnode.com` | sei/eth/base/bsc publicnode (a)(b) |
+| `https://evm-rpc.sei-apis.com` | SEI (a) |
+| `https://eth.public-rpc.com` | ETH (a) |
+| `https://rpc.ankr.com` | eth/base ankr (a) |
+| `https://mainnet.base.org` | Base (a)(b)(d) |
+| `https://*.llamarpc.com` | **added** — eth/base llamarpc in `chains.ts` rpcUrls (b) |
+| `https://*.binance.org` | **added** — bsc-dataseed1/2 (a)(b) |
+| `https://rpc.pharos.xyz` | **added** — Pharos (a)(b) |
+| `https://eth.merkle.io` | **added (defensive)** — viem/chains mainnet default (d) |
+| `https://*.rpc.thirdweb.com` | **added (defensive)** — viem/chains bsc default (d) |
+| `https://api.morpho.org` | **added** — actual `MORPHO_API_URL` (`morphoApi.ts:4,169`) |
+| `https://blue-api.morpho.org` | kept (harmless; SDK may use) |
+| `https://coins.llama.fi` | **added** — DefiLlama pricing (`defiLlama.ts:26`) |
+| `https://*.sentry.io` | **added** — Sentry ingest (when `VITE_SENTRY_DSN` set) |
+| `https://*.walletconnect.com/.org`, `https://*.reown.com` + `wss://` of each | WalletConnect/Reown (e) |
+
+Excluded by design: block explorers (etherscan/bscscan/basescan/seiscan/pharosscan) — anchor
+navigations, not fetch/XHR → not a `connect-src` concern.
+
+### Files changed
+Modified (tracked): `vercel.json` (+6/-2 lines, full policy rewrite), `playwright.config.ts`
+(+22/-8 — env-driven `baseURL`, skip local `webServer` when `BASE_URL` is external).
+New (untracked): `src/__tests__/cspPolicy.test.ts` (100 LOC), `e2e/csp.spec.ts` (61 LOC).
+
+### Tests
+- **`src/__tests__/cspPolicy.test.ts` (vitest, deterministic, in CI):** 26 assertions —
+  CSP enforced (no `-Report-Only`); `script-src` has no `'unsafe-eval'`; **each** of the 20
+  required `connect-src` hosts present; no over-broad `https:` wildcard; HSTS
+  `max-age>=63072000`+`includeSubDomains`+`preload`; Permissions-Policy present;
+  frame-ancestors/X-Frame-Options regression guard.
+- **`e2e/csp.spec.ts` (Playwright, env-gated):** `test.skip` unless `BASE_URL` set; against a
+  Vercel preview asserts enforced CSP+HSTS response headers and zero CSP console violations
+  across 6 routes. Sends `x-vercel-protection-bypass` when `VERCEL_AUTOMATION_BYPASS_SECRET`
+  is provided.
+
+### Verification
+- **Fail-on-`main` demonstrated:** `git stash` `vercel.json` (→ main: Report-Only,
+  unsafe-eval, no HSTS, incomplete connect-src) → `cspPolicy.test.ts` = **25 failed | 1
+  passed** (the 1 = unchanged frame-ancestors guard). `git stash pop` → **26 passed**.
+- `npm run test:run` → **117 passed** (7 files; was 91 — +26, 0 skipped).
+- `npx tsc -b` → **0 errors**. `npm run build` → **success**.
+- `git diff main --stat` → only `vercel.json` + `playwright.config.ts` (+2 new test files).
+  PA `stash@{0}: pre-pr2-pa-feature` verified **intact**.
+
+### Live-enforcement checkpoint (OPEN — human-in-the-loop)
+`vite` does not emit `vercel.json` headers; `e2e/csp.spec.ts` only validates a real Vercel
+preview. Project is linked (`.vercel/project.json`; remote
+`github.com/0xMagikarped/morpho-curator-app`). **Not yet run** — requires: push
+`fix/audit-03-csp-hsts` (external deploy — not done unilaterally), then
+`BASE_URL=<preview> VERCEL_AUTOMATION_BYPASS_SECRET=<tok> npx playwright test e2e/csp.spec.ts`.
+Until then, enforcement correctness is gated by the deterministic structural test only.
+
+### Scope-compliance self-audit
+**PASS.** Only `vercel.json` + `playwright.config.ts` modified; 2 new test files. No `src/**`
+runtime code, wagmi/chains config, `tsconfig`/`eslint`/`package.json`/CI, PR-1/2 artifacts,
+the PA stash, or `chore/document-defi-data-skill` touched. No push / Vercel-dashboard change
+(human checkpoint, surfaced not silently skipped).
