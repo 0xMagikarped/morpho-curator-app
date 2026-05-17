@@ -10,7 +10,11 @@
  *   liquidation whitelist, minLoanValue.
  *
  * Only includes functions + events actually used by the curator app.
+ *
+ * Custom-error fragments (audit D5) are spread in from `./moolahErrors`
+ * (sourced from the verified BscScan MoolahVault implementation).
  */
+import { MOOLAH_VAULT_ERRORS } from './moolahErrors';
 
 // ============================================================
 // MoolahVault (AccessControlEnumerable + ERC4626)
@@ -365,6 +369,8 @@ export const moolahVaultAbi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // Custom errors — verbatim from the verified BscScan MoolahVault implementation.
+  ...MOOLAH_VAULT_ERRORS,
 ] as const;
 
 // ============================================================

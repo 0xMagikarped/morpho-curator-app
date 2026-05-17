@@ -4,6 +4,10 @@
  * Used by the Set Registry & Abdicate flow.
  * setAdapterRegistry + abdicate are one-time, irreversible operations
  * that lock the vault to the Morpho Adapter Registry.
+ *
+ * No custom-error fragments (audit D5): the registry surface exposes no
+ * distinct custom-error ABI in @morpho-org/blue-sdk-viem. Reverts on these
+ * paths decode via the vaultV2Abi error set (MORPHO_METAMORPHO_V2_ERRORS).
  */
 export const vaultV2RegistryAbi = [
   {

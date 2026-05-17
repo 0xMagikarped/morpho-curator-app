@@ -10,7 +10,14 @@
  *
  * NOTE: This ABI is based on Morpho V2 docs as of March 2026.
  * Verify against deployed bytecode if any calls fail.
+ *
+ * Custom-error fragments (audit D5) are spread in from `./morphoErrors`.
  */
+import {
+  MORPHO_METAMORPHO_V2_ERRORS,
+  MORPHO_VAULT_V1_ADAPTER_ERRORS,
+  MORPHO_MARKET_V1_ADAPTER_V2_ERRORS,
+} from './morphoErrors';
 
 export const metaMorphoV2Abi = [
   // === ERC-4626 + Standard reads (shared with V1) ===
@@ -333,6 +340,8 @@ export const metaMorphoV2Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // Custom errors — verbatim from @morpho-org/blue-sdk-viem `vaultV2Abi`.
+  ...MORPHO_METAMORPHO_V2_ERRORS,
 ] as const;
 
 /**
@@ -353,6 +362,8 @@ export const v1VaultAdapterAbi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // Custom errors — verbatim from @morpho-org/blue-sdk-viem `morphoVaultV1AdapterAbi`.
+  ...MORPHO_VAULT_V1_ADAPTER_ERRORS,
 ] as const;
 
 /**
@@ -368,4 +379,6 @@ export const v1MarketAdapterAbi = [
   { inputs: [{ name: 'index', type: 'uint256' }], name: 'marketIds', outputs: [{ type: 'bytes32' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'id', type: 'bytes32' }], name: 'expectedSupplyAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'id', type: 'bytes32' }], name: 'supplyShares', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  // Custom errors — verbatim from @morpho-org/blue-sdk-viem `morphoMarketV1AdapterV2Abi`.
+  ...MORPHO_MARKET_V1_ADAPTER_V2_ERRORS,
 ] as const;

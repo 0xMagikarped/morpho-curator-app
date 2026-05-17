@@ -1,7 +1,14 @@
 /**
  * Morpho Protocol ABI definitions.
  * Only includes functions actually used by the curator app.
+ *
+ * Custom-error fragments (audit D5) are spread in from `./morphoErrors` so viem
+ * can decode named Morpho reverts instead of opaque "execution reverted".
  */
+import {
+  MORPHO_METAMORPHO_V1_ERRORS,
+  MORPHO_PUBLIC_ALLOCATOR_ERRORS,
+} from './morphoErrors';
 
 // ============================================================
 // Morpho Blue Core
@@ -558,6 +565,8 @@ export const metaMorphoV1Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // Custom errors — verbatim from @morpho-org/blue-sdk-viem `metaMorphoAbi`.
+  ...MORPHO_METAMORPHO_V1_ERRORS,
 ] as const;
 
 // ============================================================
@@ -1012,6 +1021,8 @@ export const publicAllocatorAbi = [
     inputs: [{ name: 'vault', type: 'address' }, { name: 'feeRecipient', type: 'address' }],
     name: 'transferFee', outputs: [], stateMutability: 'nonpayable', type: 'function',
   },
+  // Custom errors — verbatim from @morpho-org/blue-sdk-viem `publicAllocatorAbi`.
+  ...MORPHO_PUBLIC_ALLOCATOR_ERRORS,
 ] as const;
 
 // ============================================================

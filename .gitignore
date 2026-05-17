@@ -32,3 +32,4 @@ SECURITY-AUDIT-RESULTS.md
 *.sw?
 .vercel
 .env*.local
+audits/_scratch/

@@ -9,6 +9,10 @@
  * to existing V1 MetaMorpho vaults. Takes (parentVault, morphoVaultV1).
  *
  * IMPORTANT: Factory events emit adapter address in data (NOT indexed).
+ *
+ * No custom-error fragments (audit D5): @morpho-org/blue-sdk-viem exposes 0
+ * `type:'error'` entries for these factory ABIs (they use string reverts).
+ * Deliberately omitted — do not invent fragments.
  */
 
 // ============================================================
