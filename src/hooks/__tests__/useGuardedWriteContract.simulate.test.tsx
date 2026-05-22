@@ -25,7 +25,7 @@ const writeContractAsyncSpy = vi.fn().mockResolvedValue('0xhash');
 const resetSpy = vi.fn();
 
 vi.mock('wagmi', () => ({
-  useAccount: () => ({ isConnected: true, address: '0x1111111111111111111111111111111111111111' }),
+  useAccount: () => ({ isConnected: true, address: '0x1111111111111111111111111111111111111111', chainId: 1 }),
   useWriteContract: () => ({
     writeContract: writeContractSpy,
     writeContractAsync: writeContractAsyncSpy,
@@ -74,6 +74,23 @@ describe('useGuardedWriteContract — simulate-before-write guard (audit D4)', (
 
     await act(async () => {
       result.current.writeContract(WRITE_ARGS);
+    });
+
+    expect(simulateContractMock).toHaveBeenCalledTimes(1);
+    expect(writeContractSpy).toHaveBeenCalledTimes(1);
+    expect(result.current.simulateError).toBeNull();
+  });
+
+  it('writeContract WITHOUT chainId → falls back to the connected chain, write proceeds (PR 8)', async () => {
+    // The adapter drawers call writeContract without `chainId`. Pre-PR-8 the
+    // guard hard-failed "Missing chainId"; now it uses the connected chain.
+    simulateContractMock.mockResolvedValue({ request: {} });
+    const { chainId: _omit, ...noChainArgs } = WRITE_ARGS;
+    void _omit;
+    const { result } = renderHook(() => useGuardedWriteContract());
+
+    await act(async () => {
+      result.current.writeContract(noChainArgs);
     });
 
     expect(simulateContractMock).toHaveBeenCalledTimes(1);

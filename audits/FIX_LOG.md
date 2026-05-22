@@ -485,3 +485,60 @@ bundled. No other vault/market logic, no `vercel.json`, no other ABI, no CI/conf
 
 Manual verification (post-merge): on the XDC vault — Submit Registry Change → (no wait,
 timelock 0) → Execute — completes without `DataNotTimelocked`; then the abdicate step.
+
+---
+
+## PR 8 — Guard chainId fallback (un-break the V2 adapter drawers)
+
+- **Branch:** `fix/adapter-drawer-chainid` (off `main` @ `51a4467`)
+- **Symptom:** "Add Adapter to Vault" on XDC — the *Submit — Add Adapter* button does
+  nothing.
+- **Date:** 2026-05-22
+
+### Root cause — PR-2 latent-assumption #2
+PR 2's `useGuardedWriteContract.simulate` hard-failed when a `writeContract` call omitted
+`chainId` (`throw 'Missing chainId — refusing to dispatch'`). PR 2 assumed every consumer
+passes `chainId`; the **adapter drawers never did**. `AddAdapterDrawer.handleSubmit`
+*correctly* wraps `addAdapter` in `submit()` — but its `writeContract({…})` has no `chainId`
+→ simulate fail-closes → no tx. And the drawer destructured only `{ writeContract, data,
+isPending }`, so nothing rendered → dead button. Grep confirmed `AllocateDrawer`,
+`DeallocateDrawer`, `RemoveAdapterDrawer`, `InlineCapEditor`, `UpdateCapsDrawer` (+
+`AddAdapterDrawer`) all omit `chainId` — **every V2 adapter-management action was hard-blocked
+in production since PR 2**. `tsc`/tests missed it: `chainId` is optional in wagmi's type and
+no test exercised those drawers.
+
+### Fix — chokepoint in the guard
+`useGuardedWriteContract`: when `chainId` is omitted, fall back to the **connected chain**
+(`useAccount().chainId`) for the preflight — exactly what wagmi's own `writeContract` does
+when `chainId` is absent. One change un-breaks **all** the adapter drawers, no call-site
+sweep (PR 2/5/7 chokepoint discipline). Plus `AddAdapterDrawer` now surfaces
+`simulateError`/`error` in a banner (it also gets an explicit `chainId` on its call) so a
+genuine revert — e.g. an unregistered "Unknown type" adapter — shows a decoded reason rather
+than a dead button.
+
+### Files changed (`git diff main --stat`)
+`src/hooks/useGuardedWriteContract.ts` (+14/-5 — chainId fallback),
+`src/components/vault/adapters/AddAdapterDrawer.tsx` (+10 — `chainId` arg + error banner),
+`src/hooks/__tests__/useGuardedWriteContract.simulate.test.tsx` (+19 — new test + mock gains
+a connected `chainId`).
+
+### Tests — fail on `main`, pass on branch
+New case in the PR-2 suite: `writeContract` **without `chainId`** → guard uses the connected
+chain → `simulateContract` runs → wagmi `writeContract` dispatches; `simulateError` null.
+On `main` the old guard throws "Missing chainId" → write blocked → the test fails.
+
+### Verification
+- Fail-on-`main`: `git stash` the 2 source files → suite = **1 failed | 5 passed** →
+  `stash pop` → **6 passed**.
+- `npm run test:run` → **130 passed** (11 files; 129 + 1). `npx tsc -b` → **0 errors**.
+  `npm run build` → **success**. `git diff main --stat` → the 3 files above. PA `stash@{0}`
+  intact.
+
+### Scope-compliance self-audit
+**PASS.** Guard fix + the one reported drawer + its test. The other adapter drawers are
+un-broken by the chokepoint guard fix with no edits; surfacing `simulateError` in each of
+them remains the `audits/_followups.md` unification item. No ABI, `vercel.json`, or other
+config touched.
+
+Manual verification (post-deploy): on the XDC vault, "Add Adapter" → *Submit — Add Adapter*
+now fires the tx (or shows a decoded revert reason for an unregistered adapter).

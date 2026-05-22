@@ -70,7 +70,7 @@ function decodeSimError(err: unknown): DecodedSimError {
 }
 
 export function useGuardedWriteContract() {
-  const { isConnected, address: account } = useAccount();
+  const { isConnected, address: account, chainId: connectedChainId } = useAccount();
   const result = useWriteContract();
   const [walletError, setWalletError] = useState<string | null>(null);
   const [simulateError, setSimulateError] = useState<DecodedSimError | null>(null);
@@ -88,10 +88,14 @@ export function useGuardedWriteContract() {
         if (!account) {
           throw new Error('Wallet not connected — cannot preflight the transaction');
         }
-        if (typeof v.chainId !== 'number') {
-          throw new Error('Missing chainId — refusing to dispatch an un-simulated write');
+        // wagmi's writeContract dispatches on the connected chain when
+        // `chainId` is omitted (the adapter drawers rely on this). Mirror it
+        // for the preflight rather than hard-failing the write.
+        const simChainId = typeof v.chainId === 'number' ? v.chainId : connectedChainId;
+        if (typeof simChainId !== 'number') {
+          throw new Error('No chain available for the preflight — connect a wallet.');
         }
-        const client = getPublicClient(v.chainId);
+        const client = getPublicClient(simChainId);
         await client.simulateContract({
           address: v.address,
           abi: v.abi,
@@ -109,7 +113,7 @@ export function useGuardedWriteContract() {
         setIsSimulating(false);
       }
     },
-    [account],
+    [account, connectedChainId],
   );
 
   const guardedWriteContract: typeof result.writeContract = useCallback(

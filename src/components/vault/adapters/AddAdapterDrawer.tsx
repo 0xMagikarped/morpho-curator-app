@@ -37,7 +37,7 @@ export function AddAdapterDrawer({
     error: previewError,
   } = useAdapterPreview(chainId, vaultAddress, adapterAddress, vaultAsset, showPreview && !!adapterAddress);
 
-  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
+  const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   const handlePreview = () => {
@@ -59,6 +59,7 @@ export function AddAdapterDrawer({
       abi: metaMorphoV2Abi,
       functionName: 'submit',
       args: [innerData],
+      chainId,
     });
   };
 
@@ -261,6 +262,13 @@ export function AddAdapterDrawer({
                 <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
                   This action requires a timelock of {timelockDays.toFixed(1)} days.
                 </div>
+
+                {/* Decoded write / preflight-revert error (PR 8) */}
+                {(simulateError || error) && (
+                  <div role="alert" className="bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger">
+                    {simulateError?.message ?? (error instanceof Error ? error.message : 'Transaction failed.')}
+                  </div>
+                )}
               </div>
             )}
 
