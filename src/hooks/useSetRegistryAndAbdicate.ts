@@ -30,7 +30,9 @@ export function useSetRegistry(vaultAddress: `0x${string}`, chainId: number) {
   const chainConfig = getChainConfig(chainId);
   const registryAddress = chainConfig?.periphery.v2AdapterRegistry;
 
-  const setRegistry = () => {
+  // Execute the timelocked op — valid only after `submitSetRegistry` + the
+  // selector's timelock has elapsed (V2 self-checks `executableAt`).
+  const executeSetRegistry = () => {
     if (!registryAddress) return;
     writeContract({
       address: vaultAddress,
@@ -58,7 +60,7 @@ export function useSetRegistry(vaultAddress: `0x${string}`, chainId: number) {
   };
 
   return {
-    setRegistry, submitSetRegistry, hash, isPending, isSimulating, isConfirming, isSuccess,
+    submitSetRegistry, executeSetRegistry, hash, isPending, isSimulating, isConfirming, isSuccess,
     error: combineWriteError(simulateError, walletError, error), reset,
   };
 }
@@ -69,7 +71,9 @@ export function useAbdicateRegistry(vaultAddress: `0x${string}`, chainId: number
   } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
-  const abdicate = () => {
+  // Execute the timelocked abdication — valid only after `submitAbdicate` +
+  // the selector's timelock has elapsed.
+  const executeAbdicate = () => {
     writeContract({
       address: vaultAddress,
       abi: vaultV2RegistryAbi,
@@ -95,7 +99,7 @@ export function useAbdicateRegistry(vaultAddress: `0x${string}`, chainId: number
   };
 
   return {
-    abdicate, submitAbdicate, hash, isPending, isSimulating, isConfirming, isSuccess,
+    submitAbdicate, executeAbdicate, hash, isPending, isSimulating, isConfirming, isSuccess,
     error: combineWriteError(simulateError, walletError, error), reset,
   };
 }

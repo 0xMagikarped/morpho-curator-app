@@ -104,7 +104,11 @@ describe('custom-error ABI coverage (audit D5)', () => {
     ).toThrow();
   });
 
-  it('vaultV2RegistryAbi intentionally exposes 0 custom errors (documented omission)', () => {
-    expect(errorsOf(vaultV2RegistryAbi as unknown as Abi).length).toBe(0);
+  it('vaultV2RegistryAbi carries the V2 error set so registry reverts decode (PR 7)', () => {
+    // PR 1 left this ABI error-free with a doc-note; PR 7 spread in
+    // MORPHO_METAMORPHO_V2_ERRORS so `DataNotTimelocked` & co. decode to names.
+    const names = new Set(errorsOf(vaultV2RegistryAbi as unknown as Abi).map((e) => e.name));
+    expect(names.has('DataNotTimelocked')).toBe(true);
+    expect(names.size).toBeGreaterThanOrEqual(36);
   });
 });

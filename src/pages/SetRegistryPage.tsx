@@ -1,15 +1,13 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Check, AlertTriangle, ArrowLeft, Lock, ExternalLink } from 'lucide-react';
+import { Check, AlertTriangle, ArrowLeft, Lock, Clock, ExternalLink } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { useRegistryStatus } from '../hooks/useRegistryStatus';
+import { useRegistryStatus, type RegistryStep } from '../hooks/useRegistryStatus';
 import { useSetRegistry, useAbdicateRegistry } from '../hooks/useSetRegistryAndAbdicate';
 import { getChainConfig } from '../config/chains';
 import { truncateAddress } from '../lib/utils/format';
-
-type Step = 'review' | 'abdicate' | 'complete';
 
 export function SetRegistryPage() {
   const { chainId: chainIdParam, address } = useParams<{ chainId: string; address: string }>();
@@ -18,31 +16,22 @@ export function SetRegistryPage() {
   const vaultAddress = address as `0x${string}`;
   const chainConfig = getChainConfig(chainId);
 
-  const { status, isOwner, expectedRegistry, timelock } = useRegistryStatus(vaultAddress, chainId);
+  const { step, canManage, expectedRegistry, executableAt } = useRegistryStatus(vaultAddress, chainId);
   const {
-    setRegistry, submitSetRegistry,
-    isPending: isSettingRegistry, isSimulating: isSimulatingRegistry,
-    isConfirming: isConfirmingRegistry,
-    isSuccess: registrySet, error: registryError,
+    submitSetRegistry, executeSetRegistry,
+    isPending: isSetPending, isSimulating: isSetSimulating,
+    isConfirming: isSetConfirming, error: registryError,
   } = useSetRegistry(vaultAddress, chainId);
   const {
-    abdicate, submitAbdicate,
-    isPending: isAbdicating, isSimulating: isSimulatingAbdicate,
-    isConfirming: isConfirmingAbdicate,
-    isSuccess: abdicateSuccess, error: abdicateError,
+    submitAbdicate, executeAbdicate,
+    isPending: isAbdPending, isSimulating: isAbdSimulating,
+    isConfirming: isAbdConfirming, error: abdicateError,
   } = useAbdicateRegistry(vaultAddress, chainId);
 
   const [confirmed, setConfirmed] = useState(false);
 
-  const getCurrentStep = (): Step => {
-    if (status === 'set_and_abdicated' || abdicateSuccess) return 'complete';
-    if (status === 'set_not_abdicated' || registrySet) return 'abdicate';
-    return 'review';
-  };
-
-  const currentStep = getCurrentStep();
-  const hasTimelock = timelock > 0n;
   const txError = registryError || abdicateError;
+  const isAbdicateStep = step.startsWith('abdicate_');
 
   if (!chainId || !vaultAddress) {
     return (
@@ -53,8 +42,8 @@ export function SetRegistryPage() {
     );
   }
 
-  // Not the owner
-  if (!isOwner && status !== 'loading') {
+  // Not authorised — `submit` is curator-gated on V2; owner allowed defensively.
+  if (!canManage && step !== 'loading') {
     return (
       <div className="max-w-lg mx-auto mt-12">
         <Card>
@@ -64,7 +53,7 @@ export function SetRegistryPage() {
               <h1 className="text-lg font-bold text-text-primary">Set the Morpho Registry</h1>
             </div>
             <p className="text-sm text-text-tertiary">
-              Only the vault owner can set and abdicate the adapter registry.
+              Only the vault owner or curator can set and abdicate the adapter registry.
             </p>
             <Button variant="ghost" className="w-full" onClick={() => navigate(`/vault/${chainId}/${vaultAddress}`)}>
               Return to Vault
@@ -75,8 +64,8 @@ export function SetRegistryPage() {
     );
   }
 
-  // Complete state
-  if (currentStep === 'complete') {
+  // Complete
+  if (step === 'complete') {
     return (
       <div className="max-w-lg mx-auto mt-12">
         <Card>
@@ -97,9 +86,14 @@ export function SetRegistryPage() {
     );
   }
 
+  const setBusy = isSetSimulating || isSetPending || isSetConfirming;
+  const abdBusy = isAbdSimulating || isAbdPending || isAbdConfirming;
+  /** Busy-state label shared by every action button. */
+  const busyLabel = (sim: boolean, pend: boolean, conf: boolean): string | null =>
+    sim ? 'Simulating…' : pend ? 'Confirm in Wallet…' : conf ? 'Confirming…' : null;
+
   return (
     <div className="max-w-lg mx-auto mt-8 space-y-4">
-      {/* Back link */}
       <button
         onClick={() => navigate(`/vault/${chainId}/${vaultAddress}`)}
         className="flex items-center gap-1.5 text-sm text-text-tertiary hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
@@ -111,14 +105,16 @@ export function SetRegistryPage() {
       <Card>
         <CardHeader>
           <CardTitle>Set the Morpho Registry</CardTitle>
-          <Badge variant={currentStep === 'abdicate' ? 'success' : 'warning'}>
-            {currentStep === 'abdicate' ? 'Step 2: Abdicate' : 'Step 1: Set Registry'}
+          <Badge variant={isAbdicateStep ? 'success' : 'warning'}>
+            {isAbdicateStep ? 'Step 2: Abdicate' : 'Step 1: Set Registry'}
           </Badge>
         </CardHeader>
 
         <div className="space-y-5">
           <p className="text-sm text-text-tertiary">
-            To use adapters, assign the Morpho Registry to this vault. This change is permanent.
+            To use adapters, assign the Morpho Registry to this vault. Morpho Vault V2 timelocks
+            this change: <span className="font-mono">submit</span> it, then{' '}
+            <span className="font-mono">execute</span> once the timelock elapses.
           </p>
 
           {/* Vault + registry info */}
@@ -166,18 +162,20 @@ export function SetRegistryPage() {
             </div>
           </div>
 
-          {/* Timelock warning */}
-          {hasTimelock && currentStep === 'review' && (
+          {/* Pending-timelock notice */}
+          {(step === 'set_pending' || step === 'abdicate_pending') && (
             <div className="flex items-start gap-2 p-3 bg-warning/10 border border-warning/20">
-              <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+              <Clock className="w-4 h-4 text-warning shrink-0 mt-0.5" />
               <p className="text-xs text-text-primary">
-                This vault has a timelock of {Number(timelock)}s. The registry change will need to be submitted first, then executed after the timelock expires.
+                Submitted. Executable at{' '}
+                <span className="font-mono">{new Date(Number(executableAt) * 1000).toUTCString()}</span>.
+                This page refreshes automatically.
               </p>
             </div>
           )}
 
-          {/* Confirmation checkbox */}
-          {currentStep === 'review' && (
+          {/* Confirmation checkbox — gates the first (submit) action */}
+          {step === 'set_not_submitted' && (
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -191,19 +189,19 @@ export function SetRegistryPage() {
             </label>
           )}
 
-          {/* Success banner for abdicate step */}
-          {currentStep === 'abdicate' && (
+          {/* Registry-set success banner once on the abdicate step */}
+          {isAbdicateStep && (
             <div className="flex items-start gap-2 p-3 bg-success/10 border border-success/20">
               <Check className="w-4 h-4 text-success shrink-0 mt-0.5" />
               <p className="text-xs text-text-primary">
-                Registry set successfully. Now abdicate to permanently lock it.
+                Registry set. Now abdicate to permanently lock it.
               </p>
             </div>
           )}
 
-          {/* Error display */}
+          {/* Decoded error banner (PR 6) */}
           {txError && (
-            <div className="flex items-start gap-2 p-3 bg-danger/10 border border-danger/20">
+            <div role="alert" className="flex items-start gap-2 p-3 bg-danger/10 border border-danger/20">
               <AlertTriangle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
               <p className="text-xs text-danger">
                 {txError.message || 'Transaction failed. Please try again.'}
@@ -211,43 +209,44 @@ export function SetRegistryPage() {
             </div>
           )}
 
-          {/* Action buttons */}
+          {/* Action buttons — one per timelock sub-state */}
           <div className="space-y-2">
-            {currentStep === 'review' && (
+            {step === 'set_not_submitted' && (
               <Button
                 className="w-full"
-                onClick={() => hasTimelock ? submitSetRegistry() : setRegistry()}
-                disabled={!confirmed || isSimulatingRegistry || isSettingRegistry || isConfirmingRegistry || !expectedRegistry}
+                onClick={submitSetRegistry}
+                disabled={!confirmed || setBusy || !expectedRegistry}
               >
-                {isSimulatingRegistry
-                  ? 'Simulating…'
-                  : isSettingRegistry
-                    ? 'Confirm in Wallet...'
-                    : isConfirmingRegistry
-                      ? 'Confirming...'
-                      : hasTimelock
-                        ? 'Submit Registry Change'
-                        : 'Set Registry & Continue to Abdicate'}
+                {busyLabel(isSetSimulating, isSetPending, isSetConfirming) ?? 'Submit Registry Change'}
+              </Button>
+            )}
+            {step === 'set_pending' && (
+              <Button className="w-full" disabled>Waiting for timelock…</Button>
+            )}
+            {step === 'set_executable' && (
+              <Button className="w-full" onClick={executeSetRegistry} disabled={setBusy}>
+                {busyLabel(isSetSimulating, isSetPending, isSetConfirming) ?? 'Execute — Set Registry'}
               </Button>
             )}
 
-            {currentStep === 'abdicate' && (
-              <Button
-                variant="danger"
-                className="w-full"
-                onClick={() => hasTimelock ? submitAbdicate() : abdicate()}
-                disabled={isSimulatingAbdicate || isAbdicating || isConfirmingAbdicate}
-              >
-                {isSimulatingAbdicate
-                  ? 'Simulating…'
-                  : isAbdicating
-                    ? 'Confirm in Wallet...'
-                    : isConfirmingAbdicate
-                      ? 'Confirming...'
-                      : hasTimelock
-                        ? 'Submit Abdication'
-                        : 'Abdicate — Lock Registry Permanently'}
+            {step === 'abdicate_not_submitted' && (
+              <Button variant="danger" className="w-full" onClick={submitAbdicate} disabled={abdBusy}>
+                {busyLabel(isAbdSimulating, isAbdPending, isAbdConfirming) ?? 'Submit Abdication'}
               </Button>
+            )}
+            {step === 'abdicate_pending' && (
+              <Button variant="danger" className="w-full" disabled>Waiting for timelock…</Button>
+            )}
+            {step === 'abdicate_executable' && (
+              <Button variant="danger" className="w-full" onClick={executeAbdicate} disabled={abdBusy}>
+                {busyLabel(isAbdSimulating, isAbdPending, isAbdConfirming) ?? 'Execute — Lock Registry Permanently'}
+              </Button>
+            )}
+            {step === 'loading' && (
+              <Button className="w-full" disabled>Loading…</Button>
+            )}
+            {step === 'error' && (
+              <p className="text-xs text-danger text-center">Could not read vault registry state.</p>
             )}
 
             <Button
@@ -263,3 +262,6 @@ export function SetRegistryPage() {
     </div>
   );
 }
+
+// Re-exported for tests / external step typing.
+export type { RegistryStep };

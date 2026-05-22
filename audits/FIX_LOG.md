@@ -408,3 +408,80 @@ and fixing it (if a code bug) is separate follow-up work.
 
 Manual verification (post-merge hand-off): user retries Set Registry on the XDC vault → the
 page now shows the **decoded revert reason** instead of doing nothing.
+
+---
+
+## PR 7 — Fix the V2 registry-set flow (submit → timelock → execute)
+
+- **Branch:** `fix/v2-registry-timelock-flow` (off `main` @ `3f7ffeb`)
+- **Symptom:** XDC "Set Registry" reverted `DataNotTimelocked()` (`0x1ea942a8`, decoded via
+  PR 6's now-visible error banner).
+- **Date:** 2026-05-22
+
+### Root cause
+Morpho Vault V2 timelocks config changes: `submit(calldata)` queues an op
+(`executableAt[data] = now + timelock(selector)`); the target function (`setAdapterRegistry`)
+is then called directly and self-checks `executableAt`, reverting `DataNotTimelocked` if never
+submitted. `SetRegistryPage` did `hasTimelock ? submit : direct` — wrong: it's never a bare
+direct call, and submit/execute aren't either/or, they're sequential. `hasTimelock` was false
+because the hand-written `vaultV2RegistryAbi` had **non-existent functions** — `timelock()`
+(no args; real is `timelock(bytes4)`) and `pendingTimelock(bytes4)` (doesn't exist) — and
+lacked `executableAt(bytes)`. The whole `vaultV2RegistryAbi`/`useRegistryStatus` was built on
+an incorrect V2 timelock model.
+
+### On-chain verification (XDC RPC, vault `0x3F4ed284…1a2f`, 2026-05-22)
+`owner` == `curator` == `0x22d4…676a`; `adapterRegistry` = 0x0 (unset); `timelock` for both
+the `setAdapterRegistry` and `abdicate` selectors = **0** (no wait — submit then execute
+immediately); `executableAt` of the set-registry calldata = 0 (never submitted — confirms the
+direct call had no prior `submit`). `abdicate` called directly also reverts → treated as
+timelocked too (submit→execute), and any wrinkle now surfaces as a *named* error via the
+fragments below.
+
+### Fix
+- **`vaultV2RegistryAbi.ts`** — replaced with the verified `@morpho-org/blue-sdk-viem`
+  `vaultV2Abi` shapes: `submit(bytes)`, `executableAt(bytes)`, `timelock(bytes4)`,
+  `setAdapterRegistry`, `abdicate(bytes4)`, `abdicated(bytes4)`, `adapterRegistry`, `owner`,
+  `curator`, `revoke`. Spread in `MORPHO_METAMORPHO_V2_ERRORS` so `DataNotTimelocked` & co.
+  decode to names — completes PR 1's documented `vaultV2RegistryAbi` follow-up.
+- **`useRegistryStatus.ts`** — reworked to read the real surface + `executableAt` for both
+  operations' calldata, and derive a 9-state `step` machine
+  (`set_not_submitted|set_pending|set_executable|abdicate_*|complete|loading|error`). Exposes
+  `canManage` (owner OR curator — `submit` is curator-gated; the old hook gated on owner only).
+- **`useSetRegistryAndAbdicate.ts`** — `setRegistry`→`executeSetRegistry`,
+  `abdicate`→`executeAbdicate` (the direct post-timelock calls); `submitSetRegistry`/
+  `submitAbdicate` kept. PR 6's `combineWriteError`/`isSimulating` retained.
+- **`SetRegistryPage.tsx`** — rebuilt as a state machine over `step`: one button per
+  sub-state (Submit → wait[absolute-UTC] → Execute) for each of set + abdicate; gates on
+  `canManage`.
+
+### Files changed (`git diff main --stat`)
+Modified: `vaultV2RegistryAbi.ts`, `useRegistryStatus.ts`, `useSetRegistryAndAbdicate.ts`,
+`SetRegistryPage.tsx`, plus **two discovered-in-scope** (not in the original plan's file list,
+but mandatory consequences of the hook-signature/ABI change — fixed, not deferred):
+`RegistryAlertBanner.tsx` (the other `useRegistryStatus` consumer — old `status` shape →
+compile break) and `errorAbis.test.ts` (PR 1's "vaultV2RegistryAbi exposes 0 errors" assertion
+became obsolete once PR 7 spread the V2 errors in — updated to assert `DataNotTimelocked` is
+now present).
+New: `src/hooks/__tests__/registryStatus.test.ts` (112 LOC).
+
+### Tests (`registryStatus.test.ts`) — fail on `main`, pass on branch
+Mocks `useReadContracts`/`useAccount`; 8 tests asserting each `step` derivation
+(not-submitted / pending / executable for both set + abdicate; complete; loading; error) and
+`canManage` for owner / curator / neither. On `main` the hook has no `step` field → all fail.
+
+### Verification
+- Fail-on-`main`: `git stash` the 5 files → `registryStatus.test.ts` **8 failed** →
+  `stash pop` → **8 passed**.
+- `npm run test:run` → **129 passed** (11 files; 121 baseline + 8). One pre-existing PR-1
+  test was updated (see above), not regressed.
+- `npx tsc -b` → **0 errors**. `npm run build` → **success**.
+- `git diff main --stat` → the 6 files above.  PA `stash@{0}` intact.
+
+### Scope-compliance self-audit
+**PASS, with two disclosed in-scope additions** (`RegistryAlertBanner.tsx`,
+`errorAbis.test.ts`) — both are mandatory fallout of the planned hook/ABI change (a compile
+break and an obsolete assertion), fixed rather than left broken; flagged here, not silently
+bundled. No other vault/market logic, no `vercel.json`, no other ABI, no CI/config touched.
+
+Manual verification (post-merge): on the XDC vault — Submit Registry Change → (no wait,
+timelock 0) → Execute — completes without `DataNotTimelocked`; then the abdicate step.
