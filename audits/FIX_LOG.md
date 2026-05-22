@@ -348,3 +348,63 @@ covered by `tsc` + `build`.
 chosen), no component/store, no `package.json`/CI. The `api.morpho.org` 400 (→ PR 6) and the
 `useManagedVaults` huge-range `getLogs` issue (→ `_followups.md`) are untouched. PR 3, the PA
 stash, and `chore/document-defi-data-skill` untouched.
+
+---
+
+## PR 6 — Surface simulate/wallet errors on the Set Registry flow
+
+- **Branch:** `fix/setregistry-error-surface` (off `main` @ `e4c10d4`)
+- **Symptom:** on the XDC "Set the Morpho Registry" page, clicking *Set Registry & Continue
+  to Abdicate* did nothing — no transaction, no feedback.
+- **Date:** 2026-05-22
+
+### Root cause
+Since PR 2, `useGuardedWriteContract.writeContract` runs a `simulateContract` preflight and
+**fail-closes** (no wallet popup) on a revert — setting `simulateError`. But
+`useSetRegistry`/`useAbdicateRegistry` (`useSetRegistryAndAbdicate.ts`) destructured only
+`{ writeContract, data, isPending, error, reset }` — **not `simulateError`/`walletError`**.
+`SetRegistryPage`'s error banner renders the wagmi *write* `error`, which is `null` when the
+*simulation* fails. → failing preflight = no tx **and** a silent UI. This is the PR-2 deferred
+follow-up (`audits/_followups.md` — "~25 consumers not wired") surfacing as a real production
+bug; the XDC Set Registry flow is the first consumer to hit a *failing* simulation. PR 6 makes
+the failure **visible**; it does not guess the underlying revert reason (revealed once the
+banner renders).
+
+### Fix — chokepoint in the hook (page banner already existed)
+- **`src/hooks/useSetRegistryAndAbdicate.ts`** (+36/-…) — new `combineWriteError(simulateError,
+  walletError, writeError)` helper folds the three failure channels into one `Error` (priority:
+  decoded preflight revert → wallet-not-connected → wagmi write error). Both `useSetRegistry`
+  and `useAbdicateRegistry` now destructure `simulateError`/`walletError`/`isSimulating` and
+  return the combined `error` — so the page's existing banner works with **no banner change**.
+  Mirrors PR 2's `useVaultWrite` fix.
+- **`src/pages/SetRegistryPage.tsx`** (+/-) — destructure `isSimulating` from each hook; the
+  action buttons show `"Simulating…"` and stay disabled during the preflight, closing the ~1s
+  silent gap even when the simulation *succeeds*.
+
+New: `src/hooks/__tests__/setRegistryError.test.tsx` (99 LOC).
+
+### Tests (`setRegistryError.test.tsx`) — fail on `main`, pass on branch
+`vi.mock`s `useGuardedWriteContract` (mutable holder) + `wagmi`; `renderHook`s the two
+wrappers. 6 tests: decoded `simulateError` surfaced in `error` (set + abdicate paths);
+`walletError` surfaced; plain wagmi write error still surfaced (no regression); null when
+nothing failed; `isSimulating` passed through both. On `main` the wrappers ignore
+`simulateError`/`walletError`/`isSimulating` → **4 of 6 fail**.
+
+### Verification
+- Fail-on-`main`: `git stash` the 2 files → suite = **4 failed | 2 passed** → `stash pop` →
+  **6 passed**.
+- `npm run test:run` → **108 passed** (9 files; 102 baseline + 6, 0 skipped).
+- `npx tsc -b` → **0 errors**. `npm run build` → **success**.
+- `git diff main --stat` → only `useSetRegistryAndAbdicate.ts`, `SetRegistryPage.tsx`. PA
+  `stash@{0}` intact.
+
+### Scope-compliance self-audit
+**PASS.** Only the 2 named files + one test. `useGuardedWriteContract` (PR 2) unchanged; no
+ABI, `vercel.json`, or config touched. The broader unification across the other ~24
+`useGuardedWriteContract` consumers remains the `audits/_followups.md` item — PR 6 fixes only
+the reported-broken Set Registry flow. The underlying reason the XDC `setAdapterRegistry`/
+`submit` simulation reverts is **out of scope** — it becomes visible (decoded) once this ships,
+and fixing it (if a code bug) is separate follow-up work.
+
+Manual verification (post-merge hand-off): user retries Set Registry on the XDC vault → the
+page now shows the **decoded revert reason** instead of doing nothing.

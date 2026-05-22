@@ -21,12 +21,14 @@ export function SetRegistryPage() {
   const { status, isOwner, expectedRegistry, timelock } = useRegistryStatus(vaultAddress, chainId);
   const {
     setRegistry, submitSetRegistry,
-    isPending: isSettingRegistry, isConfirming: isConfirmingRegistry,
+    isPending: isSettingRegistry, isSimulating: isSimulatingRegistry,
+    isConfirming: isConfirmingRegistry,
     isSuccess: registrySet, error: registryError,
   } = useSetRegistry(vaultAddress, chainId);
   const {
     abdicate, submitAbdicate,
-    isPending: isAbdicating, isConfirming: isConfirmingAbdicate,
+    isPending: isAbdicating, isSimulating: isSimulatingAbdicate,
+    isConfirming: isConfirmingAbdicate,
     isSuccess: abdicateSuccess, error: abdicateError,
   } = useAbdicateRegistry(vaultAddress, chainId);
 
@@ -215,15 +217,17 @@ export function SetRegistryPage() {
               <Button
                 className="w-full"
                 onClick={() => hasTimelock ? submitSetRegistry() : setRegistry()}
-                disabled={!confirmed || isSettingRegistry || isConfirmingRegistry || !expectedRegistry}
+                disabled={!confirmed || isSimulatingRegistry || isSettingRegistry || isConfirmingRegistry || !expectedRegistry}
               >
-                {isSettingRegistry
-                  ? 'Confirm in Wallet...'
-                  : isConfirmingRegistry
-                    ? 'Confirming...'
-                    : hasTimelock
-                      ? 'Submit Registry Change'
-                      : 'Set Registry & Continue to Abdicate'}
+                {isSimulatingRegistry
+                  ? 'Simulating…'
+                  : isSettingRegistry
+                    ? 'Confirm in Wallet...'
+                    : isConfirmingRegistry
+                      ? 'Confirming...'
+                      : hasTimelock
+                        ? 'Submit Registry Change'
+                        : 'Set Registry & Continue to Abdicate'}
               </Button>
             )}
 
@@ -232,15 +236,17 @@ export function SetRegistryPage() {
                 variant="danger"
                 className="w-full"
                 onClick={() => hasTimelock ? submitAbdicate() : abdicate()}
-                disabled={isAbdicating || isConfirmingAbdicate}
+                disabled={isSimulatingAbdicate || isAbdicating || isConfirmingAbdicate}
               >
-                {isAbdicating
-                  ? 'Confirm in Wallet...'
-                  : isConfirmingAbdicate
-                    ? 'Confirming...'
-                    : hasTimelock
-                      ? 'Submit Abdication'
-                      : 'Abdicate — Lock Registry Permanently'}
+                {isSimulatingAbdicate
+                  ? 'Simulating…'
+                  : isAbdicating
+                    ? 'Confirm in Wallet...'
+                    : isConfirmingAbdicate
+                      ? 'Confirming...'
+                      : hasTimelock
+                        ? 'Submit Abdication'
+                        : 'Abdicate — Lock Registry Permanently'}
               </Button>
             )}
 

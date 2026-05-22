@@ -1,13 +1,31 @@
 import { useWaitForTransactionReceipt } from 'wagmi';
-import { useGuardedWriteContract } from './useGuardedWriteContract';
+import { useGuardedWriteContract, type DecodedSimError } from './useGuardedWriteContract';
 import { encodeFunctionData, toFunctionSelector } from 'viem';
 import { vaultV2RegistryAbi } from '../lib/contracts/vaultV2RegistryAbi';
 import { getChainConfig } from '../config/chains';
 
 const SET_REGISTRY_SELECTOR = toFunctionSelector('setAdapterRegistry(address)');
 
+/**
+ * Collapse the three failure channels of `useGuardedWriteContract` into one
+ * `Error` for the page banner. Priority: decoded preflight revert (PR 2's
+ * simulate guard) > wallet-not-connected > wagmi write error. Without this the
+ * Set Registry page silently does nothing when the simulation fail-closes.
+ */
+function combineWriteError(
+  simulateError: DecodedSimError | null,
+  walletError: string | null,
+  writeError: unknown,
+): Error | null {
+  if (simulateError) return new Error(simulateError.message);
+  if (walletError) return new Error(walletError);
+  return (writeError as Error) ?? null;
+}
+
 export function useSetRegistry(vaultAddress: `0x${string}`, chainId: number) {
-  const { writeContract, data: hash, isPending, error, reset } = useGuardedWriteContract();
+  const {
+    writeContract, data: hash, isPending, isSimulating, error, simulateError, walletError, reset,
+  } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
   const chainConfig = getChainConfig(chainId);
   const registryAddress = chainConfig?.periphery.v2AdapterRegistry;
@@ -39,11 +57,16 @@ export function useSetRegistry(vaultAddress: `0x${string}`, chainId: number) {
     });
   };
 
-  return { setRegistry, submitSetRegistry, hash, isPending, isConfirming, isSuccess, error, reset };
+  return {
+    setRegistry, submitSetRegistry, hash, isPending, isSimulating, isConfirming, isSuccess,
+    error: combineWriteError(simulateError, walletError, error), reset,
+  };
 }
 
 export function useAbdicateRegistry(vaultAddress: `0x${string}`, chainId: number) {
-  const { writeContract, data: hash, isPending, error, reset } = useGuardedWriteContract();
+  const {
+    writeContract, data: hash, isPending, isSimulating, error, simulateError, walletError, reset,
+  } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   const abdicate = () => {
@@ -71,5 +94,8 @@ export function useAbdicateRegistry(vaultAddress: `0x${string}`, chainId: number
     });
   };
 
-  return { abdicate, submitAbdicate, hash, isPending, isConfirming, isSuccess, error, reset };
+  return {
+    abdicate, submitAbdicate, hash, isPending, isSimulating, isConfirming, isSuccess,
+    error: combineWriteError(simulateError, walletError, error), reset,
+  };
 }
