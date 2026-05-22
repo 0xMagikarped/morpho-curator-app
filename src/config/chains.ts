@@ -349,6 +349,60 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       pollIntervalMs: 5_000,
     },
   },
+
+  // ============================================================
+  // XDC Network (Chain ID 50) — Morpho Vault V2 only
+  // ============================================================
+  // XDC has the Morpho Vault V2 stack deployed but NO MetaMorpho V1
+  // factory. Only `vaultFactories.v2` is populated, so the create-vault
+  // wizard surfaces XDC under the V2 flow exclusively and never the V1
+  // flow (`ChainAssetStep.tsx` filters chains by factory presence).
+  // All addresses verified on-chain via eth_getCode (2026-05-22).
+  // ============================================================
+  50: {
+    chainId: 50,
+    name: 'XDC Network',
+    protocol: 'morpho',
+    defaultVaultFlavor: 'metaMorphoV1',
+    rpcUrls: [
+      'https://rpc.xinfin.network',
+      'https://erpc.xdcrpc.com',
+      'https://rpc.xdc.network',
+    ],
+    blockExplorer: 'https://xdcscan.com',
+    morphoBlue: '0xEa49B0fE898aF913A3826F9f462eE2cDcb854fD9' as Address,
+    deployed: true,
+    vaultFactories: {
+      v2: '0x227544d6989cD15c05AAB6dde4F29523dcfdbe2B' as Address,
+    },
+    periphery: {
+      adaptiveCurveIrm: '0x15c7312B0f26aa0AA70B24a0D2AF87B9e7D614A0' as Address,
+      oracleV2Factory: '0x6Ad93a3aA829514473D3DF67382894A76c7283B4' as Address,
+      v2AdapterRegistry: '0x79A8C4e9E502C1867cAf2E7202f0C6b89aaCd5c1' as Address,
+      morphoMarketV1AdapterV2Factory:
+        '0x5C00c99F2235439725417E9f037B7D38FfF35d31' as Address,
+    },
+    apiSupported: false,
+    blockTime: 2_000,
+    finality: 'probabilistic',
+    gasConfig: {
+      blockGasLimit: 30_000_000,
+      sstoreCost: 20_000,
+    },
+    nativeToken: {
+      symbol: 'XDC',
+      decimals: 18,
+      wrapped: '0x951857744785E80e2De051c32EE7b25f9c458C42' as Address,
+    },
+    stablecoins: [],
+    oracleProviders: ['chainlink-push'],
+    deploymentBlock: 0,
+    verified: true,
+    scanner: {
+      batchSize: 5_000,
+      pollIntervalMs: 5_000,
+    },
+  },
 };
 
 /** Chains where Morpho GraphQL API is available */

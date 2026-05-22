@@ -1,5 +1,5 @@
 import { http, fallback } from 'wagmi';
-import { mainnet, base, bsc } from 'wagmi/chains';
+import { mainnet, base, bsc, xdc } from 'wagmi/chains';
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
   rabbyWallet,
@@ -86,17 +86,24 @@ const pharosTransports = [
   ...(env.pharosRpcUrl ? [http(env.pharosRpcUrl)] : []),
   http('https://rpc.pharos.xyz'),
 ];
+const xdcTransports = [
+  ...(env.xdcRpcUrl ? [http(env.xdcRpcUrl)] : []),
+  http('https://rpc.xinfin.network'),
+  http('https://erpc.xdcrpc.com'),
+  http('https://rpc.xdc.network'),
+];
 
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: env.walletConnectProjectId,
-  chains: [sei, mainnet, base, bsc, pharos],
+  chains: [sei, mainnet, base, bsc, pharos, xdc],
   transports: {
     [sei.id]: fallback(seiTransports),
     [mainnet.id]: fallback(ethTransports),
     [base.id]: fallback(baseTransports),
     [bsc.id]: fallback(bnbTransports),
     [pharos.id]: fallback(pharosTransports),
+    [xdc.id]: fallback(xdcTransports),
   },
   wallets: [
     {
