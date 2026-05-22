@@ -149,3 +149,73 @@ hooks; mounting it would test CapsTab's wiring (and require heavy mocking) rathe
 guard's hook→DOM contract. The fixture is a stronger, less brittle unit of the actual
 behaviour; CapsTab's one-line `simulateError` passthrough is covered by `tsc` + `build` + the
 explicit banner JSX. Net: a test-quality improvement, not a scope change.
+
+---
+
+## PR 4 — Moolah-aware `fetchPending*` (chain-switch crash fix)
+
+- **Branch:** `fix/moolah-pendingcap-guard` (off `main` @ `3b75a0f`, PR 1+2 merged; PR 3 parked)
+- **User-visible bug:** switching connected wallet to BNB Chain (56, Moolah) left the UI
+  stuck — `useDiscoveredMarketStatuses RPC call failed: ContractFunctionExecutionError:
+  pendingCap reverted` from `useVault.ts:503` → `rpcClient.ts:919`.
+- **Date:** 2026-05-21
+
+### Root cause
+`src/lib/data/rpcClient.ts` had three symmetric reads using the MetaMorpho V1 ABI —
+`fetchPendingCap` (L910), `fetchPendingTimelock` (~L925), `fetchPendingGuardian` (~L949) —
+all calling `pending*` selectors that **do not exist on `moolahVaultAbi`** (Moolah's `setCap`
+is instant; governance flows through a TimelockController; no pending state by protocol
+design). `fetchPendingCap` had no try/catch, so the revert propagated up through
+`Promise.all` in `useVaultPendingActions:454` and `useDiscoveredMarketStatuses:503`. The
+other two swallowed the revert in try/catch but still burned an RPC call.
+
+### Approach — chokepoint fix (matches PR 2's funnel-point discipline)
+At the top of each function: `if (getChainConfig(chainId)?.protocol === 'moolah') return null;`
+— semantically correct ("no pending value" by protocol design, not "RPC failed"). Reuses
+`getChainConfig` (already imported in the file) and the canonical Moolah-gate idiom used in
+11+ other call sites (`MarketDeployer.tsx:32`, `useMoolahSingleton.ts:23`,
+`timelock/hints.ts:92`, …). Zero call-site edits needed; both visible callers + the two
+latent variants are fixed in one place.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/data/rpcClient.ts` (+8 lines = 3 guards × 2-3 lines each with one-line
+context comment). New: `src/lib/data/__tests__/fetchPending.test.ts` (109 LOC).
+
+### Tests (`fetchPending.test.ts`) — fail on `main`, pass on branch
+Mocks `viem.createPublicClient` via `vi.hoisted` + `vi.mock('viem', importActual)` so
+`getPublicClient` hands the three functions a fake whose `readContract` is a spy. Six tests:
+- For each of `{ pendingCap, pendingTimelock, pendingGuardian }`:
+  - **Moolah (chain 56)** → returns `null`; `readContract` **not called** (no wasted RPC).
+    For `pendingTimelock`/`pendingGuardian` the spy is pre-resolved to a non-null tuple so a
+    regression that bypassed the guard would wrongly surface a fake pending value — locking
+    the no-call invariant.
+  - **Morpho (chain 1)** → `readContract` called exactly once with the matching
+    `functionName`/`address`, return tuple parsed into the expected shape.
+
+### Verification
+- **Fail-on-`main` demonstrated:** `git stash` `rpcClient.ts` (→ main: no guards) → suite =
+  **3 failed | 3 passed** (the 3 Moolah tests fail at "readContract not called" /
+  "result === null"; the 3 Morpho tests still pass). `git stash pop` → **6 passed**.
+- `npm run test:run` → **97 passed** (7 files; was 91 — +6, 0 skipped).
+- `npx tsc -b` → **0 errors**. `npm run build` → **success**.
+- `git diff main --stat` → only `src/lib/data/rpcClient.ts`. PA `stash@{0}: pre-pr2-pa-feature`
+  verified **intact**.
+
+### Scope-compliance self-audit
+**PASS.** Only `rpcClient.ts` modified + one new test file. No caller edited (chokepoint
+discipline). Not touched: PR-1 ABI files, PR-2 write hooks, PR-3 `vercel.json` /
+`playwright.config.ts`, the Base RPC pool (PR 5), the Infura key leak, SeiTrace 522/CORS, any
+UI component, store, config, or CI. PR 3 (`aa92454`) remains parked on its branch; PA stash
+and `chore/document-defi-data-skill` untouched.
+
+### Follow-ups noted (do not address in PR 4)
+- `useDiscoveredMarketStatuses` (`useVault.ts:506`) still has a generic `console.warn` +
+  `continue` per rejected market — fail-open swallow pattern; with PR 4 the Moolah case no
+  longer triggers it, but other reverts still go silent. → `_followups.md`.
+- `fetchPendingCap` lacks a try/catch on Morpho/V2 chains; if V2 vaults also lack the V1
+  selector, this could resurface. PR 4 doesn't add a defensive catch (scope: Moolah only).
+  → `_followups.md`.
+
+Manual verification (post-merge, separate hand-off): user reloads the production deploy on
+a BNB Moolah vault and confirms (a) the `pendingCap reverted` console.warn is gone and
+(b) the chain-switch flow no longer leaves the UI stuck on Moolah vaults.

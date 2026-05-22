@@ -912,6 +912,10 @@ export async function fetchPendingCap(
   vaultAddress: Address,
   marketId: MarketId,
 ): Promise<PendingCap | null> {
+  // Moolah's setCap is instant — no pending state exists by protocol design
+  // (the MetaMorpho-fork removed submitCap/acceptCap). Reading `pendingCap`
+  // would revert; return null semantically ("no pending value") instead.
+  if (getChainConfig(chainId)?.protocol === 'moolah') return null;
   const client = getPublicClient(chainId);
   const result = await client.readContract({
     address: vaultAddress,
@@ -928,6 +932,8 @@ export async function fetchPendingTimelock(
   chainId: number,
   vaultAddress: Address,
 ): Promise<PendingTimelock | null> {
+  // Moolah governs via TimelockController, not MetaMorpho's pendingTimelock.
+  if (getChainConfig(chainId)?.protocol === 'moolah') return null;
   const client = getPublicClient(chainId);
   try {
     const result = await client.readContract({
@@ -952,6 +958,8 @@ export async function fetchPendingGuardian(
   chainId: number,
   vaultAddress: Address,
 ): Promise<PendingGuardian | null> {
+  // Moolah has no MetaMorpho-style pendingGuardian (no submit/accept flow).
+  if (getChainConfig(chainId)?.protocol === 'moolah') return null;
   const client = getPublicClient(chainId);
   try {
     const result = await client.readContract({
