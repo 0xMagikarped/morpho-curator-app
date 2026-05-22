@@ -219,3 +219,68 @@ and `chore/document-defi-data-skill` untouched.
 Manual verification (post-merge, separate hand-off): user reloads the production deploy on
 a BNB Moolah vault and confirms (a) the `pendingCap reverted` console.warn is gone and
 (b) the chain-switch flow no longer leaves the UI stuck on Moolah vaults.
+
+---
+
+## Feature — Add XDC Network (chainId 50), V2 vaults only
+
+- **Branch:** `feat/xdc-network` (off `main` @ `3b75a0f`)
+- **Request:** add XDC Network as a supported chain, **restricted to Morpho Vault V2**
+  (no MetaMorpho V1, no Moolah).
+- **Date:** 2026-05-22
+
+> Not an audit finding — a feature. Logged here to keep one running change log.
+
+### Design facts
+- `viem/chains` already exports `xdc` (id 50, native XDC/18, XDCScan, multicall3
+  `0x0B17…D9aF`) — imported directly, no custom `defineChain` (unlike sei/pharos).
+- `VaultFlavor` has no `'vaultV2'` value — V2 is an orthogonal runtime axis
+  (`detectVaultVersion` `sentinel()` probe). **"V2-only" is enforced purely by config:**
+  `ChainAssetStep.tsx:20` filters creatable chains by `isV2 ? !!v2 : !!v1`, so giving XDC
+  only a `vaultFactories.v2` makes it appear in the V2 create flow and absent from V1 —
+  zero extra code.
+
+### On-chain verification (XDC RPC `eth_getCode`, chainId `0x32`, 2026-05-22)
+All six Morpho addresses have contract code: `morphoBlue` 0xEa49…4fD9, `vaultV2Factory`
+0x2275…be2B, `v2AdapterRegistry` 0x79A8…d5c1, `morphoMarketV1AdapterV2Factory` 0x5C00…5d31,
+`adaptiveCurveIrm` 0x15c7…14A0, `oracleV2Factory` 0x6Ad9…83B4. WXDC resolved + verified:
+`0x951857744785E80e2De051c32EE7b25f9c458C42` (`symbol() → "WXDC"`, `name() → "Wrapped XDC"`).
+`bundler3` / `morphoVaultV1AdapterFactory` / `publicAllocator` not deployed-for / not needed
+on the V2-market-adapter path — omitted.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/config/chains.ts` (+54 — the `50:` `CHAIN_CONFIGS` entry),
+`src/config/wagmi.ts` (+11 — `import { xdc }`, `xdcTransports`, chain + transport entry),
+`src/config/env.ts` (+1 — `xdcRpcUrl`), `.env.example` (+1 — `VITE_XDC_RPC_URL`),
+`vercel.json` (connect-src += `rpc.xinfin.network`, `*.xdcrpc.com`, `rpc.xdc.network`).
+New: `src/config/__tests__/xdc.test.ts` (73 LOC).
+
+### Tests (`xdc.test.ts`) — fail on `main`, pass on branch
+On `main` `CHAIN_CONFIGS[50]` is undefined → all 5 fail. Asserts: chain registered &
+`protocol: 'morpho'`, `apiSupported: false`, `deployed: true`; **V2-only invariant**
+(`vaultFactories.v2` set, `vaultFactories.v1` undefined); the six addresses match the
+verified values exactly; the `ChainAssetStep` gating predicate (XDC qualifies V2, excluded
+V1); native token XDC/18 + valid 20-byte WXDC.
+
+### Verification
+- Fail-on-`main`: `git stash` the 5 config files → `xdc.test.ts` **5 failed** →
+  `stash pop` → **5 passed**.
+- `npm run test:run` → **96 passed** (7 files; 91 baseline + 5, 0 skipped).
+- `npx tsc -b` → **0 errors**. `npm run build` → **success**.
+- `git diff main --stat` → only the 5 config files. PA `stash@{0}` intact.
+
+### PR-3 coordination (flagged)
+`main`'s `vercel.json` is still Report-Only CSP (PR 3 parked). The XDC `connect-src` hosts
+added here are correct under Report-Only. When `fix/audit-03-csp-hsts` (PR 3) is rebased/
+merged its enforced-`connect-src` rewrite **will conflict** on that line — resolution is a
+trivial union: PR 3's enforced policy must include `https://rpc.xinfin.network`,
+`https://*.xdcrpc.com`, `https://rpc.xdc.network`.
+
+### Scope-compliance self-audit
+**PASS.** Only the 5 config files + one test. No vault/market component logic touched
+(chain flows are config-driven). No PR-1/2/3/4 artifacts, the PA stash, or
+`chore/document-defi-data-skill` touched. `deploymentBlock: 0` follows the Pharos
+precedent (non-API chain; scanner starts from genesis).
+
+Manual verification (post-merge hand-off): connect a wallet on XDC, open the create-vault
+wizard → confirm XDC appears under **V2 only**, and a V2 vault page loads.

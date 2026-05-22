@@ -6,6 +6,7 @@ export const env = {
   seiRpcUrl: import.meta.env.VITE_SEI_RPC_URL ?? '',
   bnbRpcUrl: import.meta.env.VITE_BNB_RPC_URL ?? '',
   pharosRpcUrl: import.meta.env.VITE_PHAROS_RPC_URL ?? '',
+  xdcRpcUrl: import.meta.env.VITE_XDC_RPC_URL ?? '',
 } as const;
 
 if (!env.walletConnectProjectId) {
