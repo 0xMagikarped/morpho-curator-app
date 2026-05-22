@@ -284,3 +284,67 @@ precedent (non-API chain; scanner starts from genesis).
 
 Manual verification (post-merge hand-off): connect a wallet on XDC, open the create-vault
 wizard → confirm XDC appears under **V2 only**, and a V2 vault page loads.
+
+---
+
+## PR 5 — RPC pool: reject client-exposed keyed RPCs + rank fallbacks
+
+- **Branch:** `fix/audit-05-rpc-pool` (off `main` @ `e4c10d4`)
+- **Symptom:** production console 429 storm — `POST mainnet.infura.io/v3/70fde4d…` /
+  `base-mainnet.infura.io/v3/…` **Too Many Requests** from `useManagedVaults.ts:164`;
+  downstream `rpcClient.ts:533` "9 of 17 V2 reads returned null".
+- **Date:** 2026-05-22
+
+### Root cause
+`infura` appears **nowhere in `src/`**, yet the production bundle `index-CoceRxJu.js`
+contains `infura.io/v3/70fde4d039af47d6b5ce31de9d8710a8` — proving `VITE_ETH_RPC_URL` /
+`VITE_BASE_RPC_URL` are set in Vercel to Infura URLs. `getPublicClient` (`rpcClient.ts`) and
+`wagmi.ts` give env RPCs **first priority**, so every ETH/Base read hit that over-quota
+free-tier Infura project → 429. Because `VITE_*` vars are inlined by Vite, the key was also
+**publicly exposed** in the shipped bundle. (The audit's "no secret in bundle" finding is now
+stale — the var was added post-audit.)
+
+### Fix (user-approved Option A — code hardening; user removes the Vercel vars)
+1. **`src/config/env.ts`** (+45/-…) — new exported `sanitizeRpcUrl(name, url)`: rejects any
+   RPC URL embedding a provider key (`infura.io/v3/`, `alchemy.com/v2/`, `g.alchemy.com/`,
+   `.quiknode.pro/`, `.quicknode.com/`) — `console.error`s why and returns `''` so the app
+   falls back to the unkeyed public RPCs in `chains.ts`. Applied to all 6 `VITE_*_RPC_URL`
+   reads. `env` keeps the same shape — consumers unchanged. **`env.ts` is the single
+   chokepoint both `getPublicClient` and `wagmi.ts` read from**, so this fixes both paths.
+   Because the guard *rejects* (not just warns), PR 5 stops the 429s on its own the moment it
+   deploys — the app stops calling Infura even before the Vercel var is removed.
+2. **`src/lib/data/rpcClient.ts`** (+4/-1) — `getPublicClient`: `fallback(…, { rank: true })`
+   so viem health-ranks transports and deprioritises a slow/429-ing endpoint.
+3. **`src/config/wagmi.ts`** (+13/-6) — `{ rank: true }` on all six chain `fallback(...)`.
+New: `src/config/__tests__/envRpcGuard.test.ts` (61 LOC).
+
+### Tests (`envRpcGuard.test.ts`) — fail on `main`, pass on branch
+`sanitizeRpcUrl` doesn't exist on `main` → all 13 fail there. Asserts: rejects Infura
+(mainnet+base), Alchemy, QuickNode keyed URLs → `''`; emits a `console.error` naming the var
+and the exposure; passes unkeyed public RPCs (publicnode/llamarpc/xinfin/base.org/ankr)
+through unchanged; empty stays empty. `rank: true` is viem-internal — not unit-tested;
+covered by `tsc` + `build`.
+
+### Verification
+- Fail-on-`main`: `git stash` the 3 files → `envRpcGuard.test.ts` **13 failed** →
+  `stash pop` → **13 passed**.
+- `npm run test:run` → **115 passed** (9 files; 102 baseline + 13, 0 skipped).
+- `npx tsc -b` → **0 errors**. `npm run build` → **success**.
+- `git diff main --stat` → only `env.ts`, `wagmi.ts`, `rpcClient.ts`. PA `stash@{0}` intact.
+- Note: the full suite now prints `[env] VITE_BASE_RPC_URL/VITE_SEI_RPC_URL contains an
+  embedded provider API key` on module load — the guard correctly firing on the **local**
+  `.env`/`.env.local`, which themselves hold keyed RPC URLs. Harmless test noise; also a real
+  signal that the local env has the same misconfiguration as Vercel.
+
+### Operational follow-up (user — outside the PR)
+- Remove `VITE_ETH_RPC_URL` + `VITE_BASE_RPC_URL` from Vercel (and local `.env`/`.env.local`).
+  After PR 5 the guard makes them inert, but removing them is what deletes the exposed key
+  *string* from future bundles.
+- **Rotate the Infura key** `70fde4d039af47d6b5ce31de9d8710a8` — public in the shipped bundle,
+  treat as compromised.
+
+### Scope-compliance self-audit
+**PASS.** Only `env.ts`, `wagmi.ts`, `rpcClient.ts` + one test. No `api/` proxy (Option B not
+chosen), no component/store, no `package.json`/CI. The `api.morpho.org` 400 (→ PR 6) and the
+`useManagedVaults` huge-range `getLogs` issue (→ `_followups.md`) are untouched. PR 3, the PA
+stash, and `chore/document-defi-data-skill` untouched.

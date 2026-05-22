@@ -84,7 +84,9 @@ export function getPublicClient(chainId: number): PublicClient {
   const envUrl = ENV_RPC_URLS[chainId];
   const urls = envUrl ? [envUrl, ...chainConfig.rpcUrls] : chainConfig.rpcUrls;
   const transport = urls.length > 1
-    ? fallback(urls.map(url => http(url, { fetchOptions: { cache: 'no-store' } })))
+    // `rank: true` — viem health-ranks transports and deprioritises a slow or
+    // 429-ing endpoint instead of always hammering the first one.
+    ? fallback(urls.map(url => http(url, { fetchOptions: { cache: 'no-store' } })), { rank: true })
     : http(urls[0], { fetchOptions: { cache: 'no-store' } });
 
   const client = createPublicClient({

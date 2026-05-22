@@ -98,12 +98,13 @@ export const config = getDefaultConfig({
   projectId: env.walletConnectProjectId,
   chains: [sei, mainnet, base, bsc, pharos, xdc],
   transports: {
-    [sei.id]: fallback(seiTransports),
-    [mainnet.id]: fallback(ethTransports),
-    [base.id]: fallback(baseTransports),
-    [bsc.id]: fallback(bnbTransports),
-    [pharos.id]: fallback(pharosTransports),
-    [xdc.id]: fallback(xdcTransports),
+    // `rank: true` — health-rank endpoints so a slow/429-ing RPC is deprioritised.
+    [sei.id]: fallback(seiTransports, { rank: true }),
+    [mainnet.id]: fallback(ethTransports, { rank: true }),
+    [base.id]: fallback(baseTransports, { rank: true }),
+    [bsc.id]: fallback(bnbTransports, { rank: true }),
+    [pharos.id]: fallback(pharosTransports, { rank: true }),
+    [xdc.id]: fallback(xdcTransports, { rank: true }),
   },
   wallets: [
     {
