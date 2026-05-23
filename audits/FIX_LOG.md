@@ -542,3 +542,63 @@ config touched.
 
 Manual verification (post-deploy): on the XDC vault, "Add Adapter" → *Submit — Add Adapter*
 now fires the tx (or shows a decoded revert reason for an unregistered adapter).
+
+---
+
+## PR 9 — Deploy Market Adapter: idempotency + corrected event ABI
+
+- **Branch:** `fix/deploy-adapter-idempotency` (off `main` @ `1c659d4`)
+- **Symptom:** "Deploy adapter" on the XDC vault reverted —
+  *"The contract function 'createMorphoMarketV1AdapterV2' reverted"*.
+- **Date:** 2026-05-23
+
+### Diagnosis
+On-chain probe: `factory.morphoMarketV1AdapterV2(0x3F4e…1a2f) = 0x73b52f…cdd6` —
+**non-zero**. The adapter was **already deployed** for this vault — `0x73b5…cdd6`
+is the exact same address the user tried to add manually in the prior screenshot.
+The factory is **one-adapter-per-vault** (CREATE2), so `create…` reverts on a second call.
+
+**How it got there & stayed invisible:** a prior on-chain `create` had succeeded, but the
+hand-written `marketAdapterFactoryAbi` had the event's adapter param **non-indexed** (real
+event emits it **indexed**, named `morphoMarketV1AdapterV2`). `decodeEventLog` then read
+`args.adapter` → `undefined` → "Could not find adapter in transaction logs" → the flow
+errored *after* the on-chain deploy already succeeded, never recording the adapter. Every
+retry then reverted against the already-deployed adapter.
+
+### Fix
+- **`marketAdapterFactoryAbi.ts`** — replaced with verbatim shapes from the SDK
+  `morphoMarketV1AdapterV2FactoryAbi` / `morphoVaultV1AdapterFactoryAbi`. Events now match
+  reality (both params indexed; correct names). Added the `morphoMarketV1AdapterV2(parentVault)
+  → address` and `morphoVaultV1Adapter(parentVault, morphoVaultV1) → address` views —
+  required for the idempotency check.
+- **`useDeployMarketAdapter.ts`** — before calling `create…`, read
+  `factory.morphoMarketV1AdapterV2(vaultAddress)`; if non-zero, skip the deploy and go
+  straight to `addAdapter` with that address. The new-deploy path's event parsing now reads
+  `args.morphoMarketV1AdapterV2` (the corrected indexed name).
+
+### Files changed
+Modified: `src/hooks/useDeployMarketAdapter.ts` (+~30/-~10), `src/lib/contracts/marketAdapterFactoryAbi.ts`
+(+~38/-~15). New: `src/hooks/__tests__/deployMarketAdapter.test.ts` (108 LOC).
+
+### Tests — fail on `main`, pass on branch
+1. **Idempotency:** mock `factory.morphoMarketV1AdapterV2` → existing address →
+   `writeDeployAsync` **not** called; `writeAddAsync` called with the existing adapter; step
+   ends `'done'`. On `main` the hook blindly calls `create…` → assertion fails.
+2. **Genuine new deploy:** mock returns zero → `writeDeployAsync` called → fake receipt
+   carries a `CreateMorphoMarketV1AdapterV2` log with **indexed** params → adapter address
+   extracted via the corrected ABI → `writeAddAsync` follows. On `main` the old non-indexed
+   ABI fails to decode → "Could not find adapter" → step `'error'`, not `'done'` → fails.
+
+### Verification
+- Fail-on-`main`: `git stash` the 2 source files → suite **2 failed** → `stash pop` → **2
+  passed**.
+- `npm run test:run` → **132 passed** (12 files; 130 + 2). `npx tsc -b` → **0**.
+  `npm run build` → **success**. `git diff main --stat` → exactly those 2 files. PA stash intact.
+
+### Scope-compliance self-audit
+**PASS.** Only `useDeployMarketAdapter.ts` + `marketAdapterFactoryAbi.ts` + one test. The
+"Unknown type" adapter detection in `useV2Adapters`/`useAdapterPreview` (`isMorphoMarketV1AdapterV2`
+not consulted) is a separate cosmetic gap → `_followups.md` if it keeps biting.
+
+Manual verification (post-deploy): on the XDC vault, the "Deploy Market Adapter" step now
+detects the existing `0x73b5…cdd6`, skips the deploy, and prompts `addAdapter` directly.

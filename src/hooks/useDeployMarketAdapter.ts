@@ -9,7 +9,7 @@ import { useState, useCallback } from 'react';
 import { usePublicClient } from 'wagmi';
 import { useGuardedWriteContract } from './useGuardedWriteContract';
 import type { Address } from 'viem';
-import { decodeEventLog } from 'viem';
+import { decodeEventLog, zeroAddress } from 'viem';
 import { marketV1AdapterV2FactoryAbi } from '../lib/contracts/marketAdapterFactoryAbi';
 import { metaMorphoV2Abi } from '../lib/contracts/metaMorphoV2Abi';
 import { getChainConfig } from '../config/chains';
@@ -60,43 +60,57 @@ export function useDeployMarketAdapter(
       setError(null);
       setDeployedAdapter(null);
 
-      // Step 1: Deploy adapter via factory — single arg: parentVault
-      const deployTxHash = await writeDeployAsync({
+      // Idempotency (PR 9): the factory is one-adapter-per-vault (CREATE2);
+      // calling `create…` a second time reverts. If an adapter already
+      // exists for this vault, skip the deploy and go straight to "add".
+      let adapterAddress: Address | null = null;
+      const existing = (await publicClient.readContract({
         address: factoryAddress,
         abi: marketV1AdapterV2FactoryAbi,
-        functionName: 'createMorphoMarketV1AdapterV2',
+        functionName: 'morphoMarketV1AdapterV2',
         args: [vaultAddress],
-        chainId,
-      });
+      })) as Address;
+      if (existing && existing !== zeroAddress) {
+        adapterAddress = existing;
+      } else {
+        // Step 1: Deploy adapter via factory — single arg: parentVault
+        const deployTxHash = await writeDeployAsync({
+          address: factoryAddress,
+          abi: marketV1AdapterV2FactoryAbi,
+          functionName: 'createMorphoMarketV1AdapterV2',
+          args: [vaultAddress],
+          chainId,
+        });
 
-      setStep('confirming-deploy');
+        setStep('confirming-deploy');
 
-      const receipt = await publicClient.waitForTransactionReceipt({
-        hash: deployTxHash,
-      });
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash: deployTxHash,
+        });
 
-      // Parse adapter address from event logs
-      // Event: CreateMorphoMarketV1AdapterV2(parentVault indexed, adapter NOT indexed)
-      // adapter is in data, not in topics
-      let adapterAddress: Address | null = null;
-      for (const log of receipt.logs) {
-        try {
-          const decoded = decodeEventLog({
-            abi: marketV1AdapterV2FactoryAbi,
-            data: log.data,
-            topics: log.topics as [signature: `0x${string}`, ...args: `0x${string}`[]],
-          });
-          if (decoded.eventName === 'CreateMorphoMarketV1AdapterV2') {
-            adapterAddress = (decoded.args as { adapter: Address }).adapter;
-            break;
+        // Parse adapter address from event logs. PR 9 corrected the ABI: the
+        // adapter is INDEXED and the arg is named `morphoMarketV1AdapterV2`
+        // (the previous `data.adapter` path silently returned undefined,
+        // which is how a successful deploy got mis-recorded as a failure).
+        for (const log of receipt.logs) {
+          try {
+            const decoded = decodeEventLog({
+              abi: marketV1AdapterV2FactoryAbi,
+              data: log.data,
+              topics: log.topics as [signature: `0x${string}`, ...args: `0x${string}`[]],
+            });
+            if (decoded.eventName === 'CreateMorphoMarketV1AdapterV2') {
+              adapterAddress = (decoded.args as { morphoMarketV1AdapterV2: Address }).morphoMarketV1AdapterV2;
+              break;
+            }
+          } catch {
+            // Not our event
           }
-        } catch {
-          // Not our event
         }
-      }
 
-      if (!adapterAddress) {
-        throw new Error('Could not find deployed adapter address in transaction logs');
+        if (!adapterAddress) {
+          throw new Error('Could not find deployed adapter address in transaction logs');
+        }
       }
 
       setDeployedAdapter(adapterAddress);
