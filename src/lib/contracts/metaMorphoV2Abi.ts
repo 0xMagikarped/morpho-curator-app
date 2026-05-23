@@ -208,10 +208,17 @@ export const metaMorphoV2Abi = [
   },
 
   // === Multicall (preserves msg.sender) ===
+  // PR 13 — the V2 vault's multicall returns VOID, not `bytes[]`. Authoritative
+  // shape verified against `@morpho-org/blue-sdk-viem` `vaultV2Abi.multicall`:
+  // `{ inputs: [bytes[]], outputs: [], stateMutability: 'nonpayable' }`. A
+  // hand-written `outputs: [{ type: 'bytes[]' }]` makes viem try to decode the
+  // empty return data → "The contract function 'multicall' returned no data
+  // ('0x')". Inner calls' return data is dropped on the floor by the vault's
+  // multicall — callers that need per-call returns must call directly.
   {
     inputs: [{ name: 'data', type: 'bytes[]' }],
     name: 'multicall',
-    outputs: [{ name: 'results', type: 'bytes[]' }],
+    outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },

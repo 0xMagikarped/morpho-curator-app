@@ -876,3 +876,67 @@ exported `combineTimelockSteps` directly. Pattern is now: per-calldata
 Manual verification (post-deploy): user enters both abs cap + rel cap →
 single "Submit — Both Increases" Safe tx → wait (or 0s on XDC) → single
 "Execute — Both Increases" Safe tx. Inputs stay focused while typing.
+
+---
+
+## PR 13 — `metaMorphoV2Abi.multicall` returns void (decoding error fix)
+
+### Diagnosis (1-shot, on-chain + SDK cross-check)
+PR 12 shipped the batched cap-update flow. User immediately hit:
+
+> The contract function "multicall" returned no data ("0x").
+
+XDC probe:
+- `eth_call multicall([])` to the vault → returns `0x` (empty bytes).
+- Bytecode contains selector `0xac9650d8` (`multicall(bytes[])`).
+- `@morpho-org/blue-sdk-viem` `vaultV2Abi.multicall` declares
+  `outputs: []` — **the V2 vault's multicall returns nothing.**
+
+Our `metaMorphoV2Abi.ts` declared
+`outputs: [{ name: 'results', type: 'bytes[]' }]` (the OpenZeppelin
+Multicall pattern). viem tries to decode `bytes[]` from the empty return
+data → DecodeReturnDataError surfaced as "returned no data".
+
+Same root cause as PR 1's vaultV2RegistryAbi rebuild: hand-written V2
+ABIs in the repo had been built against the OZ defaults rather than the
+SDK's authoritative shape. The selector matches, the function executes,
+the simulator just can't validate the response.
+
+### Fix
+- **`src/lib/contracts/metaMorphoV2Abi.ts`** — change
+  `outputs: [{ name: 'results', type: 'bytes[]' }]` → `outputs: []`.
+  Two-line change. No callers were reading the return value (would have
+  thrown long ago).
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/contracts/metaMorphoV2Abi.ts`.
+New: `src/lib/contracts/__tests__/multicallAbi.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+2 tests:
+- `ours.outputs === []` — direct shape assertion.
+- `ours.outputs.length === sdk.outputs.length` and
+  `ours.inputs.map(.type) === sdk.inputs.map(.type)` — pin against
+  `@morpho-org/blue-sdk-viem` `vaultV2Abi.multicall` so a future SDK
+  update is caught before we ship.
+
+On `main` (outputs=[bytes[]]) both assertions fail. On branch (outputs=[])
+both pass.
+
+### Verification
+- Fail-on-`main`: stash → both tests fail → restore → pass.
+- `npm run test:run` → **155 passed** (16 files; was 153 + 2 new). `npx
+  tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One ABI fragment line, two-test pin. No code changes elsewhere
+— the multicall callsites (`useBatchSetCaps`, PR 12's batched ops in
+`UpdateCapsDrawer`) were already correct in their inputs and never read
+the result. Selector unchanged → no on-chain side-effects, just viem
+decoding alignment.
+
+Future audit hook: any other hand-written ABI fragment we ship for V2
+contracts should be diffed against the SDK's `vaultV2Abi` / `blueAbi` /
+adapter ABIs before merging. PR 1 already covered the *error* fragments
+this way; PR 13 extends the pattern to function-shape mismatches that
+silently no-op until they surface as decode errors.
