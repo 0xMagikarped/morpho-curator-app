@@ -32,6 +32,50 @@ export function deriveTimelockStep(
   return 'executable';
 }
 
+/**
+ * PR 12 — combine multiple timelock states into one for UIs that batch many
+ * timelocked ops behind a single Submit/Wait/Execute button (e.g. abs+rel
+ * cap increases batched via `vault.multicall`).
+ *
+ * Semantics chosen so a single multicall can correctly transition the whole
+ * batch through the V2 governance flow:
+ *
+ *   - `none`           — no ops in the batch (UI hides the button)
+ *   - `loading`        — at least one op is still loading its on-chain state
+ *   - `not_submitted`  — at least one op has `executableAt == 0` (a fresh
+ *                        multicall must `submit` *every* op to make progress;
+ *                        the batch is only fully submitted when each calldata
+ *                        has a non-zero `executableAt`).
+ *   - `pending`        — all ops submitted, but the slowest hasn't elapsed
+ *                        yet; `executableAt` is the max across the batch so
+ *                        the UI can show one accurate unlock time.
+ *   - `executable`     — every op's `executableAt` has elapsed and the
+ *                        batched execute multicall will succeed.
+ */
+export type CombinedTimelockStep =
+  | { step: 'none' }
+  | { step: 'loading' }
+  | { step: 'not_submitted' }
+  | { step: 'pending'; executableAt: bigint }
+  | { step: 'executable' };
+
+export function combineTimelockSteps(states: TimelockOpState[]): CombinedTimelockStep {
+  if (states.length === 0) return { step: 'none' };
+  if (states.some((s) => s.step === 'loading')) return { step: 'loading' };
+  // Any unsubmitted calldata blocks the whole batch — a multicall execute
+  // that contains an un-timelocked entry reverts `DataNotTimelocked`.
+  if (states.some((s) => s.executableAt === 0n)) return { step: 'not_submitted' };
+  // All submitted; check if every one has elapsed.
+  if (states.some((s) => s.step === 'pending')) {
+    const executableAt = states.reduce(
+      (max, s) => (s.executableAt > max ? s.executableAt : max),
+      0n,
+    );
+    return { step: 'pending', executableAt };
+  }
+  return { step: 'executable' };
+}
+
 interface Opts {
   vaultAddress: `0x${string}` | undefined;
   chainId: number | undefined;

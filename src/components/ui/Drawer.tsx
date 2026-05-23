@@ -20,11 +20,35 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
     queueMicrotask(() => setMotionOk(!window.matchMedia('(prefers-reduced-motion: reduce)').matches));
   }, []);
 
-  // Focus trap + ESC handler
+  // PR 12 — keydown handler MUST be re-bound when `onClose` identity changes
+  // (it closes over fresh state), but the one-shot auto-focus + body-scroll
+  // lock + previous-focus snapshot must NOT re-run on every parent re-render.
+  // Previously these were collapsed into a single `[open, onClose]` effect:
+  // parents that recreated `onClose` on every render (the common case) re-ran
+  // the effect on every keystroke and `focusable[0].focus()` stole focus from
+  // the input back to the close button — the per-keystroke focus-loss bug.
+  // Split into two effects keyed on the smallest dep set each actually needs.
   useEffect(() => {
     if (!open) return;
 
     previousFocusRef.current = document.activeElement as HTMLElement;
+    document.body.style.overflow = 'hidden';
+
+    requestAnimationFrame(() => {
+      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      focusable?.[0]?.focus();
+    });
+
+    return () => {
+      document.body.style.overflow = '';
+      previousFocusRef.current?.focus();
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -51,23 +75,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer }: Dra
     };
 
     document.addEventListener('keydown', handleKeyDown);
-
-    // Focus first focusable element
-    requestAnimationFrame(() => {
-      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      focusable?.[0]?.focus();
-    });
-
-    // Prevent body scroll
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
-      previousFocusRef.current?.focus();
-    };
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
   if (!open) return null;

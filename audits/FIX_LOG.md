@@ -763,3 +763,116 @@ Note on the user's stuck Safe queue: independent of this PR. The pending nonce-1
 Safe queue can never execute (on-chain nonce is 18). User needs to reject the stale entries
 in Safe's UI and re-create the addAdapter tx, which will now be assigned the live nonce. PR
 11 prevents the same shape of stuck-queue from happening again for future vaults.
+
+---
+
+## PR 12 — UpdateCapsDrawer: batch abs+rel via multicall + Drawer focus fix
+
+### Two user-reported issues in one drawer
+
+1. **"Can we have one tx for both updates?"** — `UpdateCapsDrawer` showed
+   independent Submit/Execute buttons for absolute cap and relative cap, so
+   updating both meant 4 Safe txs on a non-zero-timelock vault (2 submits, 2
+   executes), or 2 on a 0-timelock vault. Curators submitting cap changes for
+   a market typically want both moved together.
+2. **"For each input I need to re-click the input case"** — typing into a
+   cap input lost focus after every keystroke; the close button silently
+   reclaimed focus on each parent re-render.
+
+### Diagnosis — focus bug
+
+`Drawer.tsx` collapsed three concerns into one `useEffect` keyed on
+`[open, onClose]`:
+- one-shot `previousFocusRef` capture + body-scroll lock,
+- keydown handler (ESC + tab focus trap),
+- rAF-scheduled auto-focus of the first focusable element (the X button).
+
+Parents that pass an inline `onClose={() => { ... }}` (the realistic case)
+create a fresh function identity on every render. That bumped the
+dependency, the effect cleaned up + re-ran, and the rAF callback called
+`focusable[0].focus()` — stealing focus from the input back to the close
+button. Per-keystroke.
+
+### Diagnosis — batching
+
+`UpdateCapsDrawer`'s state machine was correct in PR 10 — each cap had its
+own `useV2TimelockedOp` keyed on its exact calldata. The remaining work is
+just UX: gather increase calldatas into one `vault.multicall([submit(cd1),
+submit(cd2)])` and execute calldatas into one
+`vault.multicall([increaseAbsCap, increaseRelCap])`. V2's multicall
+preserves `msg.sender`, so the inner ops still pass the curator gate. Each
+inner `submit` enters its own `executableAt` slot (V2 keys timelocks by
+exact bytes); each inner increase target self-checks against that slot.
+
+### Fix
+
+- **`src/components/ui/Drawer.tsx`** — split the effect:
+  - `useEffect(..., [open])`: one-shot focus snapshot + body-scroll lock +
+    rAF auto-focus. Runs once per open, not on every re-render.
+  - `useEffect(..., [open, onClose])`: keydown handler only — needs the
+    fresh `onClose` to close over current state.
+- **`src/lib/hooks/useV2TimelockedOp.ts`** — new pure
+  `combineTimelockSteps(states: TimelockOpState[])`: derives a single
+  `none | loading | not_submitted | pending(executableAt) | executable`
+  for any batch of independent timelocked ops. `pending` picks the **max**
+  `executableAt` across the batch so a multicall execute is gated on the
+  slowest member. `not_submitted` triggers on *any* un-submitted member —
+  a multicall execute that contains an un-timelocked entry would revert
+  `DataNotTimelocked`.
+- **`src/components/vault/adapters/UpdateCapsDrawer.tsx`** — rewritten:
+  - one unified Submit/Execute button for the increase batch (1 or 2 ops),
+  - one immediate Apply button for the decrease batch (1 or 2 ops),
+  - banner uses the combined state, single unlock time across both caps,
+  - single-action cases (only abs or only rel changed) bypass the
+    multicall wrap — straight to the target function (cleaner gas,
+    clearer simulation).
+  - stale-value edge case handled by the helper: if the user edits a cap
+    after submitting, the new calldata's `executableAt` is 0 → batch
+    state falls back to `not_submitted` and the UI shows "Submit". The
+    old slot stays queued on-chain but never gets executed.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/ui/Drawer.tsx`,
+`src/lib/hooks/useV2TimelockedOp.ts`,
+`src/components/vault/adapters/UpdateCapsDrawer.tsx`,
+`src/lib/hooks/__tests__/useV2TimelockedOp.test.ts`.
+New: `src/components/ui/__tests__/drawerFocus.test.tsx`.
+
+### Tests — fail on `main`, pass on branch
+- **drawerFocus** (1 test): renders a `<Fixture>` that re-renders Drawer on
+  every keystroke with a fresh inline `onClose`. Counts calls to
+  `closeBtn.focus()`. On `main` the count grows by the number of keystrokes
+  → assertion fails. On branch the count stays at the initial-open value.
+  The bug fingerprint (effect re-running) is what the test pins, not the
+  downstream `document.activeElement` state (which depends on rAF + microtask
+  ordering in JSDOM — flakier).
+- **combineTimelockSteps** (7 tests): empty → `none`; any loading → loading;
+  any unsubmitted → `not_submitted`; pending picks max executableAt;
+  pending + executable mix still pending (slowest gates); all elapsed →
+  executable; batch-of-one collapses correctly. Sits alongside PR 10's
+  4 `deriveTimelockStep` tests in the same file.
+
+### Verification
+- Fail-on-`main`: stash `Drawer.tsx` → drawerFocus.test = **fail** (focus
+  count = 1 + N where N=3 keystrokes) → restore → **pass**. The pure
+  helper test fails to load on `main` (`combineTimelockSteps` doesn't
+  exist) — verified.
+- `npm run test:run` → **153 passed** (15 files; was 145 + 8 new). `npx
+  tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Three modified, two new (test + helper inside the existing file).
+The Drawer fix is the smallest possible — effect split, no behaviour
+change beyond eliminating the rAF re-fire. The batching uses the same
+multicall hook V2's vault already advertises (and `useBatchSetCaps`
+already uses for the wizard's cap step); single-action cases preserved
+to avoid the multicall wrap when it'd be noise.
+
+Future drawers / cards that want batch-timelocked UX can reuse the
+exported `combineTimelockSteps` directly. Pattern is now: per-calldata
+`useV2TimelockedOp`s in the component, push them into an array,
+`combineTimelockSteps` derives the unified button state.
+
+Manual verification (post-deploy): user enters both abs cap + rel cap →
+single "Submit — Both Increases" Safe tx → wait (or 0s on XDC) → single
+"Execute — Both Increases" Safe tx. Inputs stay focused while typing.

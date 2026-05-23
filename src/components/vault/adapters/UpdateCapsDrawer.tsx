@@ -3,7 +3,11 @@ import type { Address } from 'viem';
 import { encodeFunctionData } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
-import { useV2TimelockedOp, type TimelockStep } from '../../../lib/hooks/useV2TimelockedOp';
+import {
+  useV2TimelockedOp,
+  combineTimelockSteps,
+  type TimelockOpState,
+} from '../../../lib/hooks/useV2TimelockedOp';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { formatTokenAmount, parseTokenAmount, formatWadPercent } from '../../../lib/utils/format';
@@ -21,6 +25,28 @@ interface UpdateCapsDrawerProps {
   assetSymbol: string;
 }
 
+/**
+ * Update absolute + relative caps on a single V2 adapter.
+ *
+ * PR 12 — both caps batch into one tx (each direction):
+ *
+ *   submit ALL increases   → `vault.multicall([submit(absCd), submit(relCd)])`
+ *   execute ALL increases  → `vault.multicall([increaseAbsoluteCap, increaseRelativeCap])`
+ *   apply ALL decreases    → `vault.multicall([decreaseAbsoluteCap, decreaseRelativeCap])`
+ *
+ * Single-action cases (only abs or only rel changed) collapse to a direct
+ * call — no multicall wrapping when there's nothing to batch.
+ *
+ * Each increase keeps its own per-calldata `executableAt` slot (V2 keys the
+ * timelock on the exact submitted bytes). `combineTimelockSteps` derives the
+ * unified Submit/Wait/Execute state across the batch.
+ *
+ * If the user changes a cap value after submitting, the new calldata has a
+ * fresh `executableAt = 0` — the UI correctly falls back to "Submit" because
+ * the previously-submitted slot is for the *old* value. The old slot stays
+ * queued on-chain harmlessly; only the slot matching the current input is
+ * what the Execute multicall would call.
+ */
 export function UpdateCapsDrawer({
   open,
   onClose,
@@ -48,8 +74,7 @@ export function UpdateCapsDrawer({
   const isAbsDecrease = !!adapter && parsedAbsCap > 0n && parsedAbsCap < adapter.absoluteCap;
   const isRelDecrease = !!adapter && parsedRelWad > 0n && parsedRelWad < adapter.relativeCap;
 
-  // PR 10: each increase is a V2-timelocked op (submit → wait → execute).
-  // Each has its own `executableAt` keyed by its exact calldata.
+  // ------- timelocked-call calldata (target functions) ---------------------
   const absIncreaseCalldata = useMemo(
     () =>
       adapter && isAbsIncrease
@@ -74,56 +99,166 @@ export function UpdateCapsDrawer({
   );
 
   const absTimelock = useV2TimelockedOp({
-    vaultAddress, chainId, calldata: absIncreaseCalldata, enabled: open && isAbsIncrease,
+    vaultAddress,
+    chainId,
+    calldata: absIncreaseCalldata,
+    enabled: open && isAbsIncrease,
   });
   const relTimelock = useV2TimelockedOp({
-    vaultAddress, chainId, calldata: relIncreaseCalldata, enabled: open && isRelIncrease,
+    vaultAddress,
+    chainId,
+    calldata: relIncreaseCalldata,
+    enabled: open && isRelIncrease,
   });
+
+  // Combine the two per-calldata timelock states into one batch state
+  // (PR 12). The reducer only includes the active ones — abs-only batches
+  // see only abs, mixed batches see both, etc.
+  const combinedIncrease = useMemo(() => {
+    const active: TimelockOpState[] = [];
+    if (isAbsIncrease) active.push(absTimelock);
+    if (isRelIncrease) active.push(relTimelock);
+    return combineTimelockSteps(active);
+  }, [isAbsIncrease, isRelIncrease, absTimelock, relTimelock]);
 
   if (!adapter) return null;
 
   const timelockDays = Number(timelockSeconds) / 86400;
   const busy = isPending || isConfirming;
 
-  // ------- absolute cap handlers ----------------------------------------
-  const submitAbsIncrease = () => {
-    if (!absIncreaseCalldata) return;
+  // ------- batched submit (increases) -------------------------------------
+  const submitAllIncreases = () => {
+    if (!absIncreaseCalldata && !relIncreaseCalldata) return;
+
+    const submits: `0x${string}`[] = [];
+    if (absIncreaseCalldata) {
+      submits.push(
+        encodeFunctionData({
+          abi: metaMorphoV2Abi,
+          functionName: 'submit',
+          args: [absIncreaseCalldata],
+        }),
+      );
+    }
+    if (relIncreaseCalldata) {
+      submits.push(
+        encodeFunctionData({
+          abi: metaMorphoV2Abi,
+          functionName: 'submit',
+          args: [relIncreaseCalldata],
+        }),
+      );
+    }
+
+    if (submits.length === 1) {
+      // Skip the multicall wrap when there's only one — cleaner gas + clearer
+      // simulation. The first non-undefined calldata is what we submit.
+      const single = absIncreaseCalldata ?? relIncreaseCalldata!;
+      writeContract({
+        address: vaultAddress,
+        abi: metaMorphoV2Abi,
+        functionName: 'submit',
+        args: [single],
+        chainId,
+      });
+      return;
+    }
     writeContract({
-      address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'submit',
-      args: [absIncreaseCalldata], chainId,
-    });
-  };
-  const executeAbsIncrease = () => {
-    writeContract({
-      address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'increaseAbsoluteCap',
-      args: [adapter.adapterId, parsedAbsCap], chainId,
-    });
-  };
-  const decreaseAbsImmediate = () => {
-    writeContract({
-      address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'decreaseAbsoluteCap',
-      args: [adapter.adapterId, parsedAbsCap], chainId,
+      address: vaultAddress,
+      abi: metaMorphoV2Abi,
+      functionName: 'multicall',
+      args: [submits],
+      chainId,
     });
   };
 
-  // ------- relative cap handlers ----------------------------------------
-  const submitRelIncrease = () => {
-    if (!relIncreaseCalldata) return;
+  // ------- batched execute (increases) ------------------------------------
+  const executeAllIncreases = () => {
+    if (!absIncreaseCalldata && !relIncreaseCalldata) return;
+
+    const calls: `0x${string}`[] = [];
+    if (absIncreaseCalldata) calls.push(absIncreaseCalldata);
+    if (relIncreaseCalldata) calls.push(relIncreaseCalldata);
+
+    if (calls.length === 1) {
+      // Single direct call — V2 self-checks executableAt on the target fn.
+      if (absIncreaseCalldata) {
+        writeContract({
+          address: vaultAddress,
+          abi: metaMorphoV2Abi,
+          functionName: 'increaseAbsoluteCap',
+          args: [adapter.adapterId, parsedAbsCap],
+          chainId,
+        });
+      } else {
+        writeContract({
+          address: vaultAddress,
+          abi: metaMorphoV2Abi,
+          functionName: 'increaseRelativeCap',
+          args: [adapter.adapterId, parsedRelWad],
+          chainId,
+        });
+      }
+      return;
+    }
     writeContract({
-      address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'submit',
-      args: [relIncreaseCalldata], chainId,
+      address: vaultAddress,
+      abi: metaMorphoV2Abi,
+      functionName: 'multicall',
+      args: [calls],
+      chainId,
     });
   };
-  const executeRelIncrease = () => {
+
+  // ------- batched immediate decreases ------------------------------------
+  const applyAllDecreases = () => {
+    const calls: `0x${string}`[] = [];
+    if (isAbsDecrease) {
+      calls.push(
+        encodeFunctionData({
+          abi: metaMorphoV2Abi,
+          functionName: 'decreaseAbsoluteCap',
+          args: [adapter.adapterId, parsedAbsCap],
+        }),
+      );
+    }
+    if (isRelDecrease) {
+      calls.push(
+        encodeFunctionData({
+          abi: metaMorphoV2Abi,
+          functionName: 'decreaseRelativeCap',
+          args: [adapter.adapterId, parsedRelWad],
+        }),
+      );
+    }
+    if (calls.length === 0) return;
+
+    if (calls.length === 1) {
+      if (isAbsDecrease) {
+        writeContract({
+          address: vaultAddress,
+          abi: metaMorphoV2Abi,
+          functionName: 'decreaseAbsoluteCap',
+          args: [adapter.adapterId, parsedAbsCap],
+          chainId,
+        });
+      } else {
+        writeContract({
+          address: vaultAddress,
+          abi: metaMorphoV2Abi,
+          functionName: 'decreaseRelativeCap',
+          args: [adapter.adapterId, parsedRelWad],
+          chainId,
+        });
+      }
+      return;
+    }
     writeContract({
-      address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'increaseRelativeCap',
-      args: [adapter.adapterId, parsedRelWad], chainId,
-    });
-  };
-  const decreaseRelImmediate = () => {
-    writeContract({
-      address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'decreaseRelativeCap',
-      args: [adapter.adapterId, parsedRelWad], chainId,
+      address: vaultAddress,
+      abi: metaMorphoV2Abi,
+      functionName: 'multicall',
+      args: [calls],
+      chainId,
     });
   };
 
@@ -132,6 +267,11 @@ export function UpdateCapsDrawer({
     setNewRelCap('');
     onClose();
   };
+
+  const hasAnyIncrease = isAbsIncrease || isRelIncrease;
+  const hasAnyDecrease = isAbsDecrease || isRelDecrease;
+  const batchSize = (isAbsIncrease ? 1 : 0) + (isRelIncrease ? 1 : 0);
+  const decreaseBatchSize = (isAbsDecrease ? 1 : 0) + (isRelDecrease ? 1 : 0);
 
   return (
     <Drawer open={open} onClose={handleClose} title={`Update Caps: ${adapter.name ?? 'Adapter'}`}>
@@ -143,7 +283,7 @@ export function UpdateCapsDrawer({
           </div>
         )}
 
-        {/* Absolute Cap */}
+        {/* Absolute Cap input */}
         <section className="space-y-2">
           <h4 className="text-xs font-medium text-text-primary">Absolute Cap</h4>
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -173,28 +313,11 @@ export function UpdateCapsDrawer({
                 : 'Decrease = immediate'}
             </p>
           )}
-          <TimelockBanner step={absTimelock.step} executableAt={absTimelock.executableAt} />
-          {isAbsIncrease ? (
-            <ActionButton
-              step={absTimelock.step}
-              submitLabel="Submit — Increase Abs. Cap"
-              executeLabel="Execute — Increase Abs. Cap"
-              onSubmit={submitAbsIncrease}
-              onExecute={executeAbsIncrease}
-              busy={busy}
-            />
-          ) : isAbsDecrease ? (
-            <Button size="sm" onClick={decreaseAbsImmediate} disabled={busy} loading={busy}>
-              Decrease Abs. Cap (immediate)
-            </Button>
-          ) : (
-            <Button size="sm" disabled>Update Abs. Cap</Button>
-          )}
         </section>
 
         <div className="border-t border-border-subtle" />
 
-        {/* Relative Cap */}
+        {/* Relative Cap input */}
         <section className="space-y-2">
           <h4 className="text-xs font-medium text-text-primary">Relative Cap</h4>
           <div className="text-xs">
@@ -222,62 +345,117 @@ export function UpdateCapsDrawer({
                 : 'Decrease = immediate'}
             </p>
           )}
-          <TimelockBanner step={relTimelock.step} executableAt={relTimelock.executableAt} />
-          {isRelIncrease ? (
-            <ActionButton
-              step={relTimelock.step}
-              submitLabel="Submit — Increase Rel. Cap"
-              executeLabel="Execute — Increase Rel. Cap"
-              onSubmit={submitRelIncrease}
-              onExecute={executeRelIncrease}
-              busy={busy}
-            />
-          ) : isRelDecrease ? (
-            <Button size="sm" onClick={decreaseRelImmediate} disabled={busy} loading={busy}>
-              Decrease Rel. Cap (immediate)
-            </Button>
-          ) : (
-            <Button size="sm" disabled>Update Rel. Cap</Button>
-          )}
         </section>
+
+        <div className="border-t border-border-subtle" />
+
+        {/* Combined timelock banner (PR 12) */}
+        {hasAnyIncrease && combinedIncrease.step === 'pending' && (
+          <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary">
+            <strong>Submitted to timelock.</strong>{' '}
+            {batchSize > 1 ? `Both cap changes` : `Cap change`} executable at{' '}
+            <span className="font-mono">
+              {new Date(Number(combinedIncrease.executableAt) * 1000).toUTCString()}
+            </span>
+            .
+          </div>
+        )}
+        {hasAnyIncrease && combinedIncrease.step === 'executable' && (
+          <div className="bg-success/10 border border-success/20 px-3 py-2 text-xs text-text-primary">
+            <strong>Ready to execute.</strong>{' '}
+            {batchSize > 1 ? 'Both timelocks have' : 'The timelock has'} elapsed — click{' '}
+            <span className="font-mono">Execute</span>.
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="space-y-2">
+          {/* Decreases — immediate. One button covers abs+rel via multicall. */}
+          {hasAnyDecrease && (
+            <Button
+              size="sm"
+              onClick={applyAllDecreases}
+              disabled={busy}
+              loading={busy}
+              className="w-full"
+            >
+              {decreaseBatchSize > 1
+                ? 'Apply Both Decreases (immediate)'
+                : 'Apply Decrease (immediate)'}
+            </Button>
+          )}
+
+          {/* Increases — submit→wait→execute. One button reflects combined state. */}
+          {hasAnyIncrease && (
+            <IncreaseButton
+              combined={combinedIncrease}
+              batchSize={batchSize}
+              busy={busy}
+              onSubmit={submitAllIncreases}
+              onExecute={executeAllIncreases}
+            />
+          )}
+
+          {/* Nothing entered yet */}
+          {!hasAnyIncrease && !hasAnyDecrease && (
+            <Button size="sm" disabled className="w-full">
+              Enter a cap to update
+            </Button>
+          )}
+        </div>
+
+        <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
+          Increases are timelocked ({timelockDays.toFixed(1)}d). Decreases apply immediately.
+          {batchSize > 1 ? ' Submit and execute are batched into one tx each via vault.multicall.' : ''}
+        </div>
       </div>
     </Drawer>
   );
 }
 
-/** Shared Submit/Wait/Execute button. */
-function ActionButton({
-  step, submitLabel, executeLabel, onSubmit, onExecute, busy,
+/**
+ * Single button that swaps label + handler based on the combined timelock
+ * state of the increase batch.
+ */
+function IncreaseButton({
+  combined,
+  batchSize,
+  busy,
+  onSubmit,
+  onExecute,
 }: {
-  step: TimelockStep;
-  submitLabel: string;
-  executeLabel: string;
+  combined: ReturnType<typeof combineTimelockSteps>;
+  batchSize: number;
+  busy: boolean;
   onSubmit: () => void;
   onExecute: () => void;
-  busy: boolean;
 }) {
-  if (step === 'loading') return <Button size="sm" disabled>Checking timelock…</Button>;
-  if (step === 'pending') return <Button size="sm" disabled>Waiting for timelock…</Button>;
-  if (step === 'executable')
-    return <Button size="sm" onClick={onExecute} disabled={busy} loading={busy}>{executeLabel}</Button>;
-  return <Button size="sm" onClick={onSubmit} disabled={busy} loading={busy}>{submitLabel}</Button>;
-}
-
-function TimelockBanner({ step, executableAt }: { step: TimelockStep; executableAt: bigint }) {
-  if (step === 'pending') {
+  const plural = batchSize > 1;
+  if (combined.step === 'loading') {
     return (
-      <div className="bg-warning/10 border border-warning/20 px-2 py-1.5 text-[10px] text-text-primary">
-        Submitted. Executable at{' '}
-        <span className="font-mono">{new Date(Number(executableAt) * 1000).toUTCString()}</span>.
-      </div>
+      <Button size="sm" disabled className="w-full">
+        Checking timelock…
+      </Button>
     );
   }
-  if (step === 'executable') {
+  if (combined.step === 'pending') {
     return (
-      <div className="bg-success/10 border border-success/20 px-2 py-1.5 text-[10px] text-text-primary">
-        Ready to execute — click <span className="font-mono">Execute</span>.
-      </div>
+      <Button size="sm" disabled className="w-full">
+        Waiting for timelock…
+      </Button>
     );
   }
-  return null;
+  if (combined.step === 'executable') {
+    return (
+      <Button size="sm" onClick={onExecute} disabled={busy} loading={busy} className="w-full">
+        {plural ? 'Execute — Both Increases' : 'Execute — Increase'}
+      </Button>
+    );
+  }
+  // not_submitted (or none, but `hasAnyIncrease` gate prevents none here)
+  return (
+    <Button size="sm" onClick={onSubmit} disabled={busy} loading={busy} className="w-full">
+      {plural ? 'Submit — Both Increases' : 'Submit — Increase'}
+    </Button>
+  );
 }
