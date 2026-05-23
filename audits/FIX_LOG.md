@@ -602,3 +602,74 @@ not consulted) is a separate cosmetic gap → `_followups.md` if it keeps biting
 
 Manual verification (post-deploy): on the XDC vault, the "Deploy Market Adapter" step now
 detects the existing `0x73b5…cdd6`, skips the deploy, and prompts `addAdapter` directly.
+
+---
+
+## PR 10 — Submit → Wait → Execute across every V2-timelocked drawer
+
+- **Branch:** `fix/v2-timelocked-ops-sweep` (off `main` @ `42c0442`)
+- **Symptom:** the user hit `DataAlreadyPending` clicking *Submit — Add Adapter* — a prior
+  `submit(addAdapter…)` had succeeded but the drawer offered no way to **execute**.
+- **Date:** 2026-05-23
+
+### Root cause
+Vault V2 timelocks every config change: `submit(calldata)` queues the op, then the target
+function (`addAdapter` / `removeAdapter` / `increaseAbsoluteCap` / …) is called **directly**
+after `executableAt`, and self-checks. Three drawers — `AddAdapterDrawer`,
+`RemoveAdapterDrawer`, `UpdateCapsDrawer` — only modelled the **Submit** half. Once submitted,
+the user had no UI to Execute, and re-submitting reverted `DataAlreadyPending`.
+`UpdateCapsDrawer.handleUpdateRelCap` additionally had the SetRegistry-pre-PR-7 bug — calling
+`increaseRelativeCap` *direct* without `submit`. Per-PR PR 7 fixed this for the registry
+flow; the same pattern was needed for adapter management.
+
+### Chokepoint design
+- **`src/lib/hooks/useV2TimelockedOp.ts`** (new) — one shared hook reads
+  `executableAt(calldata)` (via the PR-7 `vaultV2RegistryAbi`) and polls every 10s. Derives
+  `loading | not_submitted | pending | executable`. Exports a pure
+  `deriveTimelockStep(executableAt, now)` so the derivation is unit-testable without React.
+  Any current/future timelocked-op consumer can now hook into it.
+- The three drawers each:
+  - Compute the inner `encodeFunctionData(...)` calldata of the timelocked op.
+  - Call `useV2TimelockedOp` on that calldata.
+  - Render **Submit** / **Wait (absolute-UTC executableAt)** / **Execute** based on `step`.
+  - Pass `chainId` to every `writeContract` call (also closes the PR-8 fallback path —
+    drawers no longer rely on the connected-chain fallback).
+- `UpdateCapsDrawer` got the most surgery — two **independent** timelocked ops
+  (`increaseAbsoluteCap` + `increaseRelativeCap`), each with its own `useV2TimelockedOp`
+  instance; immediate `decreaseAbsoluteCap` / `decreaseRelativeCap` paths preserved as direct
+  calls. `increaseRelativeCap` is now correctly submit→execute (it used to revert
+  `DataNotTimelocked` on any non-zero increase).
+- `V2AdaptersTab` now passes `chainId` to the two drawers that grew the prop.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/adapters/AddAdapterDrawer.tsx`,
+`src/components/vault/adapters/RemoveAdapterDrawer.tsx`,
+`src/components/vault/adapters/UpdateCapsDrawer.tsx`,
+`src/components/vault/V2AdaptersTab.tsx`.
+New: `src/lib/hooks/useV2TimelockedOp.ts`, `src/lib/hooks/__tests__/useV2TimelockedOp.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+4 tests of the pure `deriveTimelockStep(executableAt, now)`: `0 → not_submitted`,
+`future → pending`, `past → executable`, `equal-to-now → executable` (mirroring the contract's
+`<=` gate). On `main` the function doesn't exist — `import` fails → suite fails to load. The
+drawer behaviour itself is exercised by the integration tests previously established
+(`useGuardedWriteContract.simulate`, `setRegistryError`, `registryStatus`,
+`deployMarketAdapter`) — they remain green here.
+
+### Verification
+- Fail-on-`main`: `mv` the helper aside → test = **suite failed to load** → restore →
+  **4 passed**.
+- `npm run test:run` → **136 passed** (13 files; 132 + 4). `npx tsc -b` → **0**. `npm run build`
+  → **success**. PA `stash@{0}` intact.
+
+### Scope-compliance self-audit
+**PASS.** One reusable hook + the three drawers + the parent that wires `chainId` for the
+prop additions. `useSetRegistryAndAbdicate` (PR 7) was already submit/execute — left alone.
+V1 paths (`RolesMetaMorphoV1`, `usePublicAllocator`, V1 cap submit/accept) untouched —
+different timelock model. Owner cards on V2 (fees / sentinel / curator / increaseTimelock)
+NOT swept — they're rarer and each has UI specifics; future use of `useV2TimelockedOp` is
+straightforward when those are touched. Audit `_followups.md` updated.
+
+Manual verification (post-deploy): user retries Add Adapter on the XDC vault — the drawer
+now sees the existing pending `submit(addAdapter(0x73b5…))`, shows **Ready to execute**, and
+the **Execute — Add Adapter** button calls `addAdapter` directly to finalise.

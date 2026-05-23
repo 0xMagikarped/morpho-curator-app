@@ -245,6 +245,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
         onClose={closeDrawer}
         adapter={selectedAdapter}
         vaultAddress={vaultAddress}
+        chainId={chainId}
         timelockSeconds={timelockSeconds}
         decimals={decimals}
         assetSymbol={assetSymbol}
@@ -255,6 +256,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
         onClose={closeDrawer}
         adapter={selectedAdapter}
         vaultAddress={vaultAddress}
+        chainId={chainId}
         timelockSeconds={timelockSeconds}
         decimals={decimals}
         assetSymbol={assetSymbol}

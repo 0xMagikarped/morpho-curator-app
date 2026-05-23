@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Address } from 'viem';
 import { isAddress, encodeFunctionData } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
+import { useV2TimelockedOp } from '../../../lib/hooks/useV2TimelockedOp';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
-import { Badge } from '../../ui/Badge';
 import { AddressDisplay } from '../../ui/AddressDisplay';
 import { useAdapterPreview } from '../../../lib/hooks/useV2Adapters';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
@@ -38,7 +38,25 @@ export function AddAdapterDrawer({
   } = useAdapterPreview(chainId, vaultAddress, adapterAddress, vaultAsset, showPreview && !!adapterAddress);
 
   const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+
+  // Submit calldata is the bytes the timelock queue is keyed on. PR 10:
+  // read `executableAt(this calldata)` to know if it's already submitted /
+  // ready to execute, so the Submit / Wait / Execute states are driven by
+  // on-chain truth (not a one-shot "did the submit tx land" guess).
+  const submitCalldata = useMemo(
+    () =>
+      adapterAddress
+        ? encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'addAdapter', args: [adapterAddress] })
+        : undefined,
+    [adapterAddress],
+  );
+  const timelockState = useV2TimelockedOp({
+    vaultAddress,
+    chainId,
+    calldata: submitCalldata,
+    enabled: showPreview,
+  });
 
   const handlePreview = () => {
     if (!adapterAddress) return;
@@ -46,19 +64,26 @@ export function AddAdapterDrawer({
   };
 
   const handleSubmit = () => {
-    if (!adapterAddress) return;
-    // Encode addAdapter(address) call and wrap in submit()
-    const innerData = encodeFunctionData({
-      abi: metaMorphoV2Abi,
-      functionName: 'addAdapter',
-      args: [adapterAddress],
-    });
-
+    if (!submitCalldata) return;
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
       functionName: 'submit',
-      args: [innerData],
+      args: [submitCalldata],
+      chainId,
+    });
+  };
+
+  // After the timelock elapses (0s on XDC → immediately), execute by calling
+  // the timelocked target directly. The V2 vault self-checks `executableAt`
+  // and reverts `DataNotTimelocked` if nothing was submitted (PR 7's lesson).
+  const handleExecute = () => {
+    if (!adapterAddress) return;
+    writeContract({
+      address: vaultAddress,
+      abi: metaMorphoV2Abi,
+      functionName: 'addAdapter',
+      args: [adapterAddress],
       chainId,
     });
   };
@@ -79,33 +104,57 @@ export function AddAdapterDrawer({
       title="Add Adapter to Vault"
       subtitle={`Chain ${chainId}`}
       footer={
-        showPreview && preview && !isSuccess ? (
+        showPreview && preview ? (
           <div className="flex gap-2">
             <Button variant="ghost" onClick={handleClose} className="flex-1">
               Cancel
             </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={!canSubmit || isPending || isConfirming}
-              loading={isPending || isConfirming}
-              className="flex-1"
-            >
-              Submit — Add Adapter
-            </Button>
+            {preview.isAlreadyEnabled ? null : timelockState.step === 'loading' ? (
+              <Button disabled className="flex-1">Checking timelock…</Button>
+            ) : timelockState.step === 'pending' ? (
+              <Button disabled className="flex-1">Waiting for timelock…</Button>
+            ) : timelockState.step === 'executable' ? (
+              <Button
+                onClick={handleExecute}
+                disabled={!canSubmit || isPending || isConfirming}
+                loading={isPending || isConfirming}
+                className="flex-1"
+              >
+                Execute — Add Adapter
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSubmit}
+                disabled={!canSubmit || isPending || isConfirming}
+                loading={isPending || isConfirming}
+                className="flex-1"
+              >
+                Submit — Add Adapter
+              </Button>
+            )}
           </div>
         ) : undefined
       }
     >
       <div className="space-y-4">
-        {isSuccess ? (
-          <div className="text-center py-8">
-            <Badge variant="success" className="mb-2">Submitted</Badge>
-            <p className="text-sm text-text-primary">Adapter addition submitted to timelock.</p>
-            <p className="text-xs text-text-tertiary mt-1">
-              Executable in {timelockDays.toFixed(1)} days.
-            </p>
+        {/* Timelock state banners (PR 10) — driven by on-chain `executableAt`
+            polling, so they reflect existing pending submissions too (not
+            just the local just-submitted-this-tab case). */}
+        {timelockState.step === 'pending' && (
+          <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary">
+            <strong>Submitted to timelock.</strong> Executable at{' '}
+            <span className="font-mono">
+              {new Date(Number(timelockState.executableAt) * 1000).toUTCString()}
+            </span>.
           </div>
-        ) : !showPreview ? (
+        )}
+        {timelockState.step === 'executable' && (
+          <div className="bg-success/10 border border-success/20 px-3 py-2 text-xs text-text-primary">
+            <strong>Ready to execute.</strong> The timelock has elapsed —
+            click <span className="font-mono">Execute</span> to finish adding this adapter.
+          </div>
+        )}
+        {!showPreview ? (
           /* Step 1: Input */
           <>
             <div>
