@@ -673,3 +673,93 @@ straightforward when those are touched. Audit `_followups.md` updated.
 Manual verification (post-deploy): user retries Add Adapter on the XDC vault — the drawer
 now sees the existing pending `submit(addAdapter(0x73b5…))`, shows **Ready to execute**, and
 the **Execute — Add Adapter** button calls `addAdapter` directly to finalise.
+
+---
+
+## PR 11 — `useDeployMarketAdapter` submit→wait→execute (the wizard's missing PR 10)
+
+### Diagnosis (verified on XDC via tx `0x85d5f3…a5c50`)
+The "Add Market" wizard's `Deploy Adapter & Add to Vault` button on the user's XDC vault
+(`0x3F4ed284…1a2f`, Safe `0x22D4…676A`) produced a Safe queue tx that:
+1. Got flagged `will most likely fail` by Safe's Tenderly preflight (XDC public RPCs strip
+   `from` in `eth_estimateGas`, so the simulator runs as 0x0 and the V2 `msg.sender ==
+   curator` gate fails).
+2. When the user signed nonce-17 and broadcast it, the Safe contract reverted **GS026**
+   (`Invalid owner provided`) — the EIP-712 digest the wallet signed was over `nonce: 17`,
+   but on-chain `Safe.nonce()` had already advanced to 18 by mining time, so `ecrecover`
+   returned a non-owner address.
+
+The signature was correct **for nonce 17** (recovered `0xBDa66C…f9e5` ✓). Two separable
+problems converged: (a) the Safe queue had a stale tx that can never execute now that nonce 17
+is consumed, and (b) — the actual *code bug* — `useDeployMarketAdapter` called
+`vault.addAdapter(adapter)` **directly**, bypassing V2's submit→execute timelock model.
+PR 10 fixed this for the standalone `AddAdapterDrawer` / `RemoveAdapterDrawer` /
+`UpdateCapsDrawer`, but the wizard's hook predates PR 10 and was missed in the sweep.
+
+For the user's specific vault on XDC the direct call happened to work conceptually (a prior
+standalone-drawer submission had already advanced `executableAt` into the past), but it
+generated a Safe queue tx that contained an `addAdapter` call which, when paired with the
+stale Safe queue, was undiagnosable as a code issue. On any fresh non-zero-timelock vault the
+direct `addAdapter` reverts `DataNotTimelocked`.
+
+On-chain truth confirmed prior to this PR:
+- `factory(0x5C00…).morphoMarketV1AdapterV2(vault) = 0x73b5…cdd6` ✓ factory-derived
+- `factory(0x5C00…).isMorphoMarketV1AdapterV2(adapter) = true` ✓
+- `adapter.parentVault() = 0x3F4e…1a2f` ✓
+- `adapter.factory() = 0x5C00…d31` ✓
+- `registry(0x79A8…).isInRegistry(adapter) = true` ✓ whitelisted
+- `vault.executableAt(addAdapter cd) = 1779547936` ≤ `block.timestamp 1779552648` → executable
+
+### Fix
+New pure helper `src/hooks/deployAdapterStateMachine.ts` exposing `nextDeployStep(input)`
+that returns one of five terminal states based on factory + vault + executableAt + now.
+`useDeployMarketAdapter` becomes a thin orchestrator around it: Phase 1 detects/deploys the
+factory adapter (PR 9 idempotency preserved); Phase 2 enters a re-read-after-each-tx loop
+that the helper drives. The loop naturally handles every entry point — fresh vault,
+already-submitted, executable, already-added — and the resume-after-refresh case (user
+closed the tab between submit and execute) becomes free.
+
+The hook also reads `vault.isAdapter(adapter)` and short-circuits to `done` when the adapter
+is already on the vault, fixing a smaller latent bug where re-clicking the wizard's deploy
+button on a completed vault would have queued a no-op `addAdapter`.
+
+`AddMarketWizard.tsx`'s `DeployStatus` grows from 2 status rows to 3 (deploy / submit /
+execute), surfaces a `Submitted to timelock — Executable at <UTC>` warning banner when the
+hook returns at `waiting-timelock`, and adds a `Check timelock & Execute` resume button.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/hooks/useDeployMarketAdapter.ts`,
+`src/components/vault/adapters/AddMarketWizard.tsx`,
+`src/hooks/__tests__/deployMarketAdapter.test.ts` (existing PR 9 tests updated for the new
+3-write-hook + submit-then-execute sequence).
+New: `src/hooks/deployAdapterStateMachine.ts`,
+`src/hooks/__tests__/deployAdapterStateMachine.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+7 unit tests of `nextDeployStep` covering all five terminal states + the `executableAt ==
+now` boundary + the `isAdapter wins over executableAt` precedence. On `main` the helper
+doesn't exist — import fails → suite fails to load. On branch all pass.
+
+Existing PR 9 hook tests (4) updated to the PR 11 flow: skips factory deploy on existing,
+short-circuits when already added, stops at `waiting-timelock` when executableAt is future,
+and runs the full deploy → submit → execute happy-path with the indexed-event extraction.
+
+### Verification
+- Fail-on-`main`: stash branch files → suite fails to load (missing module) → restore →
+  **7 passed**.
+- `npm run test:run` → **145 passed** (14 files; was 136 in PR 10 + 9 new). `npx tsc -b` →
+  **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new files (helper + test), three modified (hook, wizard, hook test). The
+existing PR 9 test file is updated rather than duplicated — the PR-9 intent (factory
+idempotency + correct event extraction) is preserved as the first and last test cases. No
+ABI changes (`vault.executableAt(bytes)` was already in `vaultV2RegistryAbi` from PR 7 — the
+hook imports both `metaMorphoV2Abi` for writes and `vaultV2RegistryAbi` for the one
+`executableAt` read). The standalone drawers (PR 10) are untouched — they were already
+correct. V1 paths untouched.
+
+Note on the user's stuck Safe queue: independent of this PR. The pending nonce-17 tx in the
+Safe queue can never execute (on-chain nonce is 18). User needs to reject the stale entries
+in Safe's UI and re-create the addAdapter tx, which will now be assigned the live nonce. PR
+11 prevents the same shape of stuck-queue from happening again for future vaults.

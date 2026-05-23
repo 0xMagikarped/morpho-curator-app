@@ -219,11 +219,26 @@ export function AddMarketWizard({
               One adapter handles ALL markets.
             </p>
 
-            <DeployStatus step={deployHook.step} error={deployHook.error} adapterAddress={deployHook.deployedAdapter} />
+            <DeployStatus
+              step={deployHook.step}
+              error={deployHook.error}
+              adapterAddress={deployHook.deployedAdapter}
+              executableAt={deployHook.executableAt}
+            />
 
             {deployHook.step === 'idle' && (
               <Button className="w-full" onClick={handleDeploy}>
                 Deploy Adapter & Add to Vault
+              </Button>
+            )}
+
+            {/* PR 11 — non-zero timelock case: submit landed but executableAt
+                is still in the future. The user can re-click to resume after
+                the unlock; the hook re-reads on-chain truth and skips the
+                submit, going straight to addAdapter. */}
+            {deployHook.step === 'waiting-timelock' && (
+              <Button className="w-full" onClick={handleDeploy}>
+                Check timelock & Execute
               </Button>
             )}
 
@@ -505,25 +520,57 @@ function DeployStatus({
   step,
   error,
   adapterAddress,
+  executableAt,
 }: {
   step: DeployStep;
   error: Error | null;
   adapterAddress: Address | null;
+  executableAt: bigint | null;
 }) {
+  // PR 11 — three sequential checkpoints driven by the new submit→wait→execute
+  // pattern: factory deploy, submit-to-timelock, execute-add. The "execute"
+  // row mirrors the V2 contract semantics: `addAdapter` directly *is* the
+  // execute step (it self-checks `executableAt`), not a separate `execute(bytes)`.
+  const submitDone =
+    step === 'waiting-timelock' ||
+    step === 'adding' ||
+    step === 'confirming-add' ||
+    step === 'done';
+  const deployDone =
+    step === 'submitting-add' ||
+    step === 'confirming-submit' ||
+    submitDone;
+
   return (
     <div className="space-y-2">
       <StepStatus label="Deploy adapter" status={
         step === 'deploying' ? 'pending' :
         step === 'confirming-deploy' ? 'confirming' :
-        step === 'adding' || step === 'confirming-add' || step === 'done' ? 'done' :
-        step === 'error' ? 'error' : 'idle'
+        deployDone ? 'done' :
+        step === 'error' && !adapterAddress ? 'error' : 'idle'
+      } />
+      <StepStatus label="Submit to timelock" status={
+        step === 'submitting-add' ? 'pending' :
+        step === 'confirming-submit' ? 'confirming' :
+        submitDone ? 'done' :
+        step === 'error' && adapterAddress ? 'error' : 'idle'
       } />
       <StepStatus label="Add to vault" status={
         step === 'adding' ? 'pending' :
         step === 'confirming-add' ? 'confirming' :
         step === 'done' ? 'done' :
-        step === 'error' && adapterAddress ? 'error' : 'idle'
+        step === 'error' && submitDone ? 'error' : 'idle'
       } />
+      {step === 'waiting-timelock' && executableAt !== null && (
+        <div className="p-2 bg-warning/10 border border-warning/20 text-xs text-text-primary">
+          <strong>Submitted to timelock.</strong>{' '}
+          Executable at{' '}
+          <span className="font-mono">
+            {new Date(Number(executableAt) * 1000).toUTCString()}
+          </span>
+          . Come back after the unlock and click <span className="font-mono">Check timelock & Execute</span>.
+        </div>
+      )}
       {error && (
         <div className="flex items-start gap-2 p-2 bg-danger/10 border border-danger/20">
           <AlertTriangle className="w-3.5 h-3.5 text-danger shrink-0 mt-0.5" />
