@@ -31,6 +31,8 @@ import { Badge } from '../ui/Badge';
 import { AddressDisplay } from '../ui/AddressDisplay';
 import { ProgressBar } from '../ui/ProgressBar';
 import { CapEditDrawer } from './adapters/CapEditDrawer';
+import { AddCollateralCapDrawer } from './caps/AddCollateralCapDrawer';
+import { AddMarketCapDrawer } from './caps/AddMarketCapDrawer';
 import { adapterIdData } from '../../lib/v2/adapterCapUtils';
 import { formatTokenAmount, formatWadPercent, formatCapDisplay } from '../../lib/utils/format';
 
@@ -51,6 +53,7 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
   const entries = useV2VaultCapEntries(chainId, vaultAddress);
   const permissions = useVaultPermissions(chainId, vaultAddress);
   const [editing, setEditing] = useState<EditingCap | null>(null);
+  const [adding, setAdding] = useState<'collateral' | 'market' | null>(null);
 
   const adapters = overview.data?.adapters ?? [];
   const decimals = vault?.assetInfo.decimals ?? 18;
@@ -196,6 +199,13 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
         <CardHeader>
           <CardTitle>Collateral Token Caps</CardTitle>
           <Badge variant="info">V2</Badge>
+          {/* PR 25 — quick-add a cap entry without going through the full
+              AddMarket wizard. Curator-gated. */}
+          {canSetCaps && (
+            <Button size="sm" variant="secondary" onClick={() => setAdding('collateral')} className="ml-auto">
+              + Add Collateral
+            </Button>
+          )}
         </CardHeader>
         <p className="text-[10px] text-text-tertiary mb-3">
           Limit the amount of assets that can be allocated to positions using specific
@@ -233,6 +243,11 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
         <CardHeader>
           <CardTitle>Market Caps</CardTitle>
           <Badge variant="info">V2</Badge>
+          {canSetCaps && (
+            <Button size="sm" variant="secondary" onClick={() => setAdding('market')} className="ml-auto">
+              + Add Market
+            </Button>
+          )}
         </CardHeader>
         <p className="text-[10px] text-text-tertiary mb-3">
           Limit the amount of assets that can be allocated to specific Morpho Blue markets.
@@ -282,6 +297,30 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
           idData={drawerProps.idData}
           currentAbs={drawerProps.currentAbs}
           currentRel={drawerProps.currentRel}
+          vaultAddress={vaultAddress}
+          chainId={chainId}
+          timelockSeconds={timelockSeconds}
+          decimals={decimals}
+          assetSymbol={assetSymbol}
+        />
+      )}
+
+      {/* PR 25 — quick-add drawers for collateral + market levels */}
+      {adding === 'collateral' && (
+        <AddCollateralCapDrawer
+          open
+          onClose={() => setAdding(null)}
+          vaultAddress={vaultAddress}
+          chainId={chainId}
+          timelockSeconds={timelockSeconds}
+          decimals={decimals}
+          assetSymbol={assetSymbol}
+        />
+      )}
+      {adding === 'market' && (
+        <AddMarketCapDrawer
+          open
+          onClose={() => setAdding(null)}
           vaultAddress={vaultAddress}
           chainId={chainId}
           timelockSeconds={timelockSeconds}

@@ -1869,3 +1869,82 @@ call site in `V2AdaptersTab`.
   types a value that round-trips to ≥ `MAX_UINT128_CAP`, the preview
   hint could explicitly say "unlimited" instead of the parsed number.
   Low priority; deferred.
+
+---
+
+## PR 25 — Quick-add `+ Add Collateral` / `+ Add Market` on the Caps tab
+
+### User feedback
+> "The 'add market' / add collateral button should be here to increase
+> caps / add news."
+
+Image showed the Caps tab — user wants Add buttons inline on the
+respective table headers so they don't have to run the full
+AddMarketWizard just to register a new cap entry.
+
+(Note: the user also asked for a Parameters tab for roles / fees /
+fee-recipient management. Logged for PR 26; this PR focuses on the
+inline-add request since it was the most recent message.)
+
+### Fix
+- **`src/components/vault/caps/AddCollateralCapDrawer.tsx`** (new) —
+  2-step drawer. Step 1: input collateral token address; live-validates
+  shape + fetches ERC-20 metadata to show the user a preview (symbol /
+  decimals / name) before they commit. Step 2: hands off to the
+  existing `CapEditDrawer` (PR 22) with `idData = collateralIdData(token)`
+  and `currentAbs=currentRel=0n`. Submit→Wait→Execute flow comes for
+  free from `CapEditDrawer`.
+
+- **`src/components/vault/caps/AddMarketCapDrawer.tsx`** (new) — 2-step
+  drawer. Step 1: pick the market-v1 adapter (auto-skipped when only
+  one exists) + paste a 32-byte market ID. Resolves via PR 19's
+  `useMarketLookup` against Morpho Blue's `idToMarketParams`, verifies
+  the market's loan token matches the vault asset, and shows pair +
+  LLTV preview. Step 2: hands off to `CapEditDrawer` with
+  `idData = marketIdData(adapter, params)`.
+
+- **`src/components/vault/V2CapsTab.tsx`** — wired both drawers to
+  `+ Add Collateral` / `+ Add Market` buttons on the respective table
+  card headers. Curator-gated (`canSetCaps`). New `adding` state
+  toggles between the two add-drawers.
+
+### Files changed (`git diff main --stat`)
+New: `src/components/vault/caps/AddCollateralCapDrawer.tsx`,
+`src/components/vault/caps/AddMarketCapDrawer.tsx`.
+Modified: `src/components/vault/V2CapsTab.tsx`.
+
+### Tests
+No new tests in this PR — the underlying flows are already pinned:
+- `parseMarketIdInput` (PR 19, 8 cases)
+- `useMarketLookup` lookup-not-found / mismatch / found paths (PR 19,
+  covered by `parseMarketIdInput.test.ts` for the input parser; the
+  hook itself is exercised by the existing market lookup integration)
+- `CapEditDrawer` submit→wait→execute (PR 12/20 batchSetCaps tests +
+  PR 22 idData test family)
+
+This PR is pure composition on top of those.
+
+### Verification
+- `npm run test:run` → **196 passed** (25 files, unchanged from PR 24
+  — no new tests, no regressions). `npx tsc -b` → **0**. `npm run build`
+  → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new files, one modified tab. Both drawers wrap the
+existing `CapEditDrawer` (PR 22) rather than reimplementing the
+timelock flow — the cap-write semantics, ABI surface, and error
+handling stay identical to the Edit case. The Add buttons are
+permission-gated (`canSetCaps`), matching the existing per-row Edit
+buttons.
+
+### Remaining follow-ups (still tracked)
+- **PR 26 (planned) — V2 Parameters tab**: owner / curator / sentinel /
+  allocator role mgmt, performance fee, management fee, fee recipients,
+  vault name / symbol. The single-call Submit→Wait→Execute pattern from
+  `CapEditDrawer` generalizes cleanly to a `V2SetterDrawer` that takes
+  any target calldata. Out of scope here.
+- Pending caps section keyed on `executableAt > 0` for entries that
+  haven't been executed yet.
+- "Add Adapter" cap quick-add on the Adapter Caps table (Adapters tab
+  already exposes the flow; adding it here is a small consistency win).
+- `∞` hint inside cap input previews when input ≥ `MAX_UINT128_CAP`.
