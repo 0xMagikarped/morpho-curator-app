@@ -39,8 +39,7 @@ export function parseDurationSeconds(raw: string): bigint | null {
 
 /**
  * Inverse: format a bigint seconds value as the most readable unit.
- * Pure — used in display + as the default input value when entering
- * Edit mode.
+ * Pure — used by general display code.
  */
 export function formatDurationSeconds(secs: bigint): string {
   if (secs === 0n) return '0';
@@ -49,4 +48,28 @@ export function formatDurationSeconds(secs: bigint): string {
   if (s < 3600) return `${(s / 60).toFixed(s % 60 === 0 ? 0 : 2)}m`;
   if (s < 86400) return `${(s / 3600).toFixed(s % 3600 === 0 ? 0 : 2)}h`;
   return `${(s / 86400).toFixed(s % 86400 === 0 ? 0 : 2)}d`;
+}
+
+/**
+ * PR 32 — format ALWAYS as a number of days. Used by the V2 Timelocks
+ * table where the curator asked for a single, consistent unit instead
+ * of the auto-picked-unit display.
+ *
+ *   0     → "0"
+ *   30    → "0.000347d"        (sub-day still shows, no clipping)
+ *   86400 → "1d"                (integer day → no decimals)
+ *   43200 → "0.5d"              (clean half)
+ *   90000 → "1.041667d"         (mixed values → up to 6 dp, trailing 0s stripped)
+ *
+ * `parseDurationSeconds` still accepts every unit shape — only the
+ * display + the edit-mode input pre-fill are unified to days.
+ */
+export function formatDurationDays(secs: bigint): string {
+  if (secs === 0n) return '0';
+  const days = Number(secs) / 86400;
+  if (Number.isInteger(days)) return `${days}d`;
+  // Up to 6 decimal places, strip trailing zeros (and a trailing `.`).
+  const fixed = days.toFixed(6);
+  const trimmed = fixed.replace(/\.?0+$/, '');
+  return `${trimmed}d`;
 }

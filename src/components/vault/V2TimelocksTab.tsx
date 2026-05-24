@@ -38,7 +38,7 @@ import { vaultV2RegistryAbi } from '../../lib/contracts/vaultV2RegistryAbi';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import {
   parseDurationSeconds,
-  formatDurationSeconds,
+  formatDurationDays,
 } from '../../lib/utils/duration';
 
 interface V2TimelocksTabProps {
@@ -123,7 +123,7 @@ export function V2TimelocksTab({ chainId, vaultAddress }: V2TimelocksTabProps) {
         const abdicated = reads?.[i * 2 + 1]?.result as boolean | undefined;
         const draft =
           drafts[selector] ??
-          (timelock !== undefined ? formatDurationSeconds(timelock) : '');
+          (timelock !== undefined ? formatDurationDays(timelock) : '');
         return {
           row,
           selector,
@@ -337,7 +337,7 @@ export function V2TimelocksTab({ chainId, vaultAddress }: V2TimelocksTabProps) {
                             {isLoading
                               ? '…'
                               : r.timelock !== undefined
-                                ? formatDurationSeconds(r.timelock)
+                                ? formatDurationDays(r.timelock)
                                 : '—'}
                           </span>
                         )}

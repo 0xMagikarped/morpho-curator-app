@@ -2,7 +2,7 @@
  * PR 31 — duration parser pin for the V2 Timelocks bulk-edit inputs.
  */
 import { describe, it, expect } from 'vitest';
-import { parseDurationSeconds, formatDurationSeconds } from '../duration';
+import { parseDurationSeconds, formatDurationSeconds, formatDurationDays } from '../duration';
 
 describe('parseDurationSeconds (PR 31)', () => {
   it('parses bare integers as seconds', () => {
@@ -64,6 +64,40 @@ describe('formatDurationSeconds (PR 31)', () => {
     for (const v of [0n, 30n, 300n, 7200n, 86400n, 7n * 86400n]) {
       const txt = formatDurationSeconds(v);
       expect(parseDurationSeconds(txt)).toBe(v);
+    }
+  });
+});
+
+describe('formatDurationDays — always-days display (PR 32)', () => {
+  it('renders 0 as "0"', () => {
+    expect(formatDurationDays(0n)).toBe('0');
+  });
+
+  it('renders integer days without decimals', () => {
+    expect(formatDurationDays(86400n)).toBe('1d');
+    expect(formatDurationDays(7n * 86400n)).toBe('7d');
+    expect(formatDurationDays(30n * 86400n)).toBe('30d');
+  });
+
+  it('renders half-day cleanly', () => {
+    expect(formatDurationDays(43200n)).toBe('0.5d');
+  });
+
+  it('renders sub-day values as decimals (no clipping)', () => {
+    // 1 hour = 1/24 = 0.041666… → trimmed to 6dp
+    expect(formatDurationDays(3600n)).toBe('0.041667d');
+    // 30 seconds → 0.000347
+    expect(formatDurationDays(30n)).toBe('0.000347d');
+  });
+
+  it('strips trailing zeros + bare decimal point', () => {
+    // 86460 = 1d + 60s = 1.000694…d → trimmed
+    expect(formatDurationDays(86460n)).toBe('1.000694d');
+  });
+
+  it('round-trips via parseDurationSeconds when input was a whole-day value', () => {
+    for (const v of [0n, 86400n, 7n * 86400n, 30n * 86400n]) {
+      expect(parseDurationSeconds(formatDurationDays(v))).toBe(v);
     }
   });
 });

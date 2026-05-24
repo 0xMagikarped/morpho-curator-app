@@ -2468,3 +2468,48 @@ decreasing row; PR 32 just wires the Save button to a second pathway
 for that subset. Per-row Abdicate also slated for PR 32 (or earlier
 in a tiny PR — single-call action with strong "are you sure"
 confirmation).
+
+---
+
+## PR 32 — V2 Timelocks display defaults to days
+
+### Diagnosis
+PR 31's auto-pick formatter chose the most-readable unit per row:
+`30s` for half a minute, `5m` for five minutes, `1d` for a day. The
+mixed-unit view was hard to scan because adjacent rows had different
+units. User asked for a single consistent unit — days — even when the
+value is sub-day.
+
+### Fix
+- **`src/lib/utils/duration.ts`** — new `formatDurationDays(secs)`
+  helper. Always days: `86400 → "1d"`, `43200 → "0.5d"`,
+  `3600 → "0.041667d"`. Integer days drop decimals; non-integer days
+  use up to 6 dp with trailing zeros stripped. The existing
+  `formatDurationSeconds` (auto-unit) stays for other callers.
+- **`src/components/vault/V2TimelocksTab.tsx`** — swapped both display
+  paths (read-mode value + edit-mode input pre-fill) to
+  `formatDurationDays`. `parseDurationSeconds` unchanged — users can
+  still TYPE `30s` / `5m` / `2h` / `1.5h` and the value rounds-trips
+  cleanly; only the default display unit changed.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/utils/duration.ts`,
+`src/components/vault/V2TimelocksTab.tsx`,
+`src/lib/utils/__tests__/duration.test.ts`.
+
+### Tests — 6 new cases for `formatDurationDays`
+- 0 → "0"
+- integer days render without decimals (1d, 7d, 30d)
+- half-day → "0.5d"
+- sub-day values keep precision up to 6 dp with no clipping
+- trailing zeros + bare decimal point stripped
+- round-trips through `parseDurationSeconds` for whole-day values
+
+### Verification
+- `npm run test:run` → **219 passed** (27 files; 213 + 6 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One helper + two display call sites + test. The parser stays
+permissive (any unit), only the *default* unit of the display changed.
+Other tabs that use `formatDurationSeconds` (auto-unit) are unaffected.
