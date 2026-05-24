@@ -2966,3 +2966,59 @@ shape as PR 38's pattern.
 
 Both surfaces are now accessible from the same drawer + the
 Adapters-tab banner.
+
+---
+
+## PR 41 — Virtual "Idle" card alongside real adapters (mirrors Morpho UI)
+
+### User question
+> "Why the morpho app show 2 adapters then?"
+
+Morpho's curator UI screenshot showed two cards side-by-side:
+- **Idle** — `< 0.01 USDC`, Cap: `Infinite / 100%`, Liquidity: `< 0.01 USDC`
+- **Morpho Blue Adapter** (Liquidity Adapter) — the real on-chain
+  adapter with its caps + utilization
+
+### Answer + fix
+**It's not a second on-chain adapter** — Morpho's UI virtualizes the
+vault's idle balance as a card. The "Idle" slot represents the
+slice of `totalAssets()` that is NOT routed through any adapter
+(`totalAssets − Σ adapter.realAssets`). Funds in this slot are
+always immediately withdrawable (no adapter / market liquidity
+constraint).
+
+PR 41 adds the same virtual card to our Adapters tab — first card
+in the grid, always present.
+
+- **`src/components/vault/adapters/IdleCard.tsx`** (new) — render
+  the idle card with:
+  - Allocation = vault.idle (already computed in
+    `useV2AdapterOverview`)
+  - Allocation % vs totalAssets
+  - Abs / Rel Cap = `∞ / 100%` (vault's own balance has no caps)
+  - Liquidity = same as allocation (always withdrawable)
+  - "Active" badge when `liquidityAdapter == 0x0` (PR 40 true-idle
+    state)
+  - "Set as Liquidity (True Idle)" button when the liquidity adapter
+    is NOT idle and the curator has permission — same one-click
+    write as the banner's Set Idle (PR 40), exposed here for
+    symmetry with the other cards' actions.
+- **`src/components/vault/V2AdaptersTab.tsx`** — `IdleCard` rendered
+  as the first card in the grid, before the `adapters.map`.
+
+### Files changed (`git diff main --stat`)
+New: `src/components/vault/adapters/IdleCard.tsx`.
+Modified: `src/components/vault/V2AdaptersTab.tsx`.
+
+### Tests
+No new tests — composition over existing primitives (`useV2AdapterOverview.idle`,
+PR 40's write call, PR 38's invalidation pattern).
+
+### Verification
+- `npm run test:run` → **224 passed** (27 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new card component, one grid edit. No on-chain
+reads added — the data was already on the page via PR 21+'s
+`useV2AdapterOverview`.

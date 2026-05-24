@@ -12,6 +12,7 @@ import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { CapitalDistribution } from './adapters/CapitalDistribution';
 import { LiquidityAdapterBanner } from './adapters/LiquidityAdapterBanner';
 import { AdapterCard } from './adapters/AdapterCard';
+import { IdleCard } from './adapters/IdleCard';
 import { AddAdapterDrawer } from './adapters/AddAdapterDrawer';
 import { AllocateDrawer } from './adapters/AllocateDrawer';
 import { DeallocateDrawer } from './adapters/DeallocateDrawer';
@@ -153,6 +154,20 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
       {/* Adapter Cards */}
       {adapters.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* PR 41 — virtual Idle card. Matches Morpho's curator UI:
+              renders the vault's idle balance alongside real adapters.
+              Not an on-chain adapter — it's the slice of totalAssets
+              that's NOT routed through any adapter. */}
+          <IdleCard
+            idle={idle}
+            totalAssets={totalAssets}
+            isLiquidityAdapterIdle={!liquidityAdapter}
+            chainId={chainId}
+            vaultAddress={vaultAddress}
+            decimals={decimals}
+            assetSymbol={assetSymbol}
+            canSetLiquidity={canSetLiquidity}
+          />
           {adapters.map((adapter) => (
             <AdapterCard
               key={adapter.address}
