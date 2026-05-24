@@ -1106,3 +1106,74 @@ current cap flow but are wrong and should be aligned in a future PR:
 These should be addressed before any UI surface depends on them. The
 new test pattern (selector equality vs SDK) is the right shape to extend
 function-by-function.
+
+---
+
+## PR 16 — `computeVaultAdapterId` matches the cap-map storage key
+
+### Diagnosis (on-chain ground truth)
+PR 15's selector fix made the multicall execute land. User's tx
+`0x00a14a7b…ac11` (block 102946094, status 0x1) updated the caps —
+verified by reading `absoluteCap(id)` / `relativeCap(id)` at the
+correct cap-map key for adapter `0x7764a05b…7a67` on the user's other
+V2 vault `0x1ac19bec…fa5a`:
+
+```
+absoluteCap = 100_000_000_000_000  (the user's 100M USDC × 10^6 dec) ✓
+relativeCap = 1_000_000_000_000_000_000  (= 1e18 = 100%) ✓
+```
+
+But the UI still showed `Current: Not set`. Root cause: the read side
+used the wrong storage key.
+
+- WRITE: `idData = abi.encode("this", adapter)` → cap-map key
+  `keccak256(idData)` = `0x17ea3483…96c5` ← reads here return the real value
+- READ (pre-PR-16): `computeVaultAdapterId(adapter)` =
+  `keccak256(abi.encode(adapter))` ← reads at this different hash return 0
+
+PR 14 aligned the WRITE side (cap mutator calldata builders) to
+`adapterIdData`. The READ side helper (`computeVaultAdapterId`) was
+still computing the legacy single-arg hash, so `fetchAdapterCaps(vault,
+adapterId)` queried a slot no cap was ever written to.
+
+### Fix
+- **`src/lib/v2/adapterUtils.ts`** — `computeVaultAdapterId` now returns
+  `keccak256(adapterIdData(adapter))`, pairing READ and WRITE on the
+  same idData payload. Removed the now-unused
+  `encodeAbiParameters`/`parseAbiParameters` imports.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/v2/adapterUtils.ts`,
+`src/lib/v2/__tests__/adapterCapIdData.test.ts` (updated the doc-string
+on the "wrong shape" test case to reflect that PR 16 retires it).
+New: `src/lib/v2/__tests__/computeVaultAdapterId.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+2 tests:
+- `computeVaultAdapterId(adapter) === keccak256(adapterIdData(adapter))`
+  — pins the READ/WRITE pairing as a symmetric invariant.
+- `computeVaultAdapterId(0x7764…7a67) === 0x17ea3483…96c5` — grounds
+  the assertion on a *real on-chain key* observed from the user's
+  successful cap write. If either side drifts again, this exact-bytes
+  check catches it.
+
+On `main` both assertions fail (the legacy hash diverges). On branch
+both pass.
+
+### Verification
+- Fail-on-`main` confirmed by stash-then-pop.
+- `npm run test:run` → **167 passed** (19 files; was 165 + 2 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Single function body change (3 lines: import + new return).
+No side-effect on any other consumer — `computeVaultAdapterId` is used
+in exactly one place (`useV2Adapters.ts:58`) to feed `fetchAdapterCaps`,
+which queries the V2 cap-map. Returning the *correct* storage key only
+makes those reads start working.
+
+The READ/WRITE pairing is the actual invariant — any future change to
+either side must round-trip through `adapterIdData`. The new test
+captures that with both a symbolic equality (`keccak256(adapterIdData(.))`)
+and a literal on-chain fixture, so a refactor of either side without
+updating the other fails CI.

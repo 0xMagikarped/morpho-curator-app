@@ -2,10 +2,11 @@
  * V2 adapter detection, ID computation, and on-chain validation utilities.
  */
 import type { Address, PublicClient } from 'viem';
-import { keccak256, encodeAbiParameters, parseAbiParameters } from 'viem';
+import { keccak256 } from 'viem';
 import { v1VaultAdapterAbi, v1MarketAdapterAbi } from '../contracts/metaMorphoV2Abi';
 import { marketV1AdapterV2FactoryAbi, vaultV1AdapterFactoryAbi } from '../contracts/marketAdapterFactoryAbi';
 import { getChainConfig } from '../../config/chains';
+import { adapterIdData } from './adapterCapUtils';
 
 // ============================================================
 // Adapter Type Detection
@@ -197,16 +198,23 @@ export async function detectAdapterTypeViaFactory(
 // ============================================================
 
 /**
- * Compute the adapter ID for a V1 vault adapter.
- * NOTE: Verify encoding against adapter source code.
+ * Compute the adapter-level cap-map storage key for a V2 vault.
+ *
+ * PR 16 — the storage key is `keccak256(idData)` where
+ * `idData = abi.encode("this", adapterAddress)`. The previous shape
+ * (`keccak256(abi.encode(adapter))` — just the address word) computed
+ * a *different* hash that no `absoluteCap` / `relativeCap` / `allocation`
+ * slot is keyed by, so all three reads returned 0. PR 14 fixed the
+ * WRITE side (cap mutator calldata builders) by switching to
+ * `adapterIdData(adapter)`; this PR fixes the READ side by piping the
+ * same helper through the hash.
+ *
+ * The cap-map key + the idData are sibling concepts:
+ *   idData      = abi.encode("this", adapter)        — `bytes` arg to mutators
+ *   storage key = keccak256(idData)                  — `bytes32` arg to getters
  */
 export function computeVaultAdapterId(adapterAddress: Address): `0x${string}` {
-  return keccak256(
-    encodeAbiParameters(
-      parseAbiParameters('address'),
-      [adapterAddress],
-    ),
-  );
+  return keccak256(adapterIdData(adapterAddress));
 }
 
 // ============================================================

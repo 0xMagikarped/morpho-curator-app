@@ -31,9 +31,12 @@ describe('adapter-level cap idData (PR 14)', () => {
     expect(byteLen).toBeGreaterThanOrEqual(96);
   });
 
-  it('the wrong (legacy) encoding — keccak256(abi.encode(adapter)) — is 32 bytes', () => {
-    // This is what V2AdapterFull.adapterId is computed as. Mirrors
-    // `computeVaultAdapterId(adapterAddress)` in adapterUtils.ts.
+  it('the legacy (pre-PR 16) encoding — keccak256(abi.encode(adapter)) — is also 32 bytes', () => {
+    // This is what the pre-PR-16 `computeVaultAdapterId(adapterAddress)`
+    // returned: keccak256 of just the address word. It hashes to a
+    // different bytes32 than the correct cap-map key, so reads at this id
+    // always returned 0. PR 16 redefines `computeVaultAdapterId` to
+    // `keccak256(adapterIdData(adapter))` — see the test below.
     const wrong = keccak256(encodeAbiParameters([{ type: 'address' }], [ADAPTER]));
     const byteLen = (wrong.length - 2) / 2;
     expect(byteLen).toBe(32);
