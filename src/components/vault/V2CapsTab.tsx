@@ -1,30 +1,41 @@
 /**
- * PR 21 — V2 caps management view.
+ * V2 caps management view.
  *
- * Replaces the "Caps moved" notice (PR 18) for V2 vaults. Renders a
- * Morpho-curator-style table of all adapters and their cap entries,
- * with edit affordances per row that open the existing
- * `UpdateCapsDrawer` (PR 12/14/15) and a pending-timelock section.
+ * PR 21 — Morpho-curator-style adapter-level table replacing the V1
+ * CapsTab on V2 vaults.
  *
- * Scope of this MVP: adapter-level caps only — collateral-level and
- * market-level cap editing live in the wizard for now
- * (`AddMarketWizard` Step 2). A future PR can extend this view with
- * sub-rows + a parameterized cap drawer that accepts any `idData`.
+ * PR 22 — extended to render the three-level hierarchy (adapter →
+ * collateral → market). All three levels open the new parameterized
+ * `CapEditDrawer` (PR 22) which handles the Submit→Wait→Execute flow
+ * via multicall regardless of which level is being edited.
  *
- * The pending section is driven by best-effort SDK error decoding +
- * the per-calldata `executableAt` reads PR 11 introduced.
+ * Data flow:
+ *   - `useV2AdapterOverview` provides adapter-level caps for every adapter.
+ *   - For each market-v1 adapter we additionally call `useV2AdapterAllCaps`
+ *     to fetch its per-collateral and per-market caps. Empty until the
+ *     adapter has positions (its on-chain `marketIds()` populates only
+ *     after the first `allocate`).
  */
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import type { Address } from 'viem';
 import { useVaultInfo } from '../../lib/hooks/useVault';
-import { useV2AdapterOverview, type V2AdapterFull } from '../../lib/hooks/useV2Adapters';
+import {
+  useV2AdapterOverview,
+  type V2AdapterFull,
+} from '../../lib/hooks/useV2Adapters';
+import {
+  useV2AdapterAllCaps,
+  type MarketCapEntry,
+  type CollateralCapEntry,
+} from '../../hooks/useV2AdapterAllCaps';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { AddressDisplay } from '../ui/AddressDisplay';
 import { ProgressBar } from '../ui/ProgressBar';
-import { UpdateCapsDrawer } from './adapters/UpdateCapsDrawer';
+import { CapEditDrawer } from './adapters/CapEditDrawer';
+import { adapterIdData } from '../../lib/v2/adapterCapUtils';
 import { formatTokenAmount, formatWadPercent } from '../../lib/utils/format';
 
 interface V2CapsTabProps {
@@ -32,29 +43,23 @@ interface V2CapsTabProps {
   vaultAddress: Address;
 }
 
+/** What the user is currently editing — drives the CapEditDrawer's props. */
+type EditingCap =
+  | { kind: 'adapter'; adapter: V2AdapterFull }
+  | { kind: 'collateral'; entry: CollateralCapEntry }
+  | { kind: 'market'; entry: MarketCapEntry };
+
 export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const overview = useV2AdapterOverview(chainId, vaultAddress, vault?.totalAssets);
   const permissions = useVaultPermissions(chainId, vaultAddress);
-  const [editingAdapter, setEditingAdapter] = useState<V2AdapterFull | null>(null);
+  const [editing, setEditing] = useState<EditingCap | null>(null);
 
   const adapters = overview.data?.adapters ?? [];
-  // `vault.assetInfo` is the enriched ERC-20 metadata; `vault.timelock` is
-  // the per-selector timelock duration in seconds (V2 vaults often 0).
   const decimals = vault?.assetInfo.decimals ?? 18;
   const assetSymbol = vault?.assetInfo.symbol ?? '???';
   const canSetCaps = permissions.canCurate || permissions.isAdmin;
   const timelockSeconds = vault?.timelock ?? 0n;
-
-  // Summary aggregates across all adapters — useful header context.
-  const summary = useMemo(() => {
-    const total = adapters.length;
-    const withCaps = adapters.filter(
-      (a) => a.absoluteCap > 0n || a.relativeCap > 0n,
-    ).length;
-    const totalAllocated = adapters.reduce((s, a) => s + a.realAssets, 0n);
-    return { total, withCaps, totalAllocated };
-  }, [adapters]);
 
   if (overview.isLoading) {
     return (
@@ -91,77 +96,108 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
     );
   }
 
+  // Resolve the open-drawer props from `editing` state.
+  const drawerProps = editing ? resolveDrawerProps(editing) : null;
+
   return (
     <div className="space-y-4">
-      {/* Summary strip */}
       <Card>
         <div className="grid grid-cols-3 gap-3 p-3">
-          <SummaryCell label="Adapters" value={String(summary.total)} />
-          <SummaryCell label="With Caps" value={`${summary.withCaps}/${summary.total}`} />
+          <SummaryCell label="Adapters" value={String(adapters.length)} />
+          <SummaryCell
+            label="With Caps"
+            value={`${adapters.filter((a) => a.absoluteCap > 0n || a.relativeCap > 0n).length}/${adapters.length}`}
+          />
           <SummaryCell
             label="Total Allocated"
-            value={`${formatTokenAmount(summary.totalAllocated, decimals)} ${assetSymbol}`}
+            value={`${formatTokenAmount(
+              adapters.reduce((s, a) => s + a.realAssets, 0n),
+              decimals,
+            )} ${assetSymbol}`}
           />
         </div>
       </Card>
 
-      {/* Adapter cap table */}
       <Card>
         <CardHeader>
-          <CardTitle>Adapter Caps</CardTitle>
+          <CardTitle>Caps</CardTitle>
           <Badge variant="info">V2</Badge>
         </CardHeader>
 
         <p className="text-[10px] text-text-tertiary mb-3">
-          Three-level cap hierarchy: adapter / collateral / market. This view shows the
-          adapter-level entry for each adapter. Collateral-level and market-level caps are
-          configured via the <span className="font-mono">Add Market</span> wizard
-          (Adapters tab → Add Market).
+          Three-level cap hierarchy: adapter / collateral / market. Each row exposes its own
+          Edit drawer — all three levels share the same on-chain
+          <span className="font-mono"> increase*Cap </span>/{' '}
+          <span className="font-mono">decrease*Cap </span>
+          mutators (PR 14 / PR 15). Collateral + market rows appear only after the adapter has
+          allocations on those markets.
         </p>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-[10px] text-text-tertiary uppercase border-b border-border-subtle">
-                <th className="text-left py-2 px-2">Adapter</th>
-                <th className="text-right py-2 px-2">Allocated</th>
-                <th className="text-right py-2 px-2">Abs. Cap</th>
-                <th className="text-right py-2 px-2">Rel. Cap</th>
-                <th className="text-right py-2 px-2 w-32">Usage</th>
-                <th className="text-right py-2 px-2 w-16">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {adapters.map((a) => (
-                <CapRow
-                  key={a.address}
-                  adapter={a}
-                  chainId={chainId}
-                  decimals={decimals}
-                  assetSymbol={assetSymbol}
-                  totalAssets={vault?.totalAssets ?? 0n}
-                  canSetCaps={canSetCaps}
-                  onEdit={() => setEditingAdapter(a)}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          {adapters.map((a) => (
+            <AdapterCapsSection
+              key={a.address}
+              adapter={a}
+              chainId={chainId}
+              vaultAddress={vaultAddress}
+              decimals={decimals}
+              assetSymbol={assetSymbol}
+              totalAssets={vault?.totalAssets ?? 0n}
+              canSetCaps={canSetCaps}
+              onEdit={setEditing}
+            />
+          ))}
         </div>
       </Card>
 
-      {/* Edit drawer reuses the existing PR 12/14/15 component */}
-      <UpdateCapsDrawer
-        open={!!editingAdapter}
-        onClose={() => setEditingAdapter(null)}
-        adapter={editingAdapter}
-        vaultAddress={vaultAddress}
-        chainId={chainId}
-        timelockSeconds={timelockSeconds}
-        decimals={decimals}
-        assetSymbol={assetSymbol}
-      />
+      {drawerProps && (
+        <CapEditDrawer
+          open
+          onClose={() => setEditing(null)}
+          label={drawerProps.label}
+          idData={drawerProps.idData}
+          currentAbs={drawerProps.currentAbs}
+          currentRel={drawerProps.currentRel}
+          vaultAddress={vaultAddress}
+          chainId={chainId}
+          timelockSeconds={timelockSeconds}
+          decimals={decimals}
+          assetSymbol={assetSymbol}
+        />
+      )}
     </div>
   );
+}
+
+function resolveDrawerProps(editing: EditingCap): {
+  label: string;
+  idData: `0x${string}`;
+  currentAbs: bigint;
+  currentRel: bigint;
+} {
+  if (editing.kind === 'adapter') {
+    return {
+      label: `Adapter caps: ${editing.adapter.name ?? editing.adapter.address.slice(0, 10)}`,
+      idData: adapterIdData(editing.adapter.address),
+      currentAbs: editing.adapter.absoluteCap,
+      currentRel: editing.adapter.relativeCap,
+    };
+  }
+  if (editing.kind === 'collateral') {
+    return {
+      label: `Collateral caps: ${editing.entry.collateralToken.symbol}`,
+      idData: editing.entry.idData,
+      currentAbs: editing.entry.absoluteCap,
+      currentRel: editing.entry.relativeCap,
+    };
+  }
+  const lltvPct = (Number(editing.entry.params.lltv) / 1e18) * 100;
+  return {
+    label: `Market caps: ${editing.entry.collateralToken.symbol} @ ${lltvPct.toFixed(1)}% LLTV`,
+    idData: editing.entry.idData,
+    currentAbs: editing.entry.absoluteCap,
+    currentRel: editing.entry.relativeCap,
+  };
 }
 
 function SummaryCell({ label, value }: { label: string; value: string }) {
@@ -173,9 +209,10 @@ function SummaryCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CapRow({
+function AdapterCapsSection({
   adapter,
   chainId,
+  vaultAddress,
   decimals,
   assetSymbol,
   totalAssets,
@@ -184,60 +221,191 @@ function CapRow({
 }: {
   adapter: V2AdapterFull;
   chainId: number;
+  vaultAddress: Address;
   decimals: number;
   assetSymbol: string;
   totalAssets: bigint;
   canSetCaps: boolean;
-  onEdit: () => void;
+  onEdit: (e: EditingCap) => void;
 }) {
-  const absPct =
-    adapter.absoluteCap > 0n
-      ? (Number(adapter.realAssets) / Number(adapter.absoluteCap)) * 100
-      : 0;
+  const subCaps = useV2AdapterAllCaps(
+    chainId,
+    vaultAddress,
+    adapter.address,
+    adapter.morphoBlue,
+    adapter.type,
+  );
+  const marketCaps = subCaps.data?.marketCaps ?? [];
+  const collateralCaps = subCaps.data?.collateralCaps ?? [];
 
-  const relUsedPct =
-    adapter.relativeCap > 0n && totalAssets > 0n
-      ? ((Number(adapter.realAssets) / Number(totalAssets)) /
-          (Number(adapter.relativeCap) / 1e18)) *
-        100
-      : 0;
-
-  const usagePct = Math.max(absPct, relUsedPct);
-
-  const status: 'unconfigured' | 'configured' =
-    adapter.absoluteCap === 0n && adapter.relativeCap === 0n ? 'unconfigured' : 'configured';
+  const hasSubRows = marketCaps.length > 0 || collateralCaps.length > 0;
 
   return (
-    <tr className="border-b border-border-subtle/50 hover:bg-bg-hover/30">
-      <td className="py-2 px-2 align-top">
+    <div className="border border-border-subtle">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[10px] text-text-tertiary uppercase bg-bg-hover/40 border-b border-border-subtle">
+            <th className="text-left py-2 px-3">Level</th>
+            <th className="text-left py-2 px-3">Target</th>
+            <th className="text-right py-2 px-3">Allocated</th>
+            <th className="text-right py-2 px-3">Abs. Cap</th>
+            <th className="text-right py-2 px-3">Rel. Cap</th>
+            <th className="text-right py-2 px-3 w-32">Usage</th>
+            <th className="text-right py-2 px-3 w-16">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {/* Adapter-level row */}
+          <CapTableRow
+            level="ADAPTER"
+            levelVariant="info"
+            target={
+              <span className="flex items-center gap-2">
+                <span className="text-text-primary font-medium">
+                  {adapter.name ?? `Adapter ${adapter.address.slice(0, 10)}`}
+                </span>
+                {adapter.type === 'market-v1' && <Badge variant="success">MKT</Badge>}
+                {adapter.type === 'vault-v1' && <Badge variant="info">V1</Badge>}
+                {adapter.isLiquidityAdapter && <Badge variant="purple">Liq</Badge>}
+              </span>
+            }
+            subTarget={<AddressDisplay address={adapter.address} chainId={chainId} />}
+            allocated={`${formatTokenAmount(adapter.realAssets, decimals)} ${assetSymbol}`}
+            absoluteCap={adapter.absoluteCap}
+            relativeCap={adapter.relativeCap}
+            allocatedRaw={adapter.realAssets}
+            totalAssets={totalAssets}
+            decimals={decimals}
+            assetSymbol={assetSymbol}
+            canEdit={canSetCaps}
+            onEdit={() => onEdit({ kind: 'adapter', adapter })}
+          />
+
+          {/* Collateral-level rows */}
+          {collateralCaps.map((c) => (
+            <CapTableRow
+              key={`c-${c.collateralToken.address.toLowerCase()}`}
+              level="COLLATERAL"
+              levelVariant="info"
+              target={
+                <span className="text-text-primary">{c.collateralToken.symbol}</span>
+              }
+              subTarget={<AddressDisplay address={c.collateralToken.address} chainId={chainId} />}
+              allocated="—"
+              absoluteCap={c.absoluteCap}
+              relativeCap={c.relativeCap}
+              allocatedRaw={0n}
+              totalAssets={totalAssets}
+              decimals={decimals}
+              assetSymbol={assetSymbol}
+              canEdit={canSetCaps}
+              onEdit={() => onEdit({ kind: 'collateral', entry: c })}
+            />
+          ))}
+
+          {/* Market-level rows */}
+          {marketCaps.map((m) => (
+            <CapTableRow
+              key={`m-${m.marketId.toLowerCase()}`}
+              level="MARKET"
+              levelVariant="success"
+              target={
+                <span className="text-text-primary">
+                  {m.collateralToken.symbol} @ {((Number(m.params.lltv) / 1e18) * 100).toFixed(1)}%
+                </span>
+              }
+              subTarget={
+                <span className="font-mono text-[10px] text-text-tertiary">
+                  {m.marketId.slice(0, 10)}…{m.marketId.slice(-4)}
+                </span>
+              }
+              allocated={`${formatTokenAmount(m.loanSupplyAssets, decimals)} ${assetSymbol}`}
+              absoluteCap={m.absoluteCap}
+              relativeCap={m.relativeCap}
+              allocatedRaw={m.loanSupplyAssets}
+              totalAssets={totalAssets}
+              decimals={decimals}
+              assetSymbol={assetSymbol}
+              canEdit={canSetCaps}
+              onEdit={() => onEdit({ kind: 'market', entry: m })}
+            />
+          ))}
+
+          {/* Empty-state hint when no positions yet */}
+          {!subCaps.isLoading && !hasSubRows && (
+            <tr>
+              <td colSpan={7} className="py-2 px-3 text-[10px] text-text-tertiary italic">
+                No allocations on this adapter yet — collateral and market caps will appear
+                here once an <span className="font-mono">allocate</span> lands on a configured
+                market.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CapTableRow({
+  level,
+  levelVariant,
+  target,
+  subTarget,
+  allocated,
+  absoluteCap,
+  relativeCap,
+  allocatedRaw,
+  totalAssets,
+  decimals,
+  assetSymbol,
+  canEdit,
+  onEdit,
+}: {
+  level: string;
+  levelVariant: 'default' | 'info' | 'success' | 'warning';
+  target: React.ReactNode;
+  subTarget: React.ReactNode;
+  allocated: string;
+  absoluteCap: bigint;
+  relativeCap: bigint;
+  allocatedRaw: bigint;
+  totalAssets: bigint;
+  decimals: number;
+  assetSymbol: string;
+  canEdit: boolean;
+  onEdit: () => void;
+}) {
+  const absPct = absoluteCap > 0n ? (Number(allocatedRaw) / Number(absoluteCap)) * 100 : 0;
+  const relUsedPct =
+    relativeCap > 0n && totalAssets > 0n
+      ? ((Number(allocatedRaw) / Number(totalAssets)) / (Number(relativeCap) / 1e18)) * 100
+      : 0;
+  const usagePct = Math.max(absPct, relUsedPct);
+  const configured = absoluteCap > 0n || relativeCap > 0n;
+
+  return (
+    <tr className="border-b border-border-subtle/50 hover:bg-bg-hover/30 last:border-0">
+      <td className="py-2 px-3 align-top">
+        <Badge variant={levelVariant}>{level}</Badge>
+      </td>
+      <td className="py-2 px-3 align-top">
         <div className="flex flex-col gap-0.5">
-          <div className="flex items-center gap-2">
-            <span className="text-text-primary font-medium">
-              {adapter.name ?? `Adapter ${adapter.address.slice(0, 10)}`}
-            </span>
-            {adapter.type === 'market-v1' && <Badge variant="success">MKT</Badge>}
-            {adapter.type === 'vault-v1' && <Badge variant="info">V1</Badge>}
-            {adapter.isLiquidityAdapter && <Badge variant="purple">Liquidity</Badge>}
-            {status === 'unconfigured' && <Badge variant="warning">No Caps</Badge>}
-          </div>
-          <div className="text-[10px] text-text-tertiary">
-            <AddressDisplay address={adapter.address} chainId={chainId} />
-          </div>
+          {target}
+          <div className="text-[10px] text-text-tertiary">{subTarget}</div>
         </div>
       </td>
-      <td className="text-right py-2 px-2 font-mono text-text-primary align-top">
-        {formatTokenAmount(adapter.realAssets, decimals)} {assetSymbol}
-      </td>
-      <td className="text-right py-2 px-2 font-mono text-text-primary align-top">
-        {adapter.absoluteCap > 0n
-          ? `${formatTokenAmount(adapter.absoluteCap, decimals)} ${assetSymbol}`
+      <td className="text-right py-2 px-3 font-mono text-text-primary align-top">{allocated}</td>
+      <td className="text-right py-2 px-3 font-mono text-text-primary align-top">
+        {absoluteCap > 0n
+          ? `${formatTokenAmount(absoluteCap, decimals)} ${assetSymbol}`
           : '—'}
       </td>
-      <td className="text-right py-2 px-2 font-mono text-text-primary align-top">
-        {adapter.relativeCap > 0n ? formatWadPercent(adapter.relativeCap) : '—'}
+      <td className="text-right py-2 px-3 font-mono text-text-primary align-top">
+        {relativeCap > 0n ? formatWadPercent(relativeCap) : '—'}
       </td>
-      <td className="py-2 px-2 align-middle">
-        {status === 'configured' ? (
+      <td className="py-2 px-3 align-middle">
+        {configured && allocatedRaw > 0n ? (
           <div className="space-y-1">
             <ProgressBar value={Math.min(usagePct, 100)} height="sm" />
             <p className="text-right font-mono text-[10px] text-text-tertiary">
@@ -248,8 +416,8 @@ function CapRow({
           <p className="text-right text-[10px] text-text-tertiary">—</p>
         )}
       </td>
-      <td className="text-right py-2 px-2 align-top">
-        <Button size="sm" variant="ghost" disabled={!canSetCaps} onClick={onEdit}>
+      <td className="text-right py-2 px-3 align-top">
+        <Button size="sm" variant="ghost" disabled={!canEdit} onClick={onEdit}>
           Edit
         </Button>
       </td>

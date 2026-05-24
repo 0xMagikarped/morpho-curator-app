@@ -1572,3 +1572,90 @@ correct for V1 vaults.
   duplicate the wizard's in-flight state.
 - **Cap-history breadcrumb** showing recent submit/execute events
   per adapter — nice-to-have observability.
+
+---
+
+## PR 22 — Three-level cap hierarchy: collateral + market editing
+
+### Diagnosis
+PR 21 shipped the V2 Caps tab with adapter-level rows only. The other
+two levels of V2's cap hierarchy (collateral / market) were unreachable
+from a dedicated view — users had to drop into the `AddMarketWizard`'s
+caps step to set them. Once allocations land, reviewing or editing
+those entries had no UI surface.
+
+### Fix
+Three pieces:
+
+1. **`src/components/vault/adapters/CapEditDrawer.tsx`** (new) —
+   parameterised V2 cap edit drawer. Identical Submit→Wait→Execute
+   batching as the original `UpdateCapsDrawer`, but takes the cap-map
+   entry's `idData` (bytes) + `currentAbs` + `currentRel` + `label`
+   directly. Works for all three levels because they share the same
+   on-chain mutators (`increaseAbsoluteCap` / `decreaseAbsoluteCap` /
+   `increaseRelativeCap` / `decreaseRelativeCap`); only the storage key
+   changes.
+
+2. **`src/components/vault/adapters/UpdateCapsDrawer.tsx`** (shrunk
+   ~470 → ~50 lines) — now a thin shim around `CapEditDrawer` for the
+   adapter-level case. Preserves the existing `{ adapter, … }` prop
+   shape so `V2AdaptersTab` continues to work unchanged. All
+   timelock/multicall logic was deduplicated into `CapEditDrawer`.
+
+3. **`src/hooks/useV2AdapterAllCaps.ts`** (new) — read-side hook that,
+   for a market-v1 adapter with tracked markets, fetches per-collateral
+   and per-market cap entries (`absoluteCap` / `relativeCap` keyed on
+   the matching `idData` hash). Vault-v1 adapters return empty
+   (they route to an underlying V1 vault with its own cap model).
+
+4. **`src/components/vault/V2CapsTab.tsx`** (extended) — each adapter
+   now renders a 3-level nested table: ADAPTER row + COLLATERAL rows
+   (one per unique collateral across the adapter's markets) + MARKET
+   rows (one per tracked market). Each row's Edit button opens
+   `CapEditDrawer` with the matching `idData`. The empty-state row
+   ("No allocations on this adapter yet — collateral and market caps
+   will appear once an allocate lands") was added for clarity.
+
+### Files changed (`git diff main --stat`)
+New: `src/components/vault/adapters/CapEditDrawer.tsx`,
+`src/hooks/useV2AdapterAllCaps.ts`,
+`src/hooks/__tests__/v2AdapterAllCaps.test.ts`.
+Modified: `src/components/vault/adapters/UpdateCapsDrawer.tsx`,
+`src/components/vault/V2CapsTab.tsx`.
+
+### Tests — fail on `main`, pass on branch
+4 cases pinning the `idData` shapes the V2 vault decodes internally
+(`abi.decode(idData, …)` shape per level):
+
+- adapter: `abi.encode("this", adapter)`
+- collateral: `abi.encode("collateralToken", token)`
+- market: `abi.encode("this/marketParams", adapter, MarketParams)`
+- sanity: adapter and collateral with the SAME address produce
+  DIFFERENT idData (the string tag is the discriminator).
+
+The PR-14 + PR-15 + PR-16 + PR-19 + PR-20 invariants all still hold;
+this PR only widens the surface that uses them. Run via the existing
+SDK-alignment + selector-equality test families.
+
+### Verification
+- `npm run test:run` → **187 passed** (23 files; 183 + 4 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new files (drawer + hook), one new test file. Two
+modified components. The UpdateCapsDrawer call signature is unchanged
+— V2AdaptersTab gets the new behaviour for free (any future PR that
+wants to edit other-level caps from the adapters tab now has the
+parameterised drawer ready). No on-chain interaction patterns
+changed; PR 22 is a pure UI extension on top of PR 11/12/14/15/16/20's
+correctness fixes.
+
+### Remaining follow-ups still on the list
+- **Pending caps section** keyed on `executableAt > 0` for entries in
+  the V2 timelock queue that haven't been executed yet — needs an
+  event-scan or known-calldata enumeration to discover the queued
+  bytes.
+- **Cap-history breadcrumb** per adapter — block-explorer-style
+  observability.
+
+Both deferred from this PR to keep scope focused on the editing gap.
