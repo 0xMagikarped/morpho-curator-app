@@ -182,7 +182,17 @@ export function AdapterCard({
                   </table>
                 </div>
               ) : (
-                <p className="text-text-tertiary text-[10px]">No markets found</p>
+                // PR 21 — clearer copy: market-v1 adapters track markets in
+                // their internal `marketIds()` array which only populates
+                // after the first `allocate(market, …)`. Setting caps on a
+                // market via the Add Market wizard does NOT populate this
+                // list until allocation happens.
+                <p className="text-text-tertiary text-[10px]">
+                  No allocations yet. Use <span className="font-mono">Allocate</span> on a
+                  market with caps configured (or run the{' '}
+                  <span className="font-mono">Add Market</span> wizard end-to-end) to start
+                  tracking.
+                </p>
               )}
             </div>
           )}

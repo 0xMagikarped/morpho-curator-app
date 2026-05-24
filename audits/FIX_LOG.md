@@ -1479,3 +1479,96 @@ existing fallback consumers continue to work). The standalone
 This closes the last "V2 target-call without submit" surface in the
 app. Going forward, any new cap-mutator caller should reuse
 `useBatchSetCaps` rather than calling targets directly.
+
+---
+
+## PR 21 — Dedicated V2 Caps tab + clearer adapter empty-markets copy
+
+### User asks
+> "It still don't show the markets. And I still want a caps dedicated
+> page following the UI of morpho curator app to help on the caps
+> management."
+
+Two requests:
+
+1. **Markets count is 0** on the adapter card even after caps were set —
+   confusing because the user expected the configured market to appear.
+2. **A dedicated caps page** styled like Morpho's curator app — PR 18
+   had retired the Caps tab on V2 vaults (the V1 component couldn't work
+   there) and the temporary "Caps moved" notice was unsatisfying.
+
+### Diagnosis (1) — "Markets 0"
+This is correct behaviour, just unclearly communicated. A market-v1
+adapter tracks markets in its internal `marketIds()` array, which only
+populates after the first `allocate(market, …)`. Setting caps on a
+market via the Add Market wizard does NOT populate this list until the
+matching allocation happens. The card copy ("No markets found") read
+like an error.
+
+### Diagnosis (2) — V2 Caps tab
+V2's three-level cap hierarchy (adapter / collateral / market) doesn't
+fit the V1 CapsTab shape (per-market supply caps + supply queue).
+Replacing the "Caps moved" notice (PR 18) with a Morpho-curator-style
+table is the right move; the data was already aggregated by
+`useV2AdapterOverview` for the Adapters tab.
+
+### Fix
+- **`src/components/vault/V2CapsTab.tsx`** (new) — Morpho-curator-style
+  view:
+  - Summary strip: adapter count, "with caps" coverage, total
+    allocated.
+  - Adapter Caps table with one row per adapter: name + type badge,
+    address, allocated, abs cap, rel cap, usage progress bar,
+    `Edit` button gated by `permissions.canCurate || isAdmin`.
+  - "No Caps" badge when both caps are 0; usage column collapses to
+    `—` instead of a 0% bar (less visual noise on uninitialised
+    adapters).
+  - The Edit button opens the existing PR 12/14/15 `UpdateCapsDrawer`
+    (adapter-level today; collateral + market level editing logged as
+    PR 22 follow-up).
+- **`src/pages/VaultPage.tsx`** — Caps tab is visible on V2 again
+  (removed `v1Only`). The body branches: V1 → existing `CapsTab`,
+  V2 → new `V2CapsTab`. Dropped the `Card` import + the temporary
+  "Caps moved" notice (PR 18) — no longer needed.
+- **`src/components/vault/adapters/AdapterCard.tsx`** — clearer copy
+  on the adapter's Markets sub-section when empty: "No allocations
+  yet. Use Allocate on a market with caps configured…" instead of
+  "No markets found".
+
+### Files changed (`git diff main --stat`)
+New: `src/components/vault/V2CapsTab.tsx`.
+Modified: `src/pages/VaultPage.tsx`,
+`src/components/vault/adapters/AdapterCard.tsx`.
+
+### Tests
+No new test — this PR is a presentation layer on data the existing
+tests already exercise (`useV2AdapterOverview`, `UpdateCapsDrawer`
+flow). The 6 ABI-alignment tests (PR 13/15/17) + the 4 PR 20 batch-cap
+flow tests + PR 16's `computeVaultAdapterId` pinning together cover
+the underlying correctness; this PR rearranges the surface.
+
+### Verification
+- `npm run test:run` → **183 passed** (22 files, unchanged from PR 20).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new component, two small edits. Reuses existing data
+(`useV2AdapterOverview`) and existing edit drawer
+(`UpdateCapsDrawer`). The V1 `CapsTab` is left untouched and still
+correct for V1 vaults.
+
+### Known follow-ups (logged as PR 22 candidates)
+- **Per-collateral and per-market cap editing UI.** Today the
+  `UpdateCapsDrawer` only handles adapter-level idData
+  (`adapterIdData(adapter)`). Extending it to accept any `idData` and
+  letting the V2CapsTab open it for collateral and market entries
+  would close the editing gap. The on-chain side already supports it
+  via `collateralIdData(token)` and `marketIdData(adapter, params)` —
+  it's purely a UI extension.
+- **Pending caps section.** Caps that have been submitted to the
+  V2 timelock but not yet executed don't show in the table today; a
+  separate section keyed on `executableAt > 0` reads per known
+  calldata would surface them. Needs careful UX so it doesn't
+  duplicate the wizard's in-flight state.
+- **Cap-history breadcrumb** showing recent submit/execute events
+  per adapter — nice-to-have observability.

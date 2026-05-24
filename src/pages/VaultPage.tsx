@@ -2,10 +2,10 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Address } from 'viem';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Card } from '../components/ui/Card';
 import { OverviewTab } from '../components/vault/OverviewTab';
 import { MarketsTab } from '../components/vault/MarketsTab';
 import { CapsTab } from '../components/vault/CapsTab';
+import { V2CapsTab } from '../components/vault/V2CapsTab';
 import { ReallocateTab } from '../components/vault/ReallocateTab';
 import { GuardianTab } from '../components/vault/GuardianTab';
 import { ProtocolTab } from '../components/vault/ProtocolTab';
@@ -45,12 +45,11 @@ const TABS: TabDef[] = [
   // Caps is always visible — allocators need to see caps for reallocation
   // limits, and any role can accept pending caps after timelock. Write
   // buttons inside are gated by permissions.canCurate.
-  // V1-only: `CapsTab` implements the V1 submitCap/acceptCap/setSupplyQueue
-  // model — sending its calldata to a V2 vault dispatches a selector that
-  // doesn't exist on-chain → revert "unknown error" (the user's PR 18
-  // report). V2's per-adapter cap UI lives in the Adapters tab
-  // (`UpdateCapsDrawer`); the Allocation tab covers viewing.
-  { id: 'caps', label: 'Caps', v1Only: true },
+  // PR 18 made this V1-only because sending V1 calldata to a V2 vault
+  // reverted. PR 21 restores the tab for V2 too — but now it renders the
+  // dedicated `V2CapsTab` (Morpho-curator-style table) instead of the V1
+  // CapsTab component. Routing branch is in the body below.
+  { id: 'caps', label: 'Caps' },
   { id: 'adapters', label: 'Adapters', v2Only: true },
   { id: 'allocation', label: 'Allocation', v2Only: true },
   { id: 'queues', label: 'Queues', requiresRole: 'isAllocator', v1Only: true },
@@ -272,25 +271,7 @@ export function VaultPage() {
           <CapsTab chainId={chainId} vaultAddress={vaultAddress} />
         )}
         {activeTab === 'caps' && isV2 && (
-          // PR 18 — defence-in-depth: even if a user lands on `?tab=caps` via
-          // a bookmark/URL on a V2 vault, don't render the V1 Caps UI. Point
-          // them at the Adapters tab where the per-adapter cap drawer lives.
-          <Card>
-            <div className="p-4 space-y-3">
-              <h3 className="text-sm font-medium text-text-primary">Caps moved</h3>
-              <p className="text-xs text-text-tertiary">
-                V2 vaults manage caps per-adapter, not per-market. Open the{' '}
-                <span className="font-mono">Adapters</span> tab, click{' '}
-                <span className="font-mono">Caps</span> on a market adapter to set
-                absolute + relative limits, or use{' '}
-                <span className="font-mono">Add Market</span> to register a new
-                market with its caps.
-              </p>
-              <Button size="sm" onClick={() => setActiveTab('adapters')}>
-                Go to Adapters
-              </Button>
-            </div>
-          </Card>
+          <V2CapsTab chainId={chainId} vaultAddress={vaultAddress} />
         )}
         {activeTab === 'reallocate' && (
           <ReallocateTab chainId={chainId} vaultAddress={vaultAddress} />
