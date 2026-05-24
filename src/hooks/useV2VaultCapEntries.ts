@@ -25,6 +25,7 @@ import type { Address } from 'viem';
 import { decodeAbiParameters, parseAbiItem } from 'viem';
 import { getPublicClient, fetchTokenInfo } from '../lib/data/rpcClient';
 import { metaMorphoV2Abi } from '../lib/contracts/metaMorphoV2Abi';
+import { computeMarketId } from '../lib/market/marketId';
 import { vaultKeys } from '../lib/queryKeys';
 import type { TokenInfo, MarketParams } from '../types';
 
@@ -51,7 +52,10 @@ export interface CollateralCapEntry {
 
 export interface MarketCapEntry {
   level: 'market';
+  /** Cap-map storage key (keccak256 of idData). Used by V2 vault to look up caps. */
   id: `0x${string}`;
+  /** The Morpho Blue market ID (keccak256(abi.encode(MarketParams))). Used to read market state. */
+  marketId: `0x${string}`;
   idData: `0x${string}`;
   adapter: Address;
   params: MarketParams;
@@ -252,6 +256,7 @@ async function fetchVaultCapEntries(
         return {
           level: 'market',
           id: m.id,
+          marketId: computeMarketId(m.params),
           idData: m.idData,
           adapter: m.adapter,
           params: m.params,

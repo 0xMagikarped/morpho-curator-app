@@ -34,7 +34,7 @@ import {
 } from '../../../lib/hooks/useV2TimelockedOp';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
-import { formatTokenAmount, parseTokenAmount, formatWadPercent } from '../../../lib/utils/format';
+import { parseTokenAmount, formatWadPercent, formatCapDisplay } from '../../../lib/utils/format';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
 
 export interface CapEditDrawerProps {
@@ -249,9 +249,7 @@ export function CapEditDrawer({
             <div>
               <span className="text-text-tertiary">Current</span>
               <p className="font-mono text-text-primary mt-0.5">
-                {currentAbs > 0n
-                  ? `${formatTokenAmount(currentAbs, decimals)} ${assetSymbol}`
-                  : 'Not set'}
+                {currentAbs > 0n ? formatCapDisplay(currentAbs, decimals, assetSymbol) : 'Not set'}
               </p>
             </div>
           </div>

@@ -157,6 +157,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
               key={adapter.address}
               adapter={adapter}
               chainId={chainId}
+              vaultAddress={vaultAddress}
               decimals={decimals}
               assetSymbol={assetSymbol}
               totalAssets={totalAssets}

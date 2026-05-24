@@ -3,6 +3,26 @@ import { formatUnits, parseUnits } from 'viem';
 const WAD = 10n ** 18n;
 
 /**
+ * The "unlimited cap" sentinel used by the wizard + drawers when the curator
+ * picks "unlimited" — `2^128 - 1`. V2 vaults accept any `uint256` for caps,
+ * but in practice the cap-mutator UI restricts to this width so the value
+ * round-trips through any future `uint128`-narrowed surface unchanged.
+ */
+export const MAX_UINT128_CAP = (1n << 128n) - 1n;
+
+/**
+ * Render a raw cap value as either the localized number or `∞` when the
+ * value is at or above the unlimited sentinel. UI rule:
+ *   - 0           → "—"  (caller decides, this function only renders >0)
+ *   - >= 2^128-1  → "∞"
+ *   - otherwise   → `${formatTokenAmount(value, decimals)} ${symbol}`
+ */
+export function formatCapDisplay(value: bigint, decimals: number, symbol: string): string {
+  if (value >= MAX_UINT128_CAP) return '∞';
+  return `${formatTokenAmount(value, decimals)} ${symbol}`;
+}
+
+/**
  * Parse a human-readable token amount to raw bigint using actual decimals.
  */
 export function parseTokenAmount(value: string, decimals: number): bigint {

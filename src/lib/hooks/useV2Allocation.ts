@@ -5,8 +5,9 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
-import { getPublicClient } from '../data/rpcClient';
+import { getPublicClient, fetchMarketState } from '../data/rpcClient';
 import { useAdapterMarketPositions, type V2AdapterFull } from './useV2Adapters';
+import { useV2VaultCapEntries } from '../../hooks/useV2VaultCapEntries';
 import {
   adapterRiskId,
   collateralRiskId,
@@ -18,9 +19,10 @@ import {
 import {
   discoverAllCappedMarkets,
   mergePositionsWithDiscoveredMarkets,
+  type DiscoveredMarket,
 } from '../data/v2MarketDiscovery';
 import { vaultKeys } from '../queryKeys';
-import type { AdapterMarketPosition, MarketParams } from '../../types';
+import type { AdapterMarketPosition, MarketParams, MarketId } from '../../types';
 
 // ============================================================
 // Types
@@ -72,6 +74,65 @@ function useDiscoveredMarkets(
     enabled: !!chainId && !!vaultAddress && !!adapterAddress && !!loanTokenAddress,
     staleTime: 60_000,
     refetchInterval: 120_000,
+  });
+}
+
+/**
+ * PR 24 — turn the event-discovered market cap entries (PR 23) into the
+ * `DiscoveredMarket[]` shape that the rest of `useV2AllocationData`
+ * consumes. Filters to the current adapter (the cap entries' `adapter`
+ * field) and backfills market state via RPC so the row's liquidity
+ * column has a real value even for cap-only markets.
+ */
+function useEventDiscoveredMarkets(
+  chainId: number | undefined,
+  adapterAddress: Address | undefined,
+  marketCapEntries:
+    | Array<{
+        marketId: `0x${string}`;
+        params: MarketParams;
+        adapter: Address;
+        collateralToken: { address: Address; symbol: string; decimals: number; name?: string } | null;
+        absoluteCap: bigint;
+        relativeCap: bigint;
+        allocation: bigint;
+      }>
+    | undefined,
+) {
+  return useQuery({
+    queryKey: [
+      'event-discovered-markets',
+      chainId,
+      adapterAddress,
+      marketCapEntries?.map((e) => e.marketId.toLowerCase()).sort().join(','),
+    ],
+    enabled: !!chainId && !!adapterAddress && !!marketCapEntries,
+    staleTime: 60_000,
+    queryFn: async (): Promise<DiscoveredMarket[]> => {
+      if (!chainId || !adapterAddress || !marketCapEntries) return [];
+      const relevant = marketCapEntries.filter(
+        (e) => e.adapter.toLowerCase() === adapterAddress.toLowerCase(),
+      );
+      if (relevant.length === 0) return [];
+
+      return await Promise.all(
+        relevant.map(async (e): Promise<DiscoveredMarket> => {
+          const marketState = await fetchMarketState(chainId, e.marketId as MarketId).catch(() => null);
+          return {
+            marketId: e.marketId,
+            params: e.params,
+            // Loan token info: best-effort; the AdapterMarketPosition
+            // merge fills it in from the vault's asset when missing.
+            loanToken: null,
+            collateralToken: e.collateralToken,
+            marketState,
+            apiAbsoluteCap: e.absoluteCap || undefined,
+            apiRelativeCap: e.relativeCap || undefined,
+            apiAllocation: e.allocation || undefined,
+          };
+        }),
+      );
+    },
   });
 }
 
@@ -157,7 +218,7 @@ export function useV2AllocationData(
     adapter?.type ?? 'unknown',
   );
 
-  // ALL capped markets (including 0-allocation ones)
+  // ALL capped markets (including 0-allocation ones) — API path
   const { data: discovered, isLoading: discLoading } = useDiscoveredMarkets(
     chainId,
     vaultAddress,
@@ -165,10 +226,41 @@ export function useV2AllocationData(
     loanTokenAddress,
   );
 
-  // Merge positions + discovered markets
-  const mergedPositions = positions && discovered
-    ? mergePositionsWithDiscoveredMarkets(positions, discovered)
-    : positions;
+  // PR 24 — event-based discovery as a parallel source. Covers chains
+  // without Morpho API coverage (XDC, SEI) by scanning the vault's
+  // `IncreaseAbsoluteCap` / `IncreaseRelativeCap` logs and decoding
+  // market-level idData. We then optionally backfill market state per
+  // marketId. Merges with the API path; per-marketId dedupe means
+  // chains supported by BOTH sources don't double-count.
+  const eventEntries = useV2VaultCapEntries(chainId, vaultAddress);
+  const eventDiscovered = useEventDiscoveredMarkets(
+    chainId,
+    adapter?.address,
+    eventEntries.data?.marketCaps,
+  );
+
+  // Concatenate both discovery sources, then merge with active positions.
+  const allDiscovered = useMemo<DiscoveredMarket[]>(() => {
+    const seen = new Set<string>();
+    const out: DiscoveredMarket[] = [];
+    for (const dm of discovered ?? []) {
+      const k = dm.marketId.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(dm);
+    }
+    for (const dm of eventDiscovered.data ?? []) {
+      const k = dm.marketId.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(dm);
+    }
+    return out;
+  }, [discovered, eventDiscovered.data]);
+
+  const mergedPositions = positions
+    ? mergePositionsWithDiscoveredMarkets(positions, allDiscovered)
+    : (positions as AdapterMarketPosition[] | undefined);
 
   // Build cap map from API-provided caps (preferred — avoids risk ID computation)
   const apiCapMap = useMemo(() => {

@@ -32,7 +32,7 @@ import { AddressDisplay } from '../ui/AddressDisplay';
 import { ProgressBar } from '../ui/ProgressBar';
 import { CapEditDrawer } from './adapters/CapEditDrawer';
 import { adapterIdData } from '../../lib/v2/adapterCapUtils';
-import { formatTokenAmount, formatWadPercent } from '../../lib/utils/format';
+import { formatTokenAmount, formatWadPercent, formatCapDisplay } from '../../lib/utils/format';
 
 interface V2CapsTabProps {
   chainId: number;
@@ -423,7 +423,7 @@ function CapTable({
                 </td>
                 <td className="text-right py-2 px-2 font-mono text-text-primary align-top">
                   {r.absoluteCap > 0n
-                    ? `${formatTokenAmount(r.absoluteCap, r.decimals)} ${r.assetSymbol}`
+                    ? formatCapDisplay(r.absoluteCap, r.decimals, r.assetSymbol)
                     : '—'}
                 </td>
                 <td className="text-right py-2 px-2 font-mono text-text-primary align-top">

@@ -74,10 +74,24 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
     );
   }
 
-  if (!allocationData || allocationData.rows.length <= 1) {
+  // PR 24 — keep the table visible whenever there's at least one market
+  // row (caps-discovered counts), not just allocated positions. The user
+  // wants to SEE configured markets even at 0 allocation.
+  if (!allocationData) {
     return (
       <Card className="py-8 text-center">
-        <p className="text-text-tertiary text-sm">No market positions found in the adapter.</p>
+        <p className="text-text-tertiary text-sm">Loading allocation data…</p>
+      </Card>
+    );
+  }
+  const marketRowCount = allocationData.rows.filter((r) => r.type === 'market').length;
+  if (marketRowCount === 0) {
+    return (
+      <Card className="py-8 text-center">
+        <p className="text-text-tertiary text-sm">No markets configured for this adapter.</p>
+        <p className="text-text-tertiary text-[10px] mt-1">
+          Use <span className="font-mono">Add Market</span> in the Adapters tab to register a market with caps.
+        </p>
       </Card>
     );
   }

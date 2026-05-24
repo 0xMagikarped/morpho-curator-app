@@ -1760,3 +1760,112 @@ per-adapter-allocation-aware view as an alternate breakdown. The shared
 - **"Add Cap" buttons** per table (Morpho curator UX) — quick-add for
   collateral and market caps without going through the full wizard.
 - **Cap-history breadcrumb** — explorer-style observability.
+
+---
+
+## PR 24 — ∞ for unlimited caps + V2 Allocation tab shows cap-only markets
+
+### Three user-reported items
+1. "Maybe add infinity vs the max uint next time" — the unlimited-cap
+   sentinel (2^128-1) was rendering as `340,282,366,920,938,450,…`.
+2. "Markets are 0 when there is no allocation, but having a non-0 cap
+   should be enough to be listed." — the adapter card's Markets
+   sub-section only listed markets the adapter had supplyAssets on.
+3. "Let's fix the allocation page — we need to see adapter and market
+   even if there is no allocations." — the Allocation tab said "No
+   market positions found in the adapter" until the adapter had at
+   least one allocation, even when markets had caps configured.
+
+### Diagnosis
+For (1): `MAX_UINT128` is the wizard's "unlimited" sentinel for cap
+values. We were rendering it with `formatTokenAmount` which produced the
+literal 39-digit number.
+
+For (2) and (3): both surfaces used `useAdapterMarketPositions`
+(populates from the adapter's on-chain `marketIds()` array) as their
+sole source. `marketIds()` only fills after the first `allocate`, so
+cap-only markets were invisible until allocation. The Allocation tab
+also queried `discoverAllCappedMarkets` (PR-23-era API discovery), but
+that path returns `[]` on XDC (no Morpho API coverage).
+
+### Fix
+- **`src/lib/utils/format.ts`** — new `formatCapDisplay(value, decimals,
+  symbol)` returning `∞` for any value ≥ `MAX_UINT128_CAP` (2^128-1),
+  else the localized token amount. Exported alongside the sentinel.
+  Adopted at every cap-render site: `V2CapsTab`, `AdapterCard`, and the
+  "Current" line inside `CapEditDrawer`.
+
+- **`src/lib/hooks/useV2Allocation.ts`** — added a second
+  market-discovery source via `useV2VaultCapEntries` (PR 23 event-
+  scanning). Concatenated with the existing API path, dedupe by
+  marketId, then handed to `mergePositionsWithDiscoveredMarkets`. New
+  helper `useEventDiscoveredMarkets` reshapes the event entries into
+  the existing `DiscoveredMarket[]` type and backfills `marketState`
+  via `fetchMarketState` so the row's liquidity column has a real
+  value even for cap-only markets.
+
+- **`src/components/vault/V2AllocationTab.tsx`** — replaced the strict
+  "no positions" empty-state with a "no markets configured" check that
+  trips only when there are NO market rows (allocated or cap-only).
+  When markets exist but allocation is zero, the table still renders.
+
+- **`src/components/vault/adapters/AdapterCard.tsx`** — accepts
+  `vaultAddress` and calls `useV2VaultCapEntries`. New
+  `useMergedPositions` helper combines live adapter positions with
+  event-discovered market cap entries filtered to this adapter,
+  deduped by `marketId`. The Markets sub-section now lists every
+  configured market with the allocated ones first.
+
+- **`src/hooks/useV2VaultCapEntries.ts`** — `MarketCapEntry` now also
+  exposes `marketId` (Morpho Blue's id = `keccak256(abi.encode(params))`),
+  distinct from `id` (the cap-map storage key = `keccak256(idData)`).
+  Computed via the existing `computeMarketId(params)` helper. Needed by
+  the merge logic above to dedupe against positions, which key on
+  Morpho Blue's id.
+
+### Files changed (`git diff main --stat`)
+New: `src/lib/utils/__tests__/formatCapDisplay.test.ts`.
+Modified: `src/lib/utils/format.ts`,
+`src/lib/hooks/useV2Allocation.ts`,
+`src/hooks/useV2VaultCapEntries.ts`,
+`src/components/vault/V2CapsTab.tsx`,
+`src/components/vault/V2AllocationTab.tsx`,
+`src/components/vault/V2AdaptersTab.tsx`,
+`src/components/vault/adapters/AdapterCard.tsx`,
+`src/components/vault/adapters/CapEditDrawer.tsx`.
+
+### Tests — fail on `main`, pass on branch
+4 cases pinning `formatCapDisplay`:
+- `MAX_UINT128_CAP` → `∞`
+- any value `> MAX_UINT128_CAP` → `∞` (forward-compat for future
+  uint256-wide sentinels)
+- a finite value → `${formatted} ${symbol}`, not `∞`
+- a clean 1-unit example → `"1 USDC"`
+
+The event-discovery and merge paths are exercised at the integration
+level by the PR 23 + PR 22 idData test families (no new behavioural
+shape — just a new consumer wiring).
+
+### Verification
+- `npm run test:run` → **196 passed** (25 files; 192 + 4 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One pure helper, three component edits, two hook edits.
+`MarketCapEntry` got an additive field (`marketId`) — no caller of the
+hook is broken because it's a new optional read. The Adapter card got
+a new required prop (`vaultAddress`), threaded through the single
+call site in `V2AdaptersTab`.
+
+### Remaining follow-ups (still tracked)
+- **Pending caps section** keyed on `executableAt > 0` for entries in
+  the V2 timelock queue that haven't executed yet.
+- **"Add Cap" quick-add buttons** per table on the Caps tab (Morpho
+  curator UX) — quick-add for collateral and market caps without going
+  through the full wizard.
+- **Cap-history breadcrumb** per adapter — explorer-style
+  observability.
+- **Same `∞` treatment for the cap input controls** — when the user
+  types a value that round-trips to ≥ `MAX_UINT128_CAP`, the preview
+  hint could explicitly say "unlimited" instead of the parsed number.
+  Low priority; deferred.

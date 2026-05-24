@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
@@ -6,13 +6,16 @@ import { Button } from '../../ui/Button';
 import { ProgressBar } from '../../ui/ProgressBar';
 import { AddressDisplay } from '../../ui/AddressDisplay';
 import { UtilizationBar } from '../../risk/UtilizationBar';
-import { formatTokenAmount, formatPercent, formatWadPercent } from '../../../lib/utils/format';
+import { formatTokenAmount, formatPercent, formatWadPercent, formatCapDisplay } from '../../../lib/utils/format';
 import { useAdapterMarketPositions, type V2AdapterFull } from '../../../lib/hooks/useV2Adapters';
-import type { AdapterMarketPosition } from '../../../types';
+import { useV2VaultCapEntries } from '../../../hooks/useV2VaultCapEntries';
+import type { AdapterMarketPosition, MarketId } from '../../../types';
+import type { Address } from 'viem';
 
 interface AdapterCardProps {
   adapter: V2AdapterFull;
   chainId: number;
+  vaultAddress: Address;
   decimals: number;
   assetSymbol: string;
   totalAssets: bigint;
@@ -31,6 +34,7 @@ interface AdapterCardProps {
 export function AdapterCard({
   adapter,
   chainId,
+  vaultAddress,
   decimals,
   assetSymbol,
   totalAssets,
@@ -51,6 +55,12 @@ export function AdapterCard({
     adapter.morphoBlue,
     adapter.type,
   );
+
+  // PR 24 — include cap-only markets from the event-discovered set
+  // (PR 23) so the Markets breakdown lists every market the adapter is
+  // configured for, not just those with a non-zero allocation.
+  const { data: capEntries } = useV2VaultCapEntries(chainId, vaultAddress);
+  const mergedPositions = useMergedPositions(adapter.address, positions, capEntries?.marketCaps);
 
   const typeBadge = adapter.type === 'vault-v1'
     ? <Badge variant="info">V1 Vault Adapter</Badge>
@@ -110,7 +120,7 @@ export function AdapterCard({
         {adapter.absoluteCap > 0n && (
           <MetricRow
             label="Abs. Cap"
-            value={`${formatTokenAmount(adapter.absoluteCap, decimals)} ${assetSymbol}`}
+            value={formatCapDisplay(adapter.absoluteCap, decimals, assetSymbol)}
           />
         )}
         {adapter.relativeCap > 0n && (
@@ -151,13 +161,13 @@ export function AdapterCard({
           >
             {marketsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <span className="font-medium">Markets</span>
-            {positions && <Badge>{positions.length}</Badge>}
+            {mergedPositions && <Badge>{mergedPositions.length}</Badge>}
           </button>
           {marketsExpanded && (
             <div className="mt-2 space-y-1.5">
               {positionsLoading ? (
                 <div className="h-8 bg-bg-hover animate-shimmer" />
-              ) : positions?.length ? (
+              ) : mergedPositions?.length ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-[11px]">
                     <thead>
@@ -169,7 +179,7 @@ export function AdapterCard({
                       </tr>
                     </thead>
                     <tbody>
-                      {positions.map((pos) => (
+                      {mergedPositions.map((pos) => (
                         <MarketPositionRow
                           key={pos.marketId}
                           position={pos}
@@ -182,16 +192,12 @@ export function AdapterCard({
                   </table>
                 </div>
               ) : (
-                // PR 21 — clearer copy: market-v1 adapters track markets in
-                // their internal `marketIds()` array which only populates
-                // after the first `allocate(market, …)`. Setting caps on a
-                // market via the Add Market wizard does NOT populate this
-                // list until allocation happens.
+                // PR 24 — even cap-only markets appear here now (PR 23
+                // event discovery). If we still get nothing, the adapter
+                // genuinely has no markets configured nor allocated.
                 <p className="text-text-tertiary text-[10px]">
-                  No allocations yet. Use <span className="font-mono">Allocate</span> on a
-                  market with caps configured (or run the{' '}
-                  <span className="font-mono">Add Market</span> wizard end-to-end) to start
-                  tracking.
+                  No markets configured for this adapter. Use{' '}
+                  <span className="font-mono">Add Market</span> to register one with caps.
                 </p>
               )}
             </div>
@@ -229,6 +235,47 @@ export function AdapterCard({
       </div>
     </Card>
   );
+}
+
+/**
+ * Merge live adapter positions with event-discovered market cap entries.
+ * Allocated markets (from `useAdapterMarketPositions`) keep their `marketState`,
+ * `loanToken`, `supplyAssets`, etc. Cap-only markets (from the event set, filtered
+ * to THIS adapter) appear as zero-allocation rows with `params` + `collateralToken`
+ * populated. Dedupe by `marketId`.
+ */
+function useMergedPositions(
+  adapterAddress: Address,
+  positions: AdapterMarketPosition[] | undefined,
+  capEntries:
+    | Array<{
+        marketId: `0x${string}`;
+        adapter: Address;
+        params: { loanToken: Address; collateralToken: Address; oracle: Address; irm: Address; lltv: bigint };
+        collateralToken: { address: Address; symbol: string; decimals: number; name?: string } | null;
+      }>
+    | undefined,
+): AdapterMarketPosition[] | undefined {
+  return useMemo(() => {
+    if (!positions && !capEntries) return undefined;
+    const merged = new Map<string, AdapterMarketPosition>();
+    for (const p of positions ?? []) merged.set(p.marketId.toLowerCase(), p);
+    for (const e of capEntries ?? []) {
+      if (e.adapter.toLowerCase() !== adapterAddress.toLowerCase()) continue;
+      const k = e.marketId.toLowerCase();
+      if (merged.has(k)) continue;
+      merged.set(k, {
+        marketId: e.marketId as MarketId,
+        supplyAssets: 0n,
+        supplyShares: 0n,
+        params: e.params,
+        marketState: null,
+        loanToken: null,
+        collateralToken: e.collateralToken,
+      });
+    }
+    return Array.from(merged.values());
+  }, [adapterAddress, positions, capEntries]);
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
