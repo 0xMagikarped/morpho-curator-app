@@ -940,3 +940,85 @@ contracts should be diffed against the SDK's `vaultV2Abi` / `blueAbi` /
 adapter ABIs before merging. PR 1 already covered the *error* fragments
 this way; PR 13 extends the pattern to function-shape mismatches that
 silently no-op until they surface as decode errors.
+
+---
+
+## PR 14 — UpdateCapsDrawer cap idData + SetLiquidityDrawer chainId/error
+
+### Two bugs surfaced after PR 12+13 made the cap flow actually reachable
+
+**Bug A — Multicall execute reverts.** With PR 13's ABI fix the multicall
+encoded + simulated cleanly; the inner `increaseAbsoluteCap` / `increaseRel
+ativeCap` calls then reverted. Root cause: `UpdateCapsDrawer` was passing
+`adapter.adapterId` (a `bytes32` keccak256 hash from
+`computeVaultAdapterId`) as the `idData` argument. V2's cap functions
+internally do `abi.decode(idData, (string, address))` and revert when
+fed a 32-byte hash. The correct shape is `adapterIdData(adapter.address)
+= abi.encode("this", adapter.address)` — the `lib/v2/adapterCapUtils.ts`
+helper that `AddMarketWizard` has been using correctly all along.
+
+PR 10 (the original drawer) and PR 12 (the batching refactor) both
+inherited the wrong shape. Nothing on-chain was actually executable until
+now — but the bug only surfaced when execute was first reached. The
+multicall layer was correct; the inner arg encoding was not.
+
+**Bug B — Set Liquidity Adapter "Select" button looked unresponsive.**
+`SetLiquidityDrawer` was calling `writeContract({...})` with no `chainId`
+arg. PR 8 made `useGuardedWriteContract` fall back to the connected wallet
+chain when `chainId` is omitted, so chain-correct preflights still ran,
+but the guard's `simulateError` was never rendered. On any preflight
+failure (e.g. the XDC `from`-strip simulator quirk, or a real revert),
+the button click did nothing visible.
+
+### Fix
+- **`src/components/vault/adapters/UpdateCapsDrawer.tsx`** — memoised
+  `adapterCapIdData = adapterIdData(adapter.address)` and threaded it
+  through all 6 increase + 6 decrease calldata sites (the two memoised
+  `*IncreaseCalldata` for submit; the four direct calls in the execute
+  paths; the four direct calls in the immediate-decrease paths). Removed
+  the `adapter.adapterId` misuse entirely from this file.
+- **`src/components/vault/adapters/SetLiquidityDrawer.tsx`** — added
+  `chainId` to the `writeContract` call and rendered the standard
+  `{simulateError || error}` banner (the PR 6/8 pattern shared across
+  drawers).
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/adapters/UpdateCapsDrawer.tsx`,
+`src/components/vault/adapters/SetLiquidityDrawer.tsx`.
+New: `src/lib/v2/__tests__/adapterCapIdData.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+4 tests of the encoding contract:
+- `adapterIdData(adapter)` produces ≥96 bytes (string offset + address
+  word + string length + padded "this" content).
+- The legacy `keccak256(abi.encode(adapter))` shape is exactly 32 bytes —
+  the bug's fingerprint.
+- `increaseAbsoluteCap` calldata built with the proper helper differs
+  from calldata built with the hash, and is strictly longer (the
+  `bytes`-length prefix dominates).
+- Sanity round-trip: the hex of "this" (`74686973`) and the adapter
+  address both appear in the raw payload at the expected positions.
+
+### Verification
+- `npm run test:run` → **159 passed** (17 files; was 155 + 4 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two drawers modified, one tiny test file new. No ABI changes,
+no hook contract changes. `adapter.adapterId` (the hash) remains
+useful for *reads* (caps map keys, allocation lookups, the
+`fetchAdapterCaps` flow) — only the cap-mutator calldata sites were
+ever wrong, and now use the proper helper.
+
+Manual verification (post-deploy): user opens UpdateCapsDrawer on the
+XDC adapter, sets abs=100M USDC + rel=100%, clicks "Submit — Both
+Increases" (one Safe tx, batched via multicall), then "Execute — Both
+Increases" (one Safe tx, batched via multicall) — both land. Liquidity
+Adapter drawer Select button responds: simulates against XDC, surfaces
+any error in the banner, broadcasts when the simulate passes.
+
+Note on the previously-submitted (wrong) slots: any cap submits the user
+already made before PR 14 used the hash-as-idData; those slots stay
+queued on-chain harmlessly because the calldata they're keyed on can
+never be successfully executed (V2's decode reverts). The fresh
+properly-encoded slot is a brand-new entry. No on-chain cleanup needed.

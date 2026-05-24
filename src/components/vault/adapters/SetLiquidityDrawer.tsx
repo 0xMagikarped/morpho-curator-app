@@ -30,15 +30,21 @@ export function SetLiquidityDrawer({
   decimals,
   assetSymbol,
 }: SetLiquidityDrawerProps) {
-  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
+  const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
+  // PR 14 — missing `chainId` made the preflight target the wallet's current
+  // chain instead of the vault's chain. On a chain mismatch the guard's
+  // simulate produces a "no contract at address" error that has nowhere to
+  // surface → the Select button looks unresponsive. Pass `chainId` + render
+  // the error banner so the user sees what blocked the write.
   const handleSet = (adapterAddress: Address) => {
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
       functionName: 'setLiquidityAdapter',
       args: [adapterAddress],
+      chainId,
     });
   };
 
@@ -56,6 +62,12 @@ export function SetLiquidityDrawer({
         </div>
       ) : (
         <div className="space-y-3">
+          {(simulateError || error) && (
+            <div role="alert" className="bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger">
+              {simulateError?.message ?? (error instanceof Error ? error.message : 'Transaction failed.')}
+            </div>
+          )}
+
           <div className="text-xs text-text-secondary mb-4">
             <p>Current: {currentLiquidityAdapter ? (
               <AddressDisplay address={currentLiquidityAdapter} chainId={chainId} />

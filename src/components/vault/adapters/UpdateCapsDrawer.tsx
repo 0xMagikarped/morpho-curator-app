@@ -12,6 +12,7 @@ import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { formatTokenAmount, parseTokenAmount, formatWadPercent } from '../../../lib/utils/format';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
+import { adapterIdData } from '../../../lib/v2/adapterCapUtils';
 import type { V2AdapterFull } from '../../../lib/hooks/useV2Adapters';
 
 interface UpdateCapsDrawerProps {
@@ -74,28 +75,38 @@ export function UpdateCapsDrawer({
   const isAbsDecrease = !!adapter && parsedAbsCap > 0n && parsedAbsCap < adapter.absoluteCap;
   const isRelDecrease = !!adapter && parsedRelWad > 0n && parsedRelWad < adapter.relativeCap;
 
+  // PR 14 — adapter-level idData is `abi.encode("this", adapter.address)`,
+  // NOT the keccak256 hash `adapter.adapterId`. The V2 cap functions decode
+  // `idData` as `(string tag, address addr)` internally and revert when fed
+  // a 32-byte hash. PR 10 / PR 12 inherited the wrong shape; multicall
+  // execute reverted on every real call because of this single misuse.
+  const adapterCapIdData = useMemo(
+    () => (adapter ? adapterIdData(adapter.address) : undefined),
+    [adapter],
+  );
+
   // ------- timelocked-call calldata (target functions) ---------------------
   const absIncreaseCalldata = useMemo(
     () =>
-      adapter && isAbsIncrease
+      adapter && isAbsIncrease && adapterCapIdData
         ? encodeFunctionData({
             abi: metaMorphoV2Abi,
             functionName: 'increaseAbsoluteCap',
-            args: [adapter.adapterId, parsedAbsCap],
+            args: [adapterCapIdData, parsedAbsCap],
           })
         : undefined,
-    [adapter, isAbsIncrease, parsedAbsCap],
+    [adapter, isAbsIncrease, parsedAbsCap, adapterCapIdData],
   );
   const relIncreaseCalldata = useMemo(
     () =>
-      adapter && isRelIncrease
+      adapter && isRelIncrease && adapterCapIdData
         ? encodeFunctionData({
             abi: metaMorphoV2Abi,
             functionName: 'increaseRelativeCap',
-            args: [adapter.adapterId, parsedRelWad],
+            args: [adapterCapIdData, parsedRelWad],
           })
         : undefined,
-    [adapter, isRelIncrease, parsedRelWad],
+    [adapter, isRelIncrease, parsedRelWad, adapterCapIdData],
   );
 
   const absTimelock = useV2TimelockedOp({
@@ -187,7 +198,7 @@ export function UpdateCapsDrawer({
           address: vaultAddress,
           abi: metaMorphoV2Abi,
           functionName: 'increaseAbsoluteCap',
-          args: [adapter.adapterId, parsedAbsCap],
+          args: [adapterCapIdData!, parsedAbsCap],
           chainId,
         });
       } else {
@@ -195,7 +206,7 @@ export function UpdateCapsDrawer({
           address: vaultAddress,
           abi: metaMorphoV2Abi,
           functionName: 'increaseRelativeCap',
-          args: [adapter.adapterId, parsedRelWad],
+          args: [adapterCapIdData!, parsedRelWad],
           chainId,
         });
       }
@@ -218,7 +229,7 @@ export function UpdateCapsDrawer({
         encodeFunctionData({
           abi: metaMorphoV2Abi,
           functionName: 'decreaseAbsoluteCap',
-          args: [adapter.adapterId, parsedAbsCap],
+          args: [adapterCapIdData!, parsedAbsCap],
         }),
       );
     }
@@ -227,7 +238,7 @@ export function UpdateCapsDrawer({
         encodeFunctionData({
           abi: metaMorphoV2Abi,
           functionName: 'decreaseRelativeCap',
-          args: [adapter.adapterId, parsedRelWad],
+          args: [adapterCapIdData!, parsedRelWad],
         }),
       );
     }
@@ -239,7 +250,7 @@ export function UpdateCapsDrawer({
           address: vaultAddress,
           abi: metaMorphoV2Abi,
           functionName: 'decreaseAbsoluteCap',
-          args: [adapter.adapterId, parsedAbsCap],
+          args: [adapterCapIdData!, parsedAbsCap],
           chainId,
         });
       } else {
@@ -247,7 +258,7 @@ export function UpdateCapsDrawer({
           address: vaultAddress,
           abi: metaMorphoV2Abi,
           functionName: 'decreaseRelativeCap',
-          args: [adapter.adapterId, parsedRelWad],
+          args: [adapterCapIdData!, parsedRelWad],
           chainId,
         });
       }
