@@ -59,9 +59,13 @@ export const metaMorphoV2Abi = [
   { inputs: [], name: 'liquidityAdapter', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'liquidityAdapterData', outputs: [{ type: 'bytes' }], stateMutability: 'view', type: 'function' },
 
-  // === Cap reads (cap types are uint128 on-chain) ===
-  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'absoluteCap', outputs: [{ type: 'uint128' }], stateMutability: 'view', type: 'function' },
-  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'relativeCap', outputs: [{ type: 'uint128' }], stateMutability: 'view', type: 'function' },
+  // === Cap reads ===
+  // PR 15 — both getters return `uint256`, not `uint128`. The encoded width
+  // on the wire is 32 bytes either way, but a `uint128` decode in viem
+  // discards the upper 16 bytes — silently truncating any return data
+  // above 2^128. Aligned to `@morpho-org/blue-sdk-viem` `vaultV2Abi`.
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'absoluteCap', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [{ name: 'id', type: 'bytes32' }], name: 'relativeCap', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'id', type: 'bytes32' }], name: 'allocation', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [{ name: 'actionHash', type: 'bytes32' }], name: 'pendingAction', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
 
@@ -115,10 +119,18 @@ export const metaMorphoV2Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // PR 15 — the on-chain cap-mutator signatures take `uint256`, NOT
+  // `uint128`. Function selectors are computed from the full signature, so
+  // `increaseAbsoluteCap(bytes,uint128)` and `increaseAbsoluteCap(bytes,uint256)`
+  // produce different 4-byte selectors. Calling our (wrong) selector finds
+  // no match on-chain → fallback revert with no data → viem surfaces
+  // "Execution reverted for an unknown reason." Aligned to
+  // `@morpho-org/blue-sdk-viem` `vaultV2Abi`. Verified by selector probe
+  // against the live XDC vault.
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint128' },
+      { name: 'newAbsoluteCap', type: 'uint256' },
     ],
     name: 'increaseAbsoluteCap',
     outputs: [],
@@ -128,7 +140,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint128' },
+      { name: 'newAbsoluteCap', type: 'uint256' },
     ],
     name: 'decreaseAbsoluteCap',
     outputs: [],
@@ -138,7 +150,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint128' },
+      { name: 'newRelativeCap', type: 'uint256' },
     ],
     name: 'increaseRelativeCap',
     outputs: [],
@@ -148,7 +160,7 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'idData', type: 'bytes' },
-      { name: 'cap', type: 'uint128' },
+      { name: 'newRelativeCap', type: 'uint256' },
     ],
     name: 'decreaseRelativeCap',
     outputs: [],

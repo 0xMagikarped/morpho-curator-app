@@ -1022,3 +1022,87 @@ already made before PR 14 used the hash-as-idData; those slots stay
 queued on-chain harmlessly because the calldata they're keyed on can
 never be successfully executed (V2's decode reverts). The fresh
 properly-encoded slot is a brand-new entry. No on-chain cleanup needed.
+
+---
+
+## PR 15 — V2 cap mutators take `uint256`, not `uint128` (selector fix)
+
+### Diagnosis
+After PR 14 fixed the `idData` shape, Execute on `UpdateCapsDrawer` still
+reverted "for an unknown reason". Direct SDK diff against
+`@morpho-org/blue-sdk-viem` `vaultV2Abi`:
+
+| Function                     | Ours                       | SDK                        |
+|------------------------------|----------------------------|----------------------------|
+| `increaseAbsoluteCap`        | `(bytes,uint128)`          | `(bytes,uint256)`          |
+| `decreaseAbsoluteCap`        | `(bytes,uint128)`          | `(bytes,uint256)`          |
+| `increaseRelativeCap`        | `(bytes,uint128)`          | `(bytes,uint256)`          |
+| `decreaseRelativeCap`        | `(bytes,uint128)`          | `(bytes,uint256)`          |
+| `absoluteCap` (getter)       | returns `uint128`          | returns `uint256`          |
+| `relativeCap` (getter)       | returns `uint128`          | returns `uint256`          |
+
+The function selector is `keccak256(name + "(" + paramTypes + ")")[:4]`.
+A `uint128` vs `uint256` change produces a *different* selector. Our
+(wrong) selector found no matching function on-chain → fallback ran with
+no revert reason → viem surfaced "Execution reverted for an unknown
+reason." Encoded calldata is 32 bytes either way for any cap value in
+range, but the selector mismatch is what kills the call.
+
+The getter return-type mismatch is a quieter footgun: encoded width is 32
+bytes either way, but `uint128` decoding in viem silently truncates
+anything above 2^128. Caps don't realistically exceed that, but the
+discrepancy is wrong on principle and the test catches it.
+
+### Fix
+- **`src/lib/contracts/metaMorphoV2Abi.ts`** — change `uint128` to
+  `uint256` for the four cap mutators' cap argument and the two cap
+  getters' return type. Arg names also adjusted to match SDK
+  (`newAbsoluteCap` / `newRelativeCap`) for diff-clarity. No call-site
+  changes needed: `MAX_UINT128` sentinel (in `adapterCapUtils.ts`) is
+  still a valid `uint256`; viem encodes any bigint to the ABI-declared
+  width, so all callers continue to work without touching them.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/contracts/metaMorphoV2Abi.ts`.
+New: `src/lib/contracts/__tests__/capAbiAlignment.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+6 tests:
+- 4 cap mutators: input-type equality + `toFunctionSelector(...)` parity
+  against the SDK shape. The selector identity check is what proves the
+  on-chain call will dispatch.
+- 2 cap getters: output-type equality + explicit `uint256` assertion.
+
+On `main` (uint128 throughout) all 6 assertions fail. On branch all 6
+pass.
+
+### Verification
+- `npm run test:run` → **165 passed** (18 files; was 159 + 6 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+- Stash-then-pop fail-on-`main`: all 6 fail on stash, all 6 pass after
+  restore.
+
+### Scope-compliance self-audit
+**PASS.** One ABI fragment file, one new test file. No call-site changes
+required (viem encodes to the declared ABI width regardless of caller).
+
+### Known remaining mismatches (logged for `_followups.md`, NOT in this PR)
+The SDK diff found four more shape mismatches that don't gate the
+current cap flow but are wrong and should be aligned in a future PR:
+
+- `timelock`: ours `()` → SDK `(bytes4 selector)` — per-selector
+  timelocks. `vaultV2RegistryAbi` already has the correct shape (PR 7),
+  but the duplicate in `metaMorphoV2Abi` is wrong. Audit callers that
+  read `timelock()` (no args) — they'll currently revert when invoked.
+- `forceDeallocate`: ours `(bytes32, uint256)` → SDK
+  `(address, bytes, uint256, address) returns (uint256)` — completely
+  different signature; ours never worked.
+- `revoke`: ours `(bytes32)` → SDK `(bytes)`.
+- Several "ours only" functions (e.g. `MORPHO`, `VAULT`, `acceptCap`,
+  `submitCap`, `fee`, `feeRecipient`, `lastTotalAssets`, …) — these
+  aren't on the V2 vault at all; either remove or move to the
+  appropriate ABI file (V2-adapter ABI, V1-vault ABI, etc.).
+
+These should be addressed before any UI surface depends on them. The
+new test pattern (selector equality vs SDK) is the right shape to extend
+function-by-function.
