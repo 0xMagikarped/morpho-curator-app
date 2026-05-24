@@ -2665,3 +2665,72 @@ Modified: `src/lib/utils/duration.ts`,
 ### Verification
 - `npm run test:run` → **224 passed** (was 223 + 1 updated + 1 new).
   `npx tsc -b` → **0**. `npm run build` → **success**.
+
+---
+
+## PR 36 — Allocation tab: surface the target market on the Active Adapter row
+
+### User feedback
+> "The diff [with the] morpho app: I know which market is set as the
+> adapter, not here."
+
+Screenshots showed:
+- Our app: Active Adapter row → `Adapter 0x7764A05B  MKT  0x7764 ... 7a67`
+- Morpho's app: Active Adapter row → `AA_Falco… / USDC  77%` (the
+  target market the adapter routes deposits to)
+
+PR 33 surfaced the adapter address but not the market. Curators can't
+tell at a glance where new deposits are auto-routing.
+
+### Diagnosis
+The V2 vault stores arbitrary `liquidityData()` bytes that the active
+adapter receives in its `allocate(market, …)` call. For a market-v1
+adapter, that payload is `abi.encode(MarketParams)` — a single market
+tuple. Reading and decoding it gives the target market identity.
+
+For other adapter types (vault-v1, unknown) `liquidityData()` is
+opaque / empty; we fall back to the adapter address display.
+
+### Fix
+- **`src/hooks/useLiquidityTargetMarket.ts`** (new) — TanStack Query
+  hook. Reads `vault.liquidityData()`, attempts to decode as a
+  MarketParams tuple, and resolves the collateral token via
+  `fetchTokenInfo`. Returns null for empty payloads, non-MarketParams
+  shapes, or zero-address tuples. Cache `staleTime: 60s` (changes on
+  every `setLiquidityAdapterAndData` call).
+
+- **`src/components/vault/V2AllocationTab.tsx`** — Active Adapter
+  row now renders:
+    - When the target market resolves: `{collateral}/{loan} @ {lltv}%`
+      with the MKT badge on the primary line. The adapter address
+      moves to a secondary `via 0x7764…7a67` line below — still
+      one-click-copyable via the existing `AddressDisplay`.
+    - When it doesn't resolve (vault-v1, unknown, or no liquidity
+      adapter set): falls back to the PR 33 shape (adapter name +
+      type badge).
+
+### Files changed (`git diff main --stat`)
+New: `src/hooks/useLiquidityTargetMarket.ts`.
+Modified: `src/components/vault/V2AllocationTab.tsx`.
+
+### Tests
+No new tests this PR — the hook is a thin wrapper over
+`readContract` + `decodeAbiParameters` + `fetchTokenInfo`, all
+already covered by upstream tests. The decoder's guard cases
+(empty bytes, malformed tuple, zero-address sentinel) are exercised
+visually in the fall-through to the address-display branch.
+
+### Verification
+- `npm run test:run` → **224 passed** (27 files, unchanged from
+  PR 35). `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new hook (single readContract + decode + token-info
+fetch), one panel render change. The fall-back to PR 33's
+adapter-address display means vault-v1 adapters / unconfigured
+adapters keep their previous look — no regression on those.
+
+### Logged follow-up
+- When the target market is rendered, optionally hyperlink the pair
+  to the Morpho Blue market explorer for that chain. Tiny ergonomic
+  win; deferred so the panel stays a presentation-only change.

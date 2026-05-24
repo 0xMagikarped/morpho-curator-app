@@ -18,6 +18,7 @@ import { isUnlimited } from '../../lib/v2/capComputation';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
 import { SetLiquidityDrawer } from './adapters/SetLiquidityDrawer';
+import { useLiquidityTargetMarket } from '../../hooks/useLiquidityTargetMarket';
 import type { MarketParams } from '../../types';
 
 interface V2AllocationTabProps {
@@ -110,14 +111,15 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
       )}
 
       {/* PR 33 — Liquidity Adapter panel (mirrors Morpho's curator UI).
-          Shows the active adapter the vault routes new deposits to + the
-          current allocation, with a Change button that opens the existing
-          SetLiquidityDrawer (PR 14/17). Curator/manager gated. */}
+          PR 36 — Active Adapter row now surfaces the TARGET MARKET the
+          adapter routes deposits to (decoded from `vault.liquidityData()`),
+          not just the adapter address. */}
       <LiquidityAdapterPanel
         chainId={chainId}
         adapters={overview?.adapters ?? []}
         currentLiquidityAdapter={overview?.liquidityAdapter ?? null}
         marketAdapter={marketAdapter}
+        vaultAddress={vaultAddress}
         decimals={decimals}
         assetSymbol={assetSymbol}
         canChange={permissions.canCurate || permissions.canManage || permissions.isAdmin}
@@ -201,6 +203,7 @@ function LiquidityAdapterPanel({
   adapters,
   currentLiquidityAdapter,
   marketAdapter,
+  vaultAddress,
   decimals,
   assetSymbol,
   canChange,
@@ -210,6 +213,7 @@ function LiquidityAdapterPanel({
   adapters: Array<{ address: Address; name: string | null; realAssets: bigint; type: 'vault-v1' | 'market-v1' | 'unknown' }>;
   currentLiquidityAdapter: Address | null;
   marketAdapter: { address: Address; name: string | null; realAssets: bigint } | null;
+  vaultAddress: Address;
   decimals: number;
   assetSymbol: string;
   canChange: boolean;
@@ -218,6 +222,12 @@ function LiquidityAdapterPanel({
   const active = currentLiquidityAdapter
     ? adapters.find((a) => a.address.toLowerCase() === currentLiquidityAdapter.toLowerCase()) ?? null
     : null;
+
+  // PR 36 — decode `vault.liquidityData()` to surface the target market
+  // for market-v1 adapters. Empty / non-MarketParams payloads return
+  // null and we fall back to the adapter address.
+  const { data: targetMarket } = useLiquidityTargetMarket(chainId, vaultAddress);
+  const lltvPct = targetMarket ? (Number(targetMarket.params.lltv) / 1e18) * 100 : null;
 
   return (
     <Card className="!p-0 overflow-hidden">
@@ -229,17 +239,33 @@ function LiquidityAdapterPanel({
         </Button>
       </div>
 
-      {/* Active Adapter row */}
+      {/* Active Adapter row — primary line shows the TARGET MARKET when
+          available; the adapter address goes on the secondary line. */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border-subtle">
         <span className="text-xs text-text-tertiary">Active Adapter</span>
         {active ? (
-          <div className="flex items-center gap-2">
-            <span className="text-text-primary text-xs">
-              {active.name ?? `Adapter ${active.address.slice(0, 10)}`}
-            </span>
-            {active.type === 'market-v1' && <Badge variant="success">MKT</Badge>}
-            {active.type === 'vault-v1' && <Badge variant="info">V1</Badge>}
-            <AddressDisplay address={active.address} chainId={chainId} />
+          <div className="flex flex-col items-end gap-0.5">
+            {targetMarket && lltvPct !== null ? (
+              <div className="flex items-center gap-2">
+                <span className="text-text-primary text-xs font-medium">
+                  {targetMarket.collateralToken?.symbol ?? '???'} / {assetSymbol}
+                </span>
+                <span className="text-text-tertiary text-[10px]">@ {lltvPct.toFixed(1)}%</span>
+                {active.type === 'market-v1' && <Badge variant="success">MKT</Badge>}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-text-primary text-xs">
+                  {active.name ?? `Adapter ${active.address.slice(0, 10)}`}
+                </span>
+                {active.type === 'market-v1' && <Badge variant="success">MKT</Badge>}
+                {active.type === 'vault-v1' && <Badge variant="info">V1</Badge>}
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-[10px] text-text-tertiary">
+              <span>via</span>
+              <AddressDisplay address={active.address} chainId={chainId} />
+            </div>
           </div>
         ) : (
           <span className="text-xs text-warning">None — new deposits will sit idle</span>
