@@ -1659,3 +1659,104 @@ correctness fixes.
   observability.
 
 Both deferred from this PR to keep scope focused on the editing gap.
+
+---
+
+## PR 23 — Three-table caps view + event-based cap discovery
+
+### User feedback
+> "I don't see the caps on collat/market still. If there is none, I want
+> to have it (none) but I believe we did set market cap that's not
+> reflected on the UI."
+
+PR 22 nested collateral and market rows under each adapter, but only
+populated them from the adapter's on-chain `marketIds()` array — which
+populates **only after the first `allocate`**. Any cap set via the
+AddMarketWizard's caps step BEFORE any allocation existed was on-chain
+but invisible in the UI.
+
+The user also shared a Morpho-curator screenshot showing three separate
+tables (Adapter Caps / Collateral Token Caps / Market Caps) — cleaner
+than the nested layout PR 22 shipped.
+
+### Fix
+- **`src/hooks/useV2VaultCapEntries.ts`** (new) — event-based discovery
+  of every cap entry on a V2 vault:
+  - Scans `IncreaseAbsoluteCap` and `IncreaseRelativeCap` logs on the
+    vault address. Each event includes the non-indexed `idData` bytes.
+  - Decodes the leading string tag from idData to classify entries:
+    `"this"` → adapter, `"collateralToken"` → collateral,
+    `"this/marketParams"` → market.
+  - Decodes the level-specific tail to extract the adapter address,
+    collateral token address, or `(adapter, MarketParams)` pair.
+  - Reads CURRENT `absoluteCap` / `relativeCap` / `allocation` for each
+    discovered id (so the table reflects today's values, not the value
+    at event time).
+  - Returns three arrays. Decreases aren't scanned independently — a
+    decrease can only happen after an increase, so every active entry
+    is reachable via the increase logs.
+
+- **`src/components/vault/V2CapsTab.tsx`** — fully rewritten to the
+  Morpho-curator three-table shape:
+  - Summary strip: adapter count + collaterals-with-caps + markets-with-
+    caps + total allocated.
+  - Three independent `<Card>` sections: Adapter Caps, Collateral Token
+    Caps, Market Caps. Each renders a `CapTable` with Target /
+    Allocation / Absolute Cap / Relative Cap / Usage / Edit columns.
+  - Adapter rows merge `useV2AdapterOverview` (every currently-enabled
+    adapter, source of truth for "what adapters exist") with the
+    event-derived entries (gives cap data for adapters that may have
+    been removed but still appear in history). Removed adapters get a
+    `Removed` badge and a disabled Edit.
+  - Edit buttons open the PR 22 parameterised `CapEditDrawer` with the
+    matching idData.
+  - Empty hints distinguish "no entries yet" from "event scan failed"
+    (with the actual error message).
+
+### Files changed (`git diff main --stat`)
+New: `src/hooks/useV2VaultCapEntries.ts`,
+`src/hooks/__tests__/v2VaultCapEntries.test.ts`.
+Modified: `src/components/vault/V2CapsTab.tsx`.
+
+### Tests — fail on `main`, pass on branch
+5 cases for the level discriminator `decodeIdDataTag(idData)`:
+- adapter → `"this"`
+- collateral → `"collateralToken"`
+- market → `"this/marketParams"`
+- garbage bytes → `null` (no panic)
+- the three discriminators are pairwise distinct (a future tag rename
+  collision is caught at CI)
+
+The discriminator strings are the literal payload bytes the V2 contract
+decodes internally. Any drift here means the corresponding bucket goes
+silent and entries vanish from the UI. The test grounds the strings.
+
+### Verification
+- `npm run test:run` → **192 passed** (24 files; 187 + 5 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new hook + one new test file + one component rewrite that
+replaces the nested PR-22 layout. PR 22's `useV2AdapterAllCaps` is now
+unused but kept (not deleted in this PR) in case a future PR wants the
+per-adapter-allocation-aware view as an alternate breakdown. The shared
+`CapEditDrawer` (PR 22) is reused unchanged.
+
+### Caveats / chain-specific behaviour
+- `getLogs(fromBlock=0n, toBlock='latest')` is the simple path. Works
+  cleanly on XDC / SEI (recent deployments, short ranges) and on
+  Base / Ethereum for vaults deployed in the V2 era (also recent).
+  Older mainnet chains with massive block counts may need chunking;
+  if a public RPC chokes, the UI surfaces the error in the empty-hint.
+- Decrease events aren't scanned — every active cap-map entry has a
+  matching `Increase*Cap` somewhere in history (a slot can't be
+  decreased before being created). If a future contract version
+  changes that invariant, the scan-source set will need expanding.
+
+### Remaining follow-ups (still tracked)
+- **Pending caps section** — surfacing submitted-but-not-executed
+  entries via the timelock's executableAt reads, keyed on the same
+  idData payloads now discoverable.
+- **"Add Cap" buttons** per table (Morpho curator UX) — quick-add for
+  collateral and market caps without going through the full wizard.
+- **Cap-history breadcrumb** — explorer-style observability.
