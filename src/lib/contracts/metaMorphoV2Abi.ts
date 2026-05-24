@@ -57,7 +57,9 @@ export const metaMorphoV2Abi = [
   { inputs: [{ name: 'adapter', type: 'address' }], name: 'isAdapter', outputs: [{ type: 'bool' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'adapterRegistry', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'liquidityAdapter', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
-  { inputs: [], name: 'liquidityAdapterData', outputs: [{ type: 'bytes' }], stateMutability: 'view', type: 'function' },
+  // PR 17 — getter is `liquidityData()` on V2, not `liquidityAdapterData()`.
+  // Aligned to `@morpho-org/blue-sdk-viem` `vaultV2Abi`.
+  { inputs: [], name: 'liquidityData', outputs: [{ type: 'bytes' }], stateMutability: 'view', type: 'function' },
 
   // === Cap reads ===
   // PR 15 — both getters return `uint256`, not `uint128`. The encoded width
@@ -201,13 +203,11 @@ export const metaMorphoV2Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
-  {
-    inputs: [{ name: 'adapter', type: 'address' }],
-    name: 'setLiquidityAdapter',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
+  // PR 17 — V2 does NOT have a standalone `setLiquidityAdapter(address)`.
+  // The atomic setter is `setLiquidityAdapterAndData(address, bytes)` (kept
+  // below). The previous fragment had no on-chain selector match, so every
+  // call reverted at the fallback. To "clear" the liquidity adapter, call
+  // `setLiquidityAdapterAndData(address(0), 0x)`.
   {
     inputs: [
       { name: 'adapter', type: 'address' },

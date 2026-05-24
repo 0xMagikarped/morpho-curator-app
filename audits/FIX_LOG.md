@@ -1177,3 +1177,84 @@ either side must round-trip through `adapterIdData`. The new test
 captures that with both a symbolic equality (`keccak256(adapterIdData(.))`)
 and a literal on-chain fixture, so a refactor of either side without
 updating the other fails CI.
+
+---
+
+## PR 17 — V2 `setLiquidityAdapter` → `setLiquidityAdapterAndData` (ABI fix)
+
+### Diagnosis
+User clicked Select in `SetLiquidityDrawer` → tx reverted with viem
+surfacing "The contract function 'setLiquidityAdapter' reverted." SDK
+diff against `@morpho-org/blue-sdk-viem` `vaultV2Abi`:
+
+| Surface             | Ours (pre-PR-17)               | SDK / on-chain                           |
+|---------------------|--------------------------------|------------------------------------------|
+| Setter              | `setLiquidityAdapter(address)` | `setLiquidityAdapterAndData(address, bytes)` |
+| Data getter         | `liquidityAdapterData()`       | `liquidityData()`                        |
+| Adapter getter      | `liquidityAdapter()`           | `liquidityAdapter()` (matches)           |
+
+Same shape of bug as PR 15 (cap mutator `uint128` vs `uint256`):
+hand-rolled function name → no on-chain selector match → contract
+fallback → revert with no error data. PR 13 found `multicall` returns
+void; PR 15 found cap arg width was wrong; PR 17 finds the setter name
+was wrong.
+
+### Fix
+- **`src/lib/contracts/metaMorphoV2Abi.ts`** —
+  - Removed the legacy `setLiquidityAdapter(address)` fragment
+    (commented with a pointer to the correct entry).
+  - Renamed `liquidityAdapterData` → `liquidityData` to match SDK.
+  - Kept `setLiquidityAdapterAndData(address, bytes)` (already present).
+- **`src/components/vault/adapters/SetLiquidityDrawer.tsx`** —
+  call `setLiquidityAdapterAndData(adapter, '0x')`. Empty bytes is the
+  right shape for a V1-vault adapter and the safe default for an
+  unconfigured market-v1 adapter (curator can still allocate via the
+  normal flow). Future enhancement: accept `MarketParams` in the
+  drawer to bind specific market liquidity routing.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/contracts/metaMorphoV2Abi.ts`,
+`src/components/vault/adapters/SetLiquidityDrawer.tsx`.
+New: `src/lib/contracts/__tests__/liquidityAdapterAbi.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+4 tests:
+- `setLiquidityAdapter` (the wrong fragment) is NOT present in either
+  ABI.
+- `setLiquidityAdapterAndData` IS present in both.
+- `liquidityData` is in both; `liquidityAdapterData` is in neither.
+- `liquidityAdapter` reader is in both (sanity).
+
+On `main` 2 of 4 fail (legacy fragments present + wrong getter name).
+On branch all pass.
+
+### Verification
+- `npm run test:run` → **171 passed** (20 files; was 167 + 4 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+- Fail-on-`main` confirmed via stash-then-pop.
+
+### Scope-compliance self-audit
+**PASS.** Two ABI fragments adjusted + one drawer call site updated.
+The new test extends the SDK-alignment pattern (PR 13: `multicall`
+outputs; PR 15: cap arg width; PR 17: liquidity setter name & data
+getter). Pattern is now to diff against `vaultV2Abi` whenever a write
+surface goes live.
+
+User's broken nonce-N tx on the Safe-controlled XDC vault and the
+broken EOA-controlled vault on the same chain both got the wrong
+selector. Once Vercel deploys, the Select button on a freshly-loaded
+drawer will dispatch `setLiquidityAdapterAndData(0x7764…7a67, 0x)`
+which exists on-chain and routes through the curator gate normally.
+
+### Known remaining mismatches still tracked (no change from PR 15)
+- `timelock`: ours `()` → SDK `(bytes4 selector)`.
+- `forceDeallocate`: ours `(bytes32, uint256)` → SDK
+  `(address, bytes, uint256, address) returns (uint256)`.
+- `revoke`: ours `(bytes32)` → SDK `(bytes)`.
+- "Ours-only" functions not in SDK V2 vaultAbi: `MORPHO`, `VAULT`,
+  `acceptCap`, `submitCap`, `fee`, `feeRecipient`, `lastTotalAssets`,
+  `submitCap`, `marketIds`, `marketIdsLength`, `realAssets`,
+  `expectedSupplyAssets`, `supplyShares`, `pendingAction`, `skim`,
+  `setFee`, `setFeeRecipient`, `setSentinel`, `sentinel`, `guardian`,
+  `execute`, `adapter`. Each needs surface-by-surface evaluation
+  before the corresponding UI is used.

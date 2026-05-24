@@ -38,12 +38,20 @@ export function SetLiquidityDrawer({
   // simulate produces a "no contract at address" error that has nowhere to
   // surface → the Select button looks unresponsive. Pass `chainId` + render
   // the error banner so the user sees what blocked the write.
+  //
+  // PR 17 — there's no standalone `setLiquidityAdapter(address)` on V2; the
+  // atomic setter is `setLiquidityAdapterAndData(address, bytes)`. We pass
+  // empty `0x` bytes by default — that's the right shape for a V1-vault
+  // adapter, and the safe default for a market-v1 adapter that hasn't been
+  // pre-configured (the curator can still allocate via the normal flow).
+  // If a curator wants to bind specific market params to liquidity, that's
+  // a future enhancement (accept MarketParams in the drawer).
   const handleSet = (adapterAddress: Address) => {
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
-      functionName: 'setLiquidityAdapter',
-      args: [adapterAddress],
+      functionName: 'setLiquidityAdapterAndData',
+      args: [adapterAddress, '0x'],
       chainId,
     });
   };
