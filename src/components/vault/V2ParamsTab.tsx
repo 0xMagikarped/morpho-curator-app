@@ -119,10 +119,16 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
           onEdit={() => setEditing({ kind: 'setManagementFeeRecipient', current: vault.managementFeeRecipient })}
           canEdit={canEdit}
         />
-        {/* PR 28 — Max Rate (vault-wide yield cap). Owner-only typically. */}
+        {/* PR 28/29 — Max Rate. On-chain: rate-per-second in WAD. UI:
+            APR% to match Morpho's curator app. Conversion lives in
+            V2SetterDrawer so the read + write round-trip cleanly. */}
         <Row
           label="Max Rate"
-          value={maxRate !== undefined ? `${(Number(maxRate as bigint) / 1e16).toFixed(2)}%` : '—'}
+          value={
+            maxRate !== undefined
+              ? `${((Number(maxRate as bigint) * 31557600) / 1e16).toFixed(2)}% APR`
+              : '—'
+          }
           onEdit={() =>
             setEditing({
               kind: 'setMaxRate',

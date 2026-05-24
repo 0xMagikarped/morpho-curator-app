@@ -40,6 +40,17 @@ export const metaMorphoV2Abi = [
 
   // === Config ===
   { inputs: [], name: 'timelock', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  // PR 29 — V2 vaults use `performanceFee` / `performanceFeeRecipient` /
+  // `managementFee` / `managementFeeRecipient`. The V1-style `fee` /
+  // `feeRecipient` aliases below were never on the V2 contract; reads
+  // resolved to `undefined` and the UI was stuck displaying 0% / Not set
+  // forever even after a successful setPerformanceFee tx. Adding the four
+  // V2 getters aligns the read side with the SDK.
+  { inputs: [], name: 'performanceFee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'performanceFeeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'managementFee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { inputs: [], name: 'managementFeeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  // Kept for backward-compat with any V1-flavoured caller; unused on V2.
   { inputs: [], name: 'fee', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'feeRecipient', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'lastTotalAssets', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },

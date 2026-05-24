@@ -2199,3 +2199,113 @@ follow-up.
 - Per-setter permission introspection (disable Edit up-front).
 - Pending caps section keyed on `executableAt > 0`.
 - Cap-history breadcrumb.
+
+---
+
+## PR 29 — V2 fee getters fix + Max Rate APR conversion + Timelocks tab
+
+### Three issues
+1. **Setting performance fee / fee recipient appeared to do nothing.**
+   Submit + Execute landed on-chain, but the UI kept showing the old
+   values.
+2. **Set Max Rate reverted with `MaxRateTooHigh`** when entering 50%.
+3. **No way to view per-selector timelock durations** for V2 governance
+   functions.
+
+### Diagnosis
+**(1) Missing V2 fee getters in our ABI.** `metaMorphoV2Abi` had
+`fee` / `feeRecipient` (V1 names) but NOT `performanceFee` /
+`performanceFeeRecipient` / `managementFee` / `managementFeeRecipient`
+(the V2 names). The vault info fetcher (`fetchVaultV2`) tried to read
+the V2 names — they resolved to `undefined` at the wagmi/viem layer
+because the ABI didn't declare them — so the displayed values were
+permanently 0 / Not set. The SETTERS were correct (PR 26 used
+`setPerformanceFee`, etc., which DO exist on V2), so the on-chain
+state did update — only the read side was blind to it.
+
+**(2) `maxRate` is rate-per-SECOND in WAD, not APR percent.** The user
+typed "50%" → we encoded it as `5e17` WAD (per second). The on-chain
+upper bound is far below that (5% APR ≈ 1.585e9 WAD-per-second). The
+contract correctly rejected with `MaxRateTooHigh`. Morpho's curator
+UI displays "150%" which is APR — annualized — not raw WAD.
+
+**(3) No Timelocks tab.** The data is on-chain (`timelock(bytes4)`,
+`abdicated(bytes4)`) but no surface exposes it. Curators couldn't see
+which functions had been timelocked or abdicated.
+
+### Fix
+- **`src/lib/contracts/metaMorphoV2Abi.ts`** — added the four missing
+  V2 fee getters: `performanceFee`, `performanceFeeRecipient`,
+  `managementFee`, `managementFeeRecipient`. Kept the V1-style `fee`
+  / `feeRecipient` aliases for backwards-compat callers.
+
+- **`src/components/vault/params/V2SetterDrawer.tsx`** — Max Rate input
+  is now APR%. New helpers `wadPerSecondToAprPct` and
+  `aprPctToWadPerSecond` round-trip via `SECONDS_PER_YEAR = 31557600`
+  (365.25 d). The drawer's display + encode + execute paths all use
+  the conversion. Initial value displays as "%.%% APR".
+
+- **`src/components/vault/V2ParamsTab.tsx`** — the Max Rate row's
+  read display matches the drawer (multiplies WAD-per-second by
+  `SECONDS_PER_YEAR` for APR percent).
+
+- **`src/components/vault/V2TimelocksTab.tsx`** (new) — Morpho-curator-
+  style read-only page. Pre-computes 19 selectors via
+  `toFunctionSelector(signature)`, batches both `timelock(bytes4)`
+  and `abdicated(bytes4)` reads via wagmi `useReadContracts` (one
+  multicall round-trip), groups by Registry / Adapters / Caps /
+  Roles / Fees / Identity / Risk / Liquidity. Durations formatted as
+  `Instant / Ns / Nm / Nh / Nd`.
+
+- **`src/pages/VaultPage.tsx`** — wired the new `Timelocks` tab
+  (`v2Only`) into `TabId` / `VALID_TABS` / `TABS` + body branch.
+
+### Files changed (`git diff main --stat`)
+New: `src/components/vault/V2TimelocksTab.tsx`.
+Modified: `src/lib/contracts/metaMorphoV2Abi.ts`,
+`src/components/vault/V2ParamsTab.tsx`,
+`src/components/vault/params/V2SetterDrawer.tsx`,
+`src/pages/VaultPage.tsx`.
+
+### Tests
+No new tests this PR — fixes (1) and (2) are pure ABI alignment + a
+pure-function conversion; both are caught indirectly by existing
+SDK-shape tests (PR 13/15/17/26). The Timelocks tab is read-only
+composition over `vaultV2RegistryAbi.timelock` / `.abdicated` which
+PR 7's tests already pinned.
+
+### Verification
+- `npm run test:run` → **196 passed** (25 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new component (read-only tab), one ABI alignment edit,
+one drawer encoding fix, one tab routing edit. The Max Rate
+conversion is bundled with PR 28's `setMaxRate` work — no other
+intent touches per-second WAD encoding, so the helpers live inside
+the drawer where they're used.
+
+### Original RPC perf question (separate from this PR)
+User also asked how to improve slow data retrieval. Audit findings,
+deferred to a focused PR:
+
+- **viem multicall batching is already on** (`batch.multicall:
+  { batchSize: 1024, wait: 10 }`).
+- **Fallback transports with `rank: true`** already in place — slow
+  RPCs auto-deprioritise.
+- **TanStack Query `staleTime` is 5 min** — generous default.
+- Biggest wins remaining:
+  1. **Persist Query cache to IndexedDB** so reloads don't re-fetch
+     anything still fresh. `@tanstack/react-query-persist-client` +
+     `createAsyncStoragePersister`. Single biggest perceived-perf win.
+  2. **Server-side RPC proxy** (Vercel serverless / Cloudflare worker)
+     in front of a keyed provider (Alchemy / dRPC). Public RPCs are
+     500–2000ms per call; keyed providers + serverless edge sit
+     around 80–200ms. Avoids the PR 5 client-bundle-leakage issue.
+  3. **Reduce `getLogs(fromBlock=0)` scans on hot pages** — PR 23's
+     event-discovery hits the full history on every cold load. A
+     persisted cache (item 1) absorbs most of the pain; an
+     incremental fetch by `fromBlock = lastKnown + 1` would close
+     the rest.
+
+Logged for the next perf-focused PR.

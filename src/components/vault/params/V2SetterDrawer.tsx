@@ -28,6 +28,28 @@ import { Button } from '../../ui/Button';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
 
 /**
+ * PR 29 — `maxRate` is `interestRatePerSecond` in WAD. UI surfaces APR%
+ * to match Morpho's curator app. Round-trip helpers:
+ *
+ *   wadPerSec ↔ aprPct   via   apr = ratePerSec * SECONDS_PER_YEAR
+ */
+const SECONDS_PER_YEAR = 365 * 24 * 3600 + Math.floor(24 * 3600 / 4); // 365.25d
+const SECONDS_PER_YEAR_BI = BigInt(SECONDS_PER_YEAR);
+
+function wadPerSecondToAprPct(wadPerSec: bigint): number {
+  // apr [unitless] = ratePerSec * SECONDS_PER_YEAR
+  // pct = apr * 100
+  return (Number(wadPerSec) * SECONDS_PER_YEAR) / 1e16;
+}
+function aprPctToWadPerSecond(pct: number): bigint {
+  if (!isFinite(pct) || pct < 0) return 0n;
+  // wadPerSec = (pct / 100) * 1e18 / SECONDS_PER_YEAR
+  // Keep precision by deferring the SECONDS_PER_YEAR divide until last.
+  const apr1e16 = BigInt(Math.round(pct * 1e16)); // 100 * 1e16 = 1e18 = 100%
+  return apr1e16 / SECONDS_PER_YEAR_BI;
+}
+
+/**
  * One variant per V2 setter we expose. The shape carries the user-facing
  * input + the encoded target calldata once committed.
  */
@@ -76,8 +98,15 @@ export function V2SetterDrawer({
     return '';
   });
   const [feeInput, setFeeInput] = useState<string>(() => {
-    if (intent.kind === 'setPerformanceFee' || intent.kind === 'setManagementFee' || intent.kind === 'setMaxRate') {
+    if (intent.kind === 'setPerformanceFee' || intent.kind === 'setManagementFee') {
       return (Number(intent.currentWad) / 1e16).toString(); // WAD → %
+    }
+    if (intent.kind === 'setMaxRate') {
+      // PR 29 — maxRate is stored as RATE-PER-SECOND in WAD; UI shows APR%.
+      // 100% APR ≈ 3.17e10 WAD; user typing "50%" must compress that down
+      // through the SECONDS_PER_YEAR divisor, else the contract rejects
+      // with `MaxRateTooHigh` (the user-visible bug from PR 28).
+      return wadPerSecondToAprPct(intent.currentWad).toFixed(2);
     }
     if (intent.kind === 'setForceDeallocatePenalty') {
       return (Number(intent.current) / 1e16).toString();
@@ -143,9 +172,9 @@ export function V2SetterDrawer({
       case 'setMaxRate': {
         const pct = parseFloat(feeInput);
         if (isNaN(pct) || pct < 0) return undefined;
-        const wad = BigInt(Math.floor(pct * 1e16));
-        if (wad === intent.currentWad) return undefined;
-        return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setMaxRate', args: [wad] });
+        const wadPerSec = aprPctToWadPerSecond(pct);
+        if (wadPerSec === intent.currentWad) return undefined;
+        return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setMaxRate', args: [wadPerSec] });
       }
       case 'setForceDeallocatePenalty': {
         const pct = parseFloat(feeInput);
@@ -203,7 +232,7 @@ export function V2SetterDrawer({
       case 'setIsSentinel':
         return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setIsSentinel', args: [addressInput as Address, grant], chainId });
       case 'setMaxRate':
-        return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setMaxRate', args: [BigInt(Math.floor(parseFloat(feeInput) * 1e16))], chainId });
+        return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setMaxRate', args: [aprPctToWadPerSecond(parseFloat(feeInput))], chainId });
       case 'setForceDeallocatePenalty':
         return writeContract({
           address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setForceDeallocatePenalty',
@@ -294,11 +323,19 @@ function CurrentValueRow({ intent }: { intent: V2SetterIntent }) {
       );
     case 'setPerformanceFee':
     case 'setManagementFee':
-    case 'setMaxRate':
       return (
         <div className="text-xs">
           <span className="text-text-tertiary">Current: </span>
           <span className="font-mono text-text-primary">{(Number(intent.currentWad) / 1e16).toFixed(2)}%</span>
+        </div>
+      );
+    case 'setMaxRate':
+      return (
+        <div className="text-xs">
+          <span className="text-text-tertiary">Current: </span>
+          <span className="font-mono text-text-primary">
+            {wadPerSecondToAprPct(intent.currentWad).toFixed(2)}% APR
+          </span>
         </div>
       );
     case 'setForceDeallocatePenalty':
@@ -364,7 +401,12 @@ function IntentInput({
       );
     case 'setMaxRate':
       return (
-        <FeeField label="New Max Rate (%)" value={feeInput} onChange={setFeeInput} hint="100% = 1e18 WAD" />
+        <FeeField
+          label="New Max Rate (% APR)"
+          value={feeInput}
+          onChange={setFeeInput}
+          hint="On-chain stored as rate-per-second in WAD; converted from APR automatically."
+        />
       );
     case 'setForceDeallocatePenalty':
       return (
