@@ -1258,3 +1258,66 @@ which exists on-chain and routes through the curator gate normally.
   `setFee`, `setFeeRecipient`, `setSentinel`, `sentinel`, `guardian`,
   `execute`, `adapter`. Each needs surface-by-surface evaluation
   before the corresponding UI is used.
+
+---
+
+## PR 18 — Hide V1 CapsTab on V2 vaults (it sends a non-existent selector)
+
+### Diagnosis
+User opened **Caps** tab on a V2 vault (Yield Network USDC on XDC) and
+tried `Submit Cap (Add Market)`. Preflight surfaced
+"Transaction would revert: unknown error" — the now-familiar fingerprint
+of dispatching a selector that doesn't exist on V2.
+
+`CapsTab.tsx` implements the V1 lifecycle:
+`submitCap(marketParams, cap)` → wait timelock → `acceptCap(marketParams)`
+→ `setSupplyQueue([marketIds])`. None of those selectors exist on
+`vaultV2Abi` — V2 replaced market-level caps with per-adapter caps
+(`increaseAbsoluteCap(idData, cap)` where `idData = marketIdData(adapter,
+params)`). The proper V2 UI is already shipped: `Adapters` tab →
+`UpdateCapsDrawer` (PR 12 + 14 + 15) covers adapter-level limits; the
+`AddMarketWizard` covers adding a new market with its caps.
+
+### Fix
+- **`src/pages/VaultPage.tsx`** — mark the Caps tab as `v1Only`, mirroring
+  how Queues / Reallocate / Guardian are gated. The tab disappears from
+  the nav on V2 vaults, eliminating the entry point to the broken flow.
+- Defence-in-depth: also gate the `activeTab === 'caps'` body. A user
+  arriving via a bookmarked `?tab=caps` URL on a V2 vault now sees a
+  small "Caps moved" notice with a `Go to Adapters` button instead of
+  the V1 cap UI loading and reverting at submit-time.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/pages/VaultPage.tsx`.
+
+### Tests
+No new test — the change is configuration (`v1Only` on a tab definition
++ conditional render). The existing test suite continues to pass
+unchanged (171 / 171). Future PR could add an integration test that
+asserts the Caps tab is not rendered on V2 vaults; for now the on-chain
+ABI-mismatch tests already shipped (PR 13, 15, 17) cover the
+"don't send V1 calldata to V2" invariant at a more fundamental level.
+
+### Verification
+- `npm run test:run` → **171 passed** (unchanged from PR 17 — no new
+  tests, no regressions). `npx tsc -b` → **0**. `npm run build` →
+  **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two-line semantic change (`v1Only: true` on the tab def + a
+conditional render branch with the V2 notice card). The V1 `CapsTab`
+component is untouched — it's still the right impl for V1 vaults, and
+no V1-only consumer changed shape.
+
+### What V2 cap surface is actually available now
+- **Per-adapter caps** (absolute + relative): Adapters tab → click
+  `Caps` on the adapter → `UpdateCapsDrawer` (PR 12: batched abs+rel
+  via multicall; PR 14: correct `adapterIdData` shape; PR 15: correct
+  `uint256` selector).
+- **Per-collateral / per-market caps**: only via `AddMarketWizard`'s
+  caps step when adding a new market. A standalone "edit market-level
+  cap" UI doesn't exist yet — listed as future work in
+  `_followups.md`.
+- **Cap readback**: Adapters tab cards (after PR 16) now show the
+  adapter-level `Abs. Cap` / `Rel. Cap` values + usage bars, because
+  `computeVaultAdapterId` is now keyed on the correct cap-map slot.
