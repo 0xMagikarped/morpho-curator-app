@@ -389,9 +389,21 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'selector', type: 'bytes4' },
-      { name: 'newTimelock', type: 'uint256' },
+      { name: 'newDuration', type: 'uint256' },
     ],
     name: 'increaseTimelock',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // PR 31 — decreaseTimelock is the timelocked counterpart; increasing
+  // security is immediate, decreasing requires submit→wait→execute.
+  {
+    inputs: [
+      { name: 'selector', type: 'bytes4' },
+      { name: 'newDuration', type: 'uint256' },
+    ],
+    name: 'decreaseTimelock',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

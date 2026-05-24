@@ -2388,3 +2388,83 @@ equality checks.
   on every cold load. Persisted cache (this PR) absorbs most of the
   pain; an incremental fetch keyed on `lastKnown + 1` would close the
   rest.
+
+---
+
+## PR 31 — V2 Timelocks: single Edit, all-rows batch, one-tx multicall
+
+### User ask
+> "I would need an edit button (not individual), for every timelock and
+> 1 tx = all update."
+
+PR 29 shipped Timelocks as a read-only table. User wants a single Edit
+toggle that turns every row's Timelock cell into an input, and a single
+button that applies all changes in one transaction.
+
+### Fix
+- **`src/lib/utils/duration.ts`** (new) — human-friendly duration parser
+  + formatter. Accepts `0` / `Instant` / `30s` / `5m` / `2h` / `1d` and
+  formats back to the most-readable unit. Pure, 11 unit tests.
+
+- **`src/lib/contracts/metaMorphoV2Abi.ts`** — added `decreaseTimelock`
+  (the timelocked counterpart to `increaseTimelock` already present);
+  fixed `increaseTimelock` arg name to `newDuration` per SDK shape.
+
+- **`src/components/vault/V2TimelocksTab.tsx`** — rewritten with an
+  Edit toggle. In edit mode every non-abdicated row's Timelock cell
+  becomes an input pre-filled with the current value formatted via
+  `formatDurationSeconds`. Pending changes (compare draft vs current
+  per selector) are bucketed:
+  - **Increases (↑)** apply immediately. Save fires a single
+    `vault.multicall([increaseTimelock(s1, d1), increaseTimelock(s2, d2), …])`
+    tx, or a direct `increaseTimelock` when only one row changed.
+  - **Decreases (↓)** display with a "timelocked" hint badge but
+    DON'T fire from this PR — they need a submit→wait→execute flow
+    that reuses PR 20's `useBatchSetCaps` shape. Flagged as PR 32.
+  - **Abdicated** rows are read-only in edit mode (no input rendered).
+  - Pending-changes summary strip shows total + increase + decrease
+    counts so the user knows what the Save button will actually
+    cover.
+  - Changed rows highlight with `bg-accent-primary/5` for visual
+    confirmation before submit.
+  - Save button label reflects the action: "No increases to apply" /
+    "Apply 1 increase" / "Apply N increases (1 tx)".
+  - On successful confirmation, edit mode auto-clears + a fresh
+    `refetch()` pulls the new on-chain values.
+  - Permission-gated on `canCurate || canManage || isAdmin`.
+
+### Files changed (`git diff main --stat`)
+New: `src/lib/utils/duration.ts`,
+`src/lib/utils/__tests__/duration.test.ts`.
+Modified: `src/lib/contracts/metaMorphoV2Abi.ts`,
+`src/components/vault/V2TimelocksTab.tsx`.
+
+### Tests — 11 cases pin the duration parser + formatter
+- Bare integers → seconds, the `instant`/`-`/empty aliases → 0n
+- Unit suffixes (`s`/`m`/`h`/`d`) including decimal hours / days
+- Malformed input → `null` (no panic)
+- Formatter picks the most-readable unit
+- Round-trip: every canonical formatted value parses back to the
+  original bigint
+
+### Verification
+- `npm run test:run` → **213 passed** (27 files; 202 + 11 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new files (parser + test), two modified (ABI fragment +
+tab). The Save button intentionally limits itself to the immediate
+direction (increases) and explicitly defers decreases — clearer
+UX than failing on broadcast with a `DataNotTimelocked` revert.
+
+### PR 32 — decrease-timelock batch (logged)
+Follow-up to mirror PR 20's `useBatchSetCaps` pattern:
+- Phase 1 submit: `vault.multicall([submit(decreaseTimelock(s1, d1)), …])`
+- Phase 2 wait until `max(executableAt) ≤ now`
+- Phase 3 execute: `vault.multicall([decreaseTimelock(s1, d1), …])`
+
+The current Timelocks tab already shows the ↓ hint badge per
+decreasing row; PR 32 just wires the Save button to a second pathway
+for that subset. Per-row Abdicate also slated for PR 32 (or earlier
+in a tiny PR — single-call action with strong "are you sure"
+confirmation).
