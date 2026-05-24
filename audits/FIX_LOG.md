@@ -2856,3 +2856,50 @@ sweep candidates for the same issue (still tracked):
   edits might suffer the same lag. Worth a follow-up sweep.
 - `V2TimelocksTab` (PR 31) — calls `refetch()` directly on its own
   `useReadContracts` instance, which is correct.
+
+---
+
+## PR 39 — SetLiquidityDrawer: "Set Idle" shortcut button
+
+### User ask
+Add a top-level "Set Idle" button to the Set Liquidity Adapter
+drawer that explicitly routes new deposits to idle without changing
+which adapter is wired up — useful when the current market target is
+mis-set and `allocate()` is reverting.
+
+Calldata pattern from user's note:
+```
+setLiquidityAdapterAndData(currentAdapter, 0x)
+```
+
+### Fix
+- **`src/components/vault/adapters/SetLiquidityDrawer.tsx`** — added a
+  prominent **Set Idle** row at the top of step 1 (above the adapter
+  list). One click fires
+  `setLiquidityAdapterAndData(currentLiquidityAdapter ?? 0x0, 0x)`.
+  - If a current adapter is set: keeps it wired up, clears the market
+    target (deposits sit idle on the adapter, no auto-allocation).
+  - If no current adapter: falls through to the zero-address form
+    which clears the wiring entirely (equivalent to "Close Deposits"
+    from the V2 Emergency Actions card).
+  - Permission-flow inherits from the existing drawer guard +
+    simulation surface (PR 8). Tx-success invalidation comes from
+    PR 38 — the Allocation panel refreshes once confirmation lands.
+
+The step-2 "Skip (no target)" path is the same mechanic reached from
+inside the adapter picker; PR 39 just exposes it as a one-click
+top-level escape hatch.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/adapters/SetLiquidityDrawer.tsx`.
+
+### Tests
+No new tests this PR — single new handler + render block; same write
+path as the existing PR 37 Skip-button.
+
+### Verification
+- `npm run test:run` → **224 passed** (27 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new handler, one new render block, no schema changes.

@@ -150,6 +150,28 @@ export function SetLiquidityDrawer({
     });
   };
 
+  // PR 39 — "Set to Idle" shortcut at the top of step 1. Same as the
+  // step-2 Skip path but reachable without picking from the adapter
+  // list first. Useful as a quick recovery when allocate is reverting
+  // because the current `liquidityData` points at a misconfigured
+  // market — clearing the bytes (keeping the same adapter) routes
+  // new deposits to idle without changing which adapter is wired up.
+  //
+  // If there's no current liquidity adapter, falls through to setting
+  // `setLiquidityAdapterAndData(0x0, 0x)` which clears the wiring
+  // entirely.
+  const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
+  const handleSetIdle = () => {
+    const target = currentLiquidityAdapter ?? ZERO_ADDR;
+    writeContract({
+      address: vaultAddress,
+      abi: metaMorphoV2Abi,
+      functionName: 'setLiquidityAdapterAndData',
+      args: [target, '0x'],
+      chainId,
+    });
+  };
+
   return (
     <Drawer
       open={open}
@@ -265,6 +287,31 @@ export function SetLiquidityDrawer({
             The liquidity adapter receives all new deposits and fulfills withdrawals when the
             idle pool is empty. Choose the most liquid, safest option.
           </p>
+
+          {/* PR 39 — escape hatch: route new deposits to idle without
+              touching which adapter is wired up. Calls
+              setLiquidityAdapterAndData(currentAdapter, 0x). Useful when
+              the current target market is mis-set and `allocate()` is
+              reverting; clears the market without disturbing the adapter. */}
+          <div className="flex items-center justify-between gap-3 p-3 border border-border-default">
+            <div className="min-w-0">
+              <p className="text-xs text-text-primary font-medium">Set to Idle</p>
+              <p className="text-[10px] text-text-tertiary mt-0.5">
+                Keep the current adapter wired up, but clear the target market so new deposits
+                sit idle on the adapter (no auto-allocation). Sends{' '}
+                <span className="font-mono">setLiquidityAdapterAndData(addr, 0x)</span>.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleSetIdle}
+              disabled={isPending || isConfirming}
+              loading={isPending || isConfirming}
+            >
+              Set Idle
+            </Button>
+          </div>
 
           <div className="space-y-2">
             {adapters.map((a) => {
