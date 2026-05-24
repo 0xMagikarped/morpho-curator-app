@@ -2734,3 +2734,69 @@ adapters keep their previous look — no regression on those.
 - When the target market is rendered, optionally hyperlink the pair
   to the Morpho Blue market explorer for that chain. Tiny ergonomic
   win; deferred so the panel stays a presentation-only change.
+
+---
+
+## PR 37 — SetLiquidityDrawer: pick the target market, not just the adapter
+
+### User feedback
+> "Still not the case?"
+
+After PR 36 shipped, the Active Adapter row still rendered the adapter
+address instead of the target market. Root cause: PR 17's
+`SetLiquidityDrawer` hardcoded empty bytes for `liquidityData`, so PR 36's
+hook had nothing to decode. The curator had no UI to pick which market
+the adapter routes to.
+
+### Fix
+`SetLiquidityDrawer` is now a two-step flow:
+
+1. **Pick adapter** — same list as before. For vault-v1 / unknown
+   adapters, the Select button immediately fires
+   `setLiquidityAdapterAndData(adapter, 0x)` (their liquidityData is
+   opaque/empty by design). For market-v1 adapters, Select transitions
+   to step 2.
+2. **Pick target market** — lists every market with caps configured
+   on the adapter (sourced from PR 23's event scan, filtered to the
+   chosen adapter). Each row shows pair / LLTV / market ID / current
+   allocation. Select fires
+   `setLiquidityAdapterAndData(adapter, abi.encode(MarketParams))`.
+   - **Back** returns to step 1.
+   - **Skip (no target)** sends empty bytes — useful when no markets
+     are configured yet (adapter is set but no auto-routing).
+   - Empty market list shows a warning pointing at the Caps tab.
+
+The PR 36 `useLiquidityTargetMarket` hook now has a non-empty payload
+to decode → Active Adapter row renders `WXDC / USDC @ 38.5%` per the
+Morpho-curator screenshot.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/adapters/SetLiquidityDrawer.tsx`.
+
+### Tests
+No new tests — composition over existing primitives
+(`useV2VaultCapEntries`, `useGuardedWriteContract`, the
+`setLiquidityAdapterAndData` ABI fragment from PR 17). The encoding
+shape (`abi.encode(MarketParams)`) mirrors what PR 36 decodes, and
+PR 22's `marketIdData` test family already pins the MarketParams
+tuple layout.
+
+### Verification
+- `npm run test:run` → **224 passed** (27 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One drawer rewritten in place. The drawer's external API
+(`{ open, onClose, adapters, currentLiquidityAdapter, … }`) didn't
+change; both call sites (V2AdaptersTab banner button + PR 33
+Allocation tab Change button) work unchanged.
+
+### Loop closed (PR 33 → PR 36 → PR 37)
+PR 33 surfaced the panel. PR 36 added the read-side decoder. PR 37
+added the write-side picker. The Active Adapter row now matches
+Morpho's curator UI end-to-end:
+  - Curator picks adapter + target market in the drawer
+  - `setLiquidityAdapterAndData(adapter, abi.encode(MarketParams))`
+  - On-chain `liquidityData()` returns those bytes
+  - `useLiquidityTargetMarket` decodes them
+  - Allocation tab renders `{collateral}/{loan} @ {lltv}%`
