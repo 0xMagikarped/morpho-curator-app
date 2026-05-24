@@ -65,7 +65,10 @@ export function formatDurationSeconds(secs: bigint): string {
  * display + the edit-mode input pre-fill are unified to days.
  */
 export function formatDurationDays(secs: bigint): string {
-  if (secs === 0n) return '0';
+  // PR 35 — zero still wears the "d" suffix so the column reads as a
+  // single consistent unit ("0d", "1d", "7d"). Previously zero rendered
+  // as bare "0" which made the user think days hadn't kicked in.
+  if (secs === 0n) return '0d';
   const days = Number(secs) / 86400;
   if (Number.isInteger(days)) return `${days}d`;
   // Up to 6 decimal places, strip trailing zeros (and a trailing `.`).

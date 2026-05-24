@@ -2637,3 +2637,31 @@ by a Map/Set-style replacer branch.
 - Consider `superjson` as a heavier-but-bulletproof alternative — it
   handles Date / RegExp / undefined out of the box. Not needed today;
   Map / Set + bigint cover the current surface.
+
+---
+
+## PR 35 — Timelocks zero displays as `0d`
+
+### Diagnosis
+PR 32 made the Timelocks column default to days, but
+`formatDurationDays(0n)` was still returning bare `"0"`. On a fresh
+zero-timelock vault every input cell read `0` with no unit — which
+made the user think days hadn't kicked in.
+
+### Fix
+- `formatDurationDays(0n)` → `"0d"` instead of `"0"`. Unit stays
+  consistent across every row.
+- Placeholder updated `0 / 30s / 5m / 2h / 1d` → `e.g. 1d, 0.5d, 7d`
+  to nudge users toward the default unit (parser still accepts every
+  shape).
+- `parseDurationSeconds("0d")` already returned `0n` so round-trips
+  are unchanged; added an explicit test case to pin it.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/utils/duration.ts`,
+`src/components/vault/V2TimelocksTab.tsx`,
+`src/lib/utils/__tests__/duration.test.ts`.
+
+### Verification
+- `npm run test:run` → **224 passed** (was 223 + 1 updated + 1 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.

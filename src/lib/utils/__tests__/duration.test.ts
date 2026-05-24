@@ -68,9 +68,9 @@ describe('formatDurationSeconds (PR 31)', () => {
   });
 });
 
-describe('formatDurationDays — always-days display (PR 32)', () => {
-  it('renders 0 as "0"', () => {
-    expect(formatDurationDays(0n)).toBe('0');
+describe('formatDurationDays — always-days display (PR 32 / 35)', () => {
+  it('renders 0 as "0d" so the unit is visible at zero (PR 35)', () => {
+    expect(formatDurationDays(0n)).toBe('0d');
   });
 
   it('renders integer days without decimals', () => {
@@ -99,5 +99,9 @@ describe('formatDurationDays — always-days display (PR 32)', () => {
     for (const v of [0n, 86400n, 7n * 86400n, 30n * 86400n]) {
       expect(parseDurationSeconds(formatDurationDays(v))).toBe(v);
     }
+  });
+
+  it('"0d" parses back to 0n (PR 35 — zero round-trip with explicit unit)', () => {
+    expect(parseDurationSeconds('0d')).toBe(0n);
   });
 });

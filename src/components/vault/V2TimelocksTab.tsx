@@ -319,7 +319,7 @@ export function V2TimelocksTab({ chainId, vaultAddress }: V2TimelocksTabProps) {
                               onChange={(e) =>
                                 setDrafts((d) => ({ ...d, [r.selector]: e.target.value }))
                               }
-                              placeholder="0 / 30s / 5m / 2h / 1d"
+                              placeholder="e.g. 1d, 0.5d, 7d"
                               className="w-32 bg-bg-elevated border border-border-default px-2 py-1 text-xs text-text-primary placeholder-text-tertiary font-mono focus:border-border-focus focus:outline-none text-right"
                             />
                             {r.draftSecs === null && (
