@@ -347,17 +347,39 @@ export function AddMarketWizard({
               assetSymbol={assetSymbol}
             />
 
-            {/* Status */}
-            {capsHook.step === 'pending' && (
+            {/* Status — PR 20 surfaces the submit→wait→execute states */}
+            {capsHook.step === 'submitting' && (
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Confirm batch tx in wallet...
+                Confirm SUBMIT tx in wallet (1/2)…
               </div>
             )}
-            {capsHook.step === 'confirming' && (
+            {capsHook.step === 'confirming-submit' && (
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Confirming...
+                Confirming submit…
+              </div>
+            )}
+            {capsHook.step === 'waiting-timelock' && capsHook.executableAt !== null && (
+              <div className="p-2 bg-warning/10 border border-warning/20 text-xs text-text-primary">
+                <strong>Caps submitted to timelock.</strong>{' '}
+                Executable at{' '}
+                <span className="font-mono">
+                  {new Date(Number(capsHook.executableAt) * 1000).toUTCString()}
+                </span>
+                . Come back and click <span className="font-mono">Execute Caps</span>.
+              </div>
+            )}
+            {capsHook.step === 'executing' && (
+              <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Confirm EXECUTE tx in wallet (2/2)…
+              </div>
+            )}
+            {capsHook.step === 'confirming-execute' && (
+              <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Confirming execute…
               </div>
             )}
             {capsHook.error && (
@@ -367,9 +389,18 @@ export function AddMarketWizard({
               </div>
             )}
 
-            {capsHook.step !== 'done' && capsHook.step !== 'pending' && capsHook.step !== 'confirming' && (
+            {/* Action button — label reflects the next step. The hook
+                resumes correctly when re-invoked: it re-reads
+                `executableAt` on each entry and skips already-completed
+                phases. */}
+            {(capsHook.step === 'idle' || capsHook.step === 'error') && (
               <Button className="w-full" onClick={handleSetCaps}>
-                {capsHook.step === 'error' ? 'Retry Caps' : 'Set Caps (Batch)'}
+                {capsHook.step === 'error' ? 'Retry Caps' : 'Submit Caps (Step 1/2)'}
+              </Button>
+            )}
+            {capsHook.step === 'waiting-timelock' && (
+              <Button className="w-full" onClick={handleSetCaps}>
+                Check timelock & Execute Caps
               </Button>
             )}
           </div>

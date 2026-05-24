@@ -1396,3 +1396,86 @@ events) and out of scope for this fix.
 Pattern banked: for any "this chain isn't on the API" gap, provide a
 direct-lookup-by-stable-id RPC fallback before building a scanner.
 Market lookup, vault lookup, oracle lookup all fit this shape.
+
+---
+
+## PR 20 — `useBatchSetCaps` submit→wait→execute (wizard caps step)
+
+### Diagnosis
+User in `AddMarketWizard` → Step 2 Configure Caps → clicked Set Caps
+(Batch). UI: "DataNotTimelocked The contract function 'multicall'
+reverted." Same fingerprint as PR 11 / PR 12: the V2 cap mutators
+(`increaseAbsoluteCap` / `increaseRelativeCap`) are timelocked, each
+self-checks `executableAt`, and `useBatchSetCaps.execute(actions)` was
+firing one multicall containing the TARGET functions directly — every
+inner call reverted, multicall rolled back.
+
+The wizard's caps step was the last consumer of the direct-call-on-V2
+pattern. PR 10 fixed the standalone drawers, PR 11 fixed the deploy
+hook, PR 12 fixed the standalone cap drawer — PR 20 finishes the sweep.
+
+### Fix
+- **`src/hooks/useSetCaps.ts`** — `useBatchSetCaps` now implements the
+  V2 governance pattern:
+  - Encode all target calldatas once.
+  - Split into timelocked (increases) vs immediate (decreases).
+  - **Phase 1 — submit**: read existing `executableAt` for each
+    increase; if any is 0 (not yet submitted), fire
+    `vault.multicall([submit(cd1), submit(cd2), …])` — one Safe sig.
+    Submit is skipped entirely when every increase is already queued
+    (the resume-after-wait case).
+  - Re-read `executableAt`; if `max(executableAt) > now`, stop at
+    `waiting-timelock` and expose the unlock time. Re-invoking
+    `execute(actions)` after the unlock picks up from on-chain truth.
+  - **Phase 2 — execute**: fire `vault.multicall([cd1, cd2, …])` (or a
+    direct call when only one action) — one Safe sig.
+  - On a 0-timelock vault the whole flow is 2 Safe sigs back-to-back.
+  - `useSequentialSetCaps` left untouched but marked as "0-timelock
+    only" in a doc-comment for clarity; the wizard uses the batched
+    path.
+
+- **`src/components/vault/adapters/AddMarketWizard.tsx`** — Step 2 now
+  renders the new states (`submitting` → `confirming-submit` →
+  `waiting-timelock` → `executing` → `confirming-execute` → `done`)
+  with sequence-numbered hints ("Confirm SUBMIT tx in wallet (1/2)…",
+  "(2/2)…"). The "Waiting for timelock" banner surfaces the unlock UTC
+  and a "Check timelock & Execute Caps" resume button.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/hooks/useSetCaps.ts`,
+`src/components/vault/adapters/AddMarketWizard.tsx`.
+New: `src/hooks/__tests__/batchSetCaps.test.ts`.
+
+### Tests — fail on `main`, pass on branch
+4 integration cases against mocked wagmi + publicClient:
+- **0-timelock**: one submit-multicall + one execute-multicall, ends at
+  `done`.
+- **non-zero timelock**: only submit fires, ends at `waiting-timelock`
+  with `executableAt` populated.
+- **resume**: existing elapsed executableAt → submit skipped, only
+  execute multicall fires, ends at `done`.
+- **empty action list**: no writes, stays `idle`.
+
+Call attribution by inspecting the inner calldata's selector (verified
+via `viem.toFunctionSelector("submit(bytes)") = 0xef7fa71b`).
+
+On `main` 2 of 4 cases fail (writeContractAsync is called once with
+the target functions directly; no submit ever fires). On branch all 4
+pass.
+
+### Verification
+- `npm run test:run` → **183 passed** (22 files; was 179 + 4 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+- Fail-on-`main` verified by stash-then-pop.
+
+### Scope-compliance self-audit
+**PASS.** One hook rewritten, one wizard component updated, one test
+file new. The sequential `useSequentialSetCaps` path was not touched
+beyond a clarifying doc-comment — it remains correct for 0-timelock
+vaults under direct calls (the wizard doesn't use it anymore, but
+existing fallback consumers continue to work). The standalone
+`UpdateCapsDrawer` (PR 12 + 14 + 15) is independent and unaffected.
+
+This closes the last "V2 target-call without submit" surface in the
+app. Going forward, any new cap-mutator caller should reuse
+`useBatchSetCaps` rather than calling targets directly.
