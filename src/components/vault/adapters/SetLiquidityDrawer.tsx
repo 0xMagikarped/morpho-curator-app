@@ -150,24 +150,24 @@ export function SetLiquidityDrawer({
     });
   };
 
-  // PR 39 — "Set to Idle" shortcut at the top of step 1. Same as the
-  // step-2 Skip path but reachable without picking from the adapter
-  // list first. Useful as a quick recovery when allocate is reverting
-  // because the current `liquidityData` points at a misconfigured
-  // market — clearing the bytes (keeping the same adapter) routes
-  // new deposits to idle without changing which adapter is wired up.
+  // PR 40 — "True Idle" — sets the liquidity adapter to ZERO ADDRESS
+  // so new deposits don't even touch an adapter; they sit in the
+  // vault's own ERC-4626 balance. This is the canonical Morpho V2
+  // "idle" state: there is no dedicated idle adapter on V2 vaults
+  // (the design doesn't need one — absence of a liquidity adapter
+  // IS the idle state).
   //
-  // If there's no current liquidity adapter, falls through to setting
-  // `setLiquidityAdapterAndData(0x0, 0x)` which clears the wiring
-  // entirely.
+  // PR 39's earlier semantic (keep current adapter, clear data) is
+  // still reachable via step 2's "Skip (no target)" — useful when the
+  // curator wants to keep the adapter wired but route to no specific
+  // market.
   const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
   const handleSetIdle = () => {
-    const target = currentLiquidityAdapter ?? ZERO_ADDR;
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
       functionName: 'setLiquidityAdapterAndData',
-      args: [target, '0x'],
+      args: [ZERO_ADDR, '0x'],
       chainId,
     });
   };
@@ -288,18 +288,20 @@ export function SetLiquidityDrawer({
             idle pool is empty. Choose the most liquid, safest option.
           </p>
 
-          {/* PR 39 — escape hatch: route new deposits to idle without
-              touching which adapter is wired up. Calls
-              setLiquidityAdapterAndData(currentAdapter, 0x). Useful when
-              the current target market is mis-set and `allocate()` is
-              reverting; clears the market without disturbing the adapter. */}
+          {/* PR 40 — TRUE IDLE: clears the liquidity adapter to zero so
+              new deposits sit in the vault's own ERC-4626 balance with
+              no adapter touching them. There is no dedicated idle
+              adapter on Morpho V2 vaults — absence of a liquidity
+              adapter IS the idle state. */}
           <div className="flex items-center justify-between gap-3 p-3 border border-border-default">
             <div className="min-w-0">
-              <p className="text-xs text-text-primary font-medium">Set to Idle</p>
+              <p className="text-xs text-text-primary font-medium">Set to True Idle</p>
               <p className="text-[10px] text-text-tertiary mt-0.5">
-                Keep the current adapter wired up, but clear the target market so new deposits
-                sit idle on the adapter (no auto-allocation). Sends{' '}
-                <span className="font-mono">setLiquidityAdapterAndData(addr, 0x)</span>.
+                Clears the liquidity adapter so new deposits sit in the vault's own balance
+                (no auto-allocation, no adapter touching the funds). Sends{' '}
+                <span className="font-mono">setLiquidityAdapterAndData(0x0, 0x)</span>. To
+                keep the current adapter wired but clear the market target instead, use the
+                step-2 <span className="font-mono">Skip (no target)</span> path after Next.
               </p>
             </div>
             <Button

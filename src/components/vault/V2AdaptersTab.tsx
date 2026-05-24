@@ -134,6 +134,7 @@ export function V2AdaptersTab({ chainId, vaultAddress }: V2AdaptersTabProps) {
         liquidityAdapter={liquidityAdapter}
         adapters={adapters}
         chainId={chainId}
+        vaultAddress={vaultAddress}
         canSetLiquidity={canSetLiquidity}
         onSetLiquidity={() => openDrawer('liquidity')}
       />

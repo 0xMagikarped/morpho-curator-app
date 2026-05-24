@@ -2903,3 +2903,66 @@ path as the existing PR 37 Skip-button.
 
 ### Scope-compliance self-audit
 **PASS.** One new handler, one new render block, no schema changes.
+
+---
+
+## PR 40 — True idle: `setLiquidityAdapterAndData(0x0, 0x)` shortcut
+
+### User ask + concept clarification
+> "Does the vault have… an idle-compatible adapter + empty data? If
+> not why? We need one and wire the 'set to idle on the allocation
+> page' to this adapter."
+
+**Answer to the conceptual question:** Morpho V2 vaults don't ship
+with a dedicated "idle adapter" because the design doesn't need
+one. The canonical idle state IS the absence of a liquidity adapter
+— deposits sit in the vault's own ERC-4626 balance, no adapter
+routing. The right call is
+`setLiquidityAdapterAndData(0x0, 0x)`.
+
+PR 39 wired "Set Idle" but did it WRONG — it kept the current
+adapter wired and only cleared the market bytes. That's a useful
+"keep adapter, no market" semantic but it isn't TRUE idle (funds
+still touch the adapter logic).
+
+### Fix
+- **`src/components/vault/adapters/SetLiquidityDrawer.tsx`** —
+  `handleSetIdle` now sends ZERO_ADDR + empty bytes. Copy on the
+  step-1 row updated to "Set to True Idle" with a clarification
+  pointer at the step-2 "Skip (no target)" path for the keep-adapter
+  semantic.
+- **`src/components/vault/adapters/LiquidityAdapterBanner.tsx`** —
+  added a one-click **Set Idle** button alongside Change in the
+  Adapters-tab banner. Self-contained: owns its
+  `useGuardedWriteContract`, fires
+  `setLiquidityAdapterAndData(0x0, 0x)` directly, invalidates the
+  adapter family on tx success (PR 38 pattern). No drawer needed —
+  fastest possible recovery when current adapter / market is mis-set
+  and `allocate()` is reverting.
+- **`src/components/vault/V2AdaptersTab.tsx`** — threaded
+  `vaultAddress` into the banner so it can fire its own writes.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/adapters/SetLiquidityDrawer.tsx`,
+`src/components/vault/adapters/LiquidityAdapterBanner.tsx`,
+`src/components/vault/V2AdaptersTab.tsx`.
+
+### Tests
+No new tests this PR — single-call write + invalidation, same
+shape as PR 38's pattern.
+
+### Verification
+- `npm run test:run` → **224 passed** (27 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Two idle semantics now exposed in the UI
+- **True idle** (drawer's "Set Idle" + banner's "Set Idle"):
+  `setLiquidityAdapterAndData(0x0, 0x)`. No adapter, no market.
+  Deposits sit in vault balance.
+- **No-target idle** (drawer's step-2 "Skip (no target)"):
+  `setLiquidityAdapterAndData(currentAdapter, 0x)`. Adapter stays
+  wired but routes to no specific market. New deposits sit on the
+  adapter's internal idle pool.
+
+Both surfaces are now accessible from the same drawer + the
+Adapters-tab banner.
