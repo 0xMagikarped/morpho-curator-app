@@ -2569,3 +2569,71 @@ state on the tab (drawer-open toggle + permission hook), one panel
 render before the Reallocate header. Zero changes to data fetching
 — the `LiquidityAdapterPanel` reads from data that was already on
 the page.
+
+---
+
+## PR 34 — Persister breaks production: `v?.get is not a function`
+
+### Diagnosis (urgent prod fix)
+User hit `TypeError: v?.get is not a function` on the VaultPage in
+production right after PR 30 went live. Root cause: PR 30's serializer
+handled `bigint` but NOT `Map` / `Set`.
+
+`JSON.stringify(new Map())` produces `"{}"` — silent data loss. Three
+of our queries return Map values:
+
+- `useMarketCaps` (`src/lib/hooks/useV2Allocation.ts`)
+- `useRiskMonitoring` (`src/lib/hooks/useRiskMonitoring.ts`)
+- `useOracleHealth` (`src/lib/hooks/useOracle.ts`)
+
+When the cache rehydrated, the previously-Map values came back as
+plain `{}` objects. The first call to `.get(key)` on the rehydrated
+value blew up — exactly the error pattern in the bug report.
+
+The PR 30 tests covered top-level bigint + nested bigint + poisoned
+payloads, but Map / Set round-trip was the gap.
+
+### Fix
+- **`src/lib/persist/queryPersister.ts`** — replacer now detects
+  `value instanceof Map` (before JSON's own conversion runs) and emits
+  `{ __MAP__: Array.from(value.entries()) }`. Sets get `{ __SET__:
+  Array.from(value.values()) }`. Reviver reconstructs both. Nested
+  bigints inside Map values get the existing `__BI__` treatment
+  recursively, so the full round-trip (Map → JSON → Map of bigints)
+  works.
+- **`QUERY_CACHE_BUSTER` bumped `v1 → v2`** so any user with the
+  broken v1 cache on disk gets a fresh start on the next load.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/persist/queryPersister.ts`,
+`src/lib/persist/__tests__/queryPersister.test.ts`.
+
+### Tests — 4 new cases covering the gap
+- top-level Map round-trips (preserves keys, values, size)
+- nested Map containing bigints round-trips
+- top-level Set round-trips
+- false-positive defence: a plain object with a `__MAP__` key whose
+  value is NOT an entries array stays a plain object (the reviver's
+  `Array.isArray` guard catches this).
+
+### Verification
+- `npm run test:run` → **223 passed** (27 files; 219 + 4 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Pattern banked
+**Never trust JSON serialization for non-primitive containers.** Maps,
+Sets, Dates, RegExps all silently lose info via `JSON.stringify`. A
+custom serializer must enumerate every container shape the cache may
+hold OR opt-in dehydrate only queries known to be JSON-safe.
+
+For now we enumerate. Going forward, any new query that returns a
+non-primitive should either return plain objects/arrays OR get covered
+by a Map/Set-style replacer branch.
+
+### Logged follow-up
+- Inventory all `useQuery` queries that return non-JSON-safe values
+  (Date, RegExp, custom classes). If any exist they'll need similar
+  serializer branches.
+- Consider `superjson` as a heavier-but-bulletproof alternative — it
+  handles Date / RegExp / undefined out of the box. Not needed today;
+  Map / Set + bigint cover the current surface.

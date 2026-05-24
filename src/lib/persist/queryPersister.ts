@@ -34,17 +34,38 @@ import { get, set, del } from 'idb-keyval';
 /**
  * Bump when a persisted query's shape changes in a breaking way.
  * History:
- *   v1 — initial persistence
+ *   v1 — initial persistence (PR 30)
+ *   v2 — Map / Set support (PR 34). v1 silently nuked Map values to `{}`
+ *        which caused `TypeError: v?.get is not a function` on rehydrate.
+ *        Forcing a cache clear so prod users get unblocked.
  */
-export const QUERY_CACHE_BUSTER = 'v1';
+export const QUERY_CACHE_BUSTER = 'v2';
 
 /** Per-query max age in the persisted cache. */
 export const QUERY_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
 
 const BI_TAG = '__BI__';
+const MAP_TAG = '__MAP__';
+const SET_TAG = '__SET__';
 
+/**
+ * Replacer runs BEFORE JSON converts the value, so `value instanceof Map`
+ * still works at this point. Without these branches, `JSON.stringify(new
+ * Map())` produces `"{}"` and silent data loss on rehydrate — `useMarketCaps`
+ * / `useRiskMonitoring` / `useOracleHealth` all return Map<…> values and
+ * v1 of the persister bricked the app with `TypeError: v?.get is not a
+ * function` (PR 34 bug report).
+ */
 function replacer(_key: string, value: unknown): unknown {
   if (typeof value === 'bigint') return `${BI_TAG}${value.toString()}`;
+  if (value instanceof Map) {
+    // Entries form: `[[k1, v1], [k2, v2], …]`. Nested values get the
+    // replacer applied recursively by JSON.stringify.
+    return { [MAP_TAG]: Array.from(value.entries()) };
+  }
+  if (value instanceof Set) {
+    return { [SET_TAG]: Array.from(value.values()) };
+  }
   return value;
 }
 
@@ -54,6 +75,15 @@ function reviver(_key: string, value: unknown): unknown {
       return BigInt(value.slice(BI_TAG.length));
     } catch {
       return value;
+    }
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    if (Array.isArray(obj[MAP_TAG])) {
+      return new Map(obj[MAP_TAG] as Iterable<readonly [unknown, unknown]>);
+    }
+    if (Array.isArray(obj[SET_TAG])) {
+      return new Set(obj[SET_TAG] as Iterable<unknown>);
     }
   }
   return value;

@@ -58,4 +58,53 @@ describe('queryPersister BigInt-safe serialize/deserialize (PR 30)', () => {
     const s = serialize(v);
     expect(() => JSON.parse(s)).not.toThrow();
   });
+
+  // PR 34 — bug fingerprint: v1 nuked Map values to `{}` and the app
+  // crashed with `TypeError: v?.get is not a function` on rehydrate.
+  // Three queries (`useMarketCaps`, `useRiskMonitoring`, `useOracleHealth`)
+  // return Map<…> values; without Map-aware (de)serialization the cache
+  // is poison.
+  it('round-trips a top-level Map preserving entries', () => {
+    const m = new Map<string, number>([['a', 1], ['b', 2]]);
+    const out = deserialize<Map<string, number>>(serialize(m));
+    expect(out).toBeInstanceOf(Map);
+    expect(out.get('a')).toBe(1);
+    expect(out.get('b')).toBe(2);
+    expect(out.size).toBe(2);
+  });
+
+  it('round-trips a Map nested inside an object', () => {
+    const v = {
+      vault: '0x123',
+      caps: new Map<string, { abs: bigint; rel: bigint }>([
+        ['0xaaa', { abs: 100n, rel: 10n ** 18n }],
+      ]),
+    };
+    const out = deserialize<typeof v>(serialize(v));
+    expect(out.caps).toBeInstanceOf(Map);
+    const entry = out.caps.get('0xaaa');
+    expect(entry?.abs).toBe(100n);
+    expect(entry?.rel).toBe(10n ** 18n);
+  });
+
+  it('round-trips a Set', () => {
+    const s = new Set<string>(['a', 'b', 'c']);
+    const out = deserialize<Set<string>>(serialize(s));
+    expect(out).toBeInstanceOf(Set);
+    expect(out.has('a')).toBe(true);
+    expect(out.has('b')).toBe(true);
+    expect(out.has('c')).toBe(true);
+    expect(out.size).toBe(3);
+  });
+
+  it('does NOT mistake a plain object with __MAP__ as key for a Map (false-positive defence)', () => {
+    // If a user-data object happened to have a key literally named
+    // `__MAP__` whose value isn't an entries array, the reviver should
+    // leave it alone. The `Array.isArray` check on the tag value is the
+    // guard.
+    const v = { __MAP__: 'not entries — just a string' };
+    const out = deserialize<typeof v>(serialize(v));
+    expect(out).toEqual(v); // still a plain object
+    expect(out).not.toBeInstanceOf(Map);
+  });
 });
