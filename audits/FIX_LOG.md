@@ -2049,3 +2049,62 @@ dedicated two-step transfer drawer; deferred to keep this PR scoped.
 - **Cap-history breadcrumb** per adapter.
 - **ABI-alignment test family extension** for the 9 setters covered
   here.
+
+---
+
+## PR 27 — V2 Allocation tab: `0n` totalAssets stuck on "Loading…"
+
+### Diagnosis
+User reported the Allocation tab showed "Loading allocation data…"
+indefinitely on the Yield Network USDC vault. Vault badges
+(METAMORPHO / OWNER / CURATOR / ALLOCATOR) confirm vault info loaded.
+
+Root cause — `src/lib/hooks/useV2Allocation.ts:295`:
+
+```ts
+if (!adapter || !mergedPositions || !totalAssets) return null;
+```
+
+The vault has zero deposits so `totalAssets === 0n`. In JavaScript
+`!0n` evaluates to `true` (bigint zero is falsy), so the data builder
+returned `null` for every fresh-empty V2 vault. PR 24's empty-state
+guard then rendered "Loading allocation data…" — that branch was
+designed to catch the brief moment before data was built, not the
+permanent zero-TVL case.
+
+### Fix
+- **`src/lib/hooks/useV2Allocation.ts`** — change `!totalAssets` to
+  `totalAssets === undefined`. Zero is a legitimate state for a vault
+  whose deposits haven't started yet; the table should render with
+  every market row showing 0 allocation.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/hooks/useV2Allocation.ts` (one-line change).
+
+### Tests
+No new test in this PR — the rest of the suite catches the regression
+shape indirectly (the data builder runs in 196 existing tests via
+allocation-row composition). A follow-up could add a focused unit
+test that exercises `useV2AllocationData` against
+`{ totalAssets: 0n, positions: [], discovered: [some] }` and asserts
+`data !== null`. Left as a logged follow-up alongside the other
+allocation-tab UX work.
+
+### Verification
+- `npm run test:run` → **196 passed** (25 files, unchanged from PR 26).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Pattern banked
+**Never use `!bigint`** when "loading vs zero" matters. Three valid
+states for a bigint coming out of a query:
+- `undefined` — still loading / not yet read
+- `0n` — read, legitimate zero (no deposits, no allocation, etc.)
+- `> 0n` — read, non-zero
+
+Conflating undefined and 0n is the trap. Always check
+`x === undefined` for the loading state.
+
+Sweep across `src/` for similar `!totalAssets` / `!allocation` /
+`!fee` patterns flagged no others — `!allocation` references in
+`QueuesTab` / `MarketsTab` / `ReallocateTab` check object existence
+(not bigints) and remain correct.

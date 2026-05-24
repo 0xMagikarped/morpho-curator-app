@@ -292,7 +292,12 @@ export function useV2AllocationData(
 
   // Build allocation data
   const data: V2AllocationData | null = (() => {
-    if (!adapter || !mergedPositions || !totalAssets) return null;
+    // PR 27 — `totalAssets === 0n` is a *legitimate* state for a fresh
+    // vault with no deposits yet. The previous `!totalAssets` check
+    // treated zero as "still loading" and returned null, leaving the
+    // V2AllocationTab stuck on "Loading allocation data…" forever. Use
+    // an explicit undefined check instead.
+    if (!adapter || !mergedPositions || totalAssets === undefined) return null;
 
     const adapterTotal = adapter.realAssets;
     const idle = totalAssets > adapterTotal ? totalAssets - adapterTotal : 0n;
