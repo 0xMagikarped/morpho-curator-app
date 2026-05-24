@@ -10,12 +10,14 @@ import { SectionHeader } from '../ui/SectionHeader';
 import { AddressDisplay } from '../ui/AddressDisplay';
 import { useVaultInfo, useVaultRole } from '../../lib/hooks/useVault';
 import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
+import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useV2AllocationData, type AllocationRow, type V2AllocationData } from '../../lib/hooks/useV2Allocation';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount, truncateAddress } from '../../lib/utils/format';
 import { isUnlimited } from '../../lib/v2/capComputation';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
+import { SetLiquidityDrawer } from './adapters/SetLiquidityDrawer';
 import type { MarketParams } from '../../types';
 
 interface V2AllocationTabProps {
@@ -49,6 +51,8 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
 
   const [showMarketId, setShowMarketId] = useState(false);
   const [showReallocate, setShowReallocate] = useState(false);
+  const [showSetLiquidity, setShowSetLiquidity] = useState(false);
+  const permissions = useVaultPermissions(chainId, vaultAddress);
 
   const canReallocate = role.isAllocator || role.isOwner;
   const isLoading = overviewLoading || allocLoading;
@@ -105,12 +109,33 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
         </div>
       )}
 
-      {/* Adapter info */}
-      <div className="flex items-center gap-2 text-xs text-text-tertiary">
-        <span>Market Adapter:</span>
-        <AddressDisplay address={marketAdapter.address} chainId={chainId} />
-        {marketAdapter.isLiquidityAdapter && <Badge variant="purple">Liquidity</Badge>}
-      </div>
+      {/* PR 33 — Liquidity Adapter panel (mirrors Morpho's curator UI).
+          Shows the active adapter the vault routes new deposits to + the
+          current allocation, with a Change button that opens the existing
+          SetLiquidityDrawer (PR 14/17). Curator/manager gated. */}
+      <LiquidityAdapterPanel
+        chainId={chainId}
+        adapters={overview?.adapters ?? []}
+        currentLiquidityAdapter={overview?.liquidityAdapter ?? null}
+        marketAdapter={marketAdapter}
+        decimals={decimals}
+        assetSymbol={assetSymbol}
+        canChange={permissions.canCurate || permissions.canManage || permissions.isAdmin}
+        onChange={() => setShowSetLiquidity(true)}
+      />
+
+      {/* SetLiquidityDrawer (PR 14/17) — same component used on the
+          Adapters tab's "No Liquidity Adapter Set" banner. */}
+      <SetLiquidityDrawer
+        open={showSetLiquidity}
+        onClose={() => setShowSetLiquidity(false)}
+        adapters={overview?.adapters ?? []}
+        currentLiquidityAdapter={overview?.liquidityAdapter ?? null}
+        vaultAddress={vaultAddress}
+        chainId={chainId}
+        decimals={decimals}
+        assetSymbol={assetSymbol}
+      />
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -155,6 +180,82 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
 // ============================================================
 // Allocation Table
 // ============================================================
+
+/**
+ * PR 33 — Morpho-curator-style "Liquidity Adapter" panel at the top of the
+ * Allocation tab.
+ *
+ * Three rows:
+ *   - Liquidity Adapter (section header + Change button)
+ *   - Active Adapter: name + type badge + address of the currently-
+ *     designated liquidity adapter. Falls back to "None" with a styled
+ *     warning when zero.
+ *   - Current Allocation: realAssets of the active adapter (or 0 if none).
+ *
+ * The Change button reuses the existing SetLiquidityDrawer (PR 14/17) so
+ * the on-chain call (`setLiquidityAdapterAndData`) and the empty-bytes
+ * default stay consistent across surfaces.
+ */
+function LiquidityAdapterPanel({
+  chainId,
+  adapters,
+  currentLiquidityAdapter,
+  marketAdapter,
+  decimals,
+  assetSymbol,
+  canChange,
+  onChange,
+}: {
+  chainId: number;
+  adapters: Array<{ address: Address; name: string | null; realAssets: bigint; type: 'vault-v1' | 'market-v1' | 'unknown' }>;
+  currentLiquidityAdapter: Address | null;
+  marketAdapter: { address: Address; name: string | null; realAssets: bigint } | null;
+  decimals: number;
+  assetSymbol: string;
+  canChange: boolean;
+  onChange: () => void;
+}) {
+  const active = currentLiquidityAdapter
+    ? adapters.find((a) => a.address.toLowerCase() === currentLiquidityAdapter.toLowerCase()) ?? null
+    : null;
+
+  return (
+    <Card className="!p-0 overflow-hidden">
+      {/* Header row */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border-subtle">
+        <SectionHeader>Liquidity Adapter</SectionHeader>
+        <Button size="sm" variant="secondary" disabled={!canChange} onClick={onChange}>
+          Change
+        </Button>
+      </div>
+
+      {/* Active Adapter row */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border-subtle">
+        <span className="text-xs text-text-tertiary">Active Adapter</span>
+        {active ? (
+          <div className="flex items-center gap-2">
+            <span className="text-text-primary text-xs">
+              {active.name ?? `Adapter ${active.address.slice(0, 10)}`}
+            </span>
+            {active.type === 'market-v1' && <Badge variant="success">MKT</Badge>}
+            {active.type === 'vault-v1' && <Badge variant="info">V1</Badge>}
+            <AddressDisplay address={active.address} chainId={chainId} />
+          </div>
+        ) : (
+          <span className="text-xs text-warning">None — new deposits will sit idle</span>
+        )}
+      </div>
+
+      {/* Current Allocation row */}
+      <div className="flex items-center justify-between px-3 py-2.5">
+        <span className="text-xs text-text-tertiary">Current Allocation</span>
+        <span className="text-text-primary text-xs font-mono">
+          {formatTokenAmount(active?.realAssets ?? marketAdapter?.realAssets ?? 0n, decimals)} {assetSymbol}
+        </span>
+      </div>
+    </Card>
+  );
+}
 
 function AllocationTable({
   data,

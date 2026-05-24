@@ -2513,3 +2513,59 @@ Modified: `src/lib/utils/duration.ts`,
 **PASS.** One helper + two display call sites + test. The parser stays
 permissive (any unit), only the *default* unit of the display changed.
 Other tabs that use `formatDurationSeconds` (auto-unit) are unaffected.
+
+---
+
+## PR 33 — Allocation tab: Liquidity Adapter panel + Change button
+
+### User ask
+> "In the allocation page can we have similar data? I want to be able
+> to set the active adapter."
+
+Screenshot showed Morpho's curator Allocation tab with a 3-row panel
+above the Reallocate Funds section:
+  - Liquidity Adapter (header + Change button)
+  - Active Adapter (name + ticker)
+  - Current Allocation (TVL on the active adapter)
+
+### Fix
+- **`src/components/vault/V2AllocationTab.tsx`** — added a
+  `LiquidityAdapterPanel` component above the Reallocate Funds header.
+  Reuses the data we already had from `useV2AdapterOverview` (which
+  PR 21+ pulls in for the Caps view): `liquidityAdapter` field gives
+  the active address; `adapters[]` provides the name / type / TVL
+  match. Three rows mirror the screenshot.
+  - Active Adapter row shows the adapter name + type badge (MKT / V1) +
+    truncated address. Falls back to "None — new deposits will sit
+    idle" with a warning style when no liquidity adapter is set.
+  - Current Allocation row shows the active adapter's `realAssets`
+    (falls back to the market adapter when no liquidity adapter is
+    set — better than rendering "0" which would be ambiguous).
+  - **Change** button reuses the existing `SetLiquidityDrawer` (PR 14/
+    17) so the on-chain call (`setLiquidityAdapterAndData(addr,
+    bytes)`) and the empty-bytes default stay consistent with the
+    Adapters-tab banner button. Permission-gated on
+    `canCurate || canManage || isAdmin`.
+- Dropped the inline "Market Adapter:" line above the Reallocate
+  header — the new panel covers the same address+type info more
+  clearly.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/V2AllocationTab.tsx`.
+
+### Tests
+No new tests this PR — pure composition over existing primitives
+(`useV2AdapterOverview` data, `SetLiquidityDrawer` write surface).
+The 4 ABI-alignment tests for the liquidity setter (PR 17) still
+pin the only on-chain interaction.
+
+### Verification
+- `npm run test:run` → **219 passed** (27 files, unchanged from
+  PR 32). `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** One new component in the same file, two new pieces of
+state on the tab (drawer-open toggle + permission hook), one panel
+render before the Reallocate header. Zero changes to data fetching
+— the `LiquidityAdapterPanel` reads from data that was already on
+the page.
