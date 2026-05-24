@@ -2108,3 +2108,94 @@ Sweep across `src/` for similar `!totalAssets` / `!allocation` /
 `!fee` patterns flagged no others — `!allocation` references in
 `QueuesTab` / `MarketsTab` / `ReallocateTab` check object existence
 (not bigints) and remain correct.
+
+---
+
+## PR 28 — Max Rate + Force Deallocate Penalty + Emergency playbooks scaffold
+
+### User asks
+1. Add `setMaxRate` and `setForceDeallocatePenalty` to the Parameters
+   tab (admin panel).
+2. Build the Emergency page matching Morpho's curator UI (5 preset
+   playbooks: Close Deposits / Hard Market Removal / Safe Market
+   Removal / Sentinel Lockdown / Allocator Compromised).
+
+### Fix
+**Parameters additions (Max Rate + Force Deallocate Penalty):**
+- **`src/lib/contracts/metaMorphoV2Abi.ts`** — added 4 fragments:
+  `maxRate()`, `setMaxRate(uint256)`, `forceDeallocatePenalty(address)`,
+  and aligned `setForceDeallocatePenalty(address, uint256)` arg name to
+  the SDK shape.
+- **`src/components/vault/params/V2SetterDrawer.tsx`** — extended the
+  `V2SetterIntent` union with `setMaxRate` (single % input, WAD) and
+  `setForceDeallocatePenalty` (per-adapter intent — adapter address
+  is part of the intent payload, only the penalty value is user-input).
+  Reused the existing Submit→Wait→Execute flow.
+- **`src/components/vault/V2ParamsTab.tsx`** — added a Max Rate row to
+  the Fees section + a dedicated `ForceDeallocatePenaltyCard` that
+  lists one row per adapter on the vault (current value read via
+  `forceDeallocatePenalty(adapter)`, Edit opens the drawer with the
+  matching intent).
+
+**Emergency playbooks (scaffold + 2 working):**
+- **`src/components/vault/V2SecurityTab.tsx`** — added an
+  `EmergencyPlaybooks` card that renders the 5 Morpho-curator playbook
+  rows with title, description, and a Start button. Privileged-role
+  gated (`canEmergency`).
+  - **Close Deposits** — implemented. `CloseDepositsConfirmDialog`
+    fires `setLiquidityAdapterAndData(0x0, 0x)` (immediate, not
+    timelocked). Confirmation modal with cancel + danger-styled
+    confirm.
+  - **Allocator Compromised** — implemented via the existing
+    `V2SetterDrawer` with `intent: setIsAllocator, defaultGrant: false`.
+    Curator gates the call; surfaces simulation errors via the drawer's
+    existing banner.
+  - **Hard Market Removal / Safe Market Removal / Sentinel Lockdown**
+    — render with disabled "Coming soon" buttons. Each is a multi-call
+    orchestration that's tracked as a PR 29 follow-up (Hard / Safe
+    need `revoke` + `decrease*Cap` chained per market; Sentinel
+    Lockdown needs `abdicate` per critical selector).
+
+### Files changed (`git diff main --stat`)
+Modified: `src/lib/contracts/metaMorphoV2Abi.ts`,
+`src/components/vault/V2ParamsTab.tsx`,
+`src/components/vault/V2SecurityTab.tsx`,
+`src/components/vault/params/V2SetterDrawer.tsx`.
+
+### Tests
+No new tests in this PR — both new setters compose existing
+primitives (`useV2TimelockedOp` for the timelock flow,
+`metaMorphoV2Abi` ABI alignment, PR 8 simulation guard). The Close
+Deposits playbook is a single direct write through the same write
+guard. ABI shape for the 4 new fragments matches `vaultV2Abi` from
+`@morpho-org/blue-sdk-viem` and could be added to the
+`capAbiAlignment` selector-equality test family in a follow-up.
+
+### Verification
+- `npm run test:run` → **196 passed** (25 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new setter variants on top of PR 26's `V2SetterDrawer`,
+one new card on the Params tab, one new playbook card on the Security
+tab. The 3 stub playbooks are explicit — disabled buttons with
+"Coming soon" titles + an internal hint pointing at the PR 29
+follow-up.
+
+### Remaining follow-ups (still tracked)
+- **PR 29 — complete emergency playbooks:**
+  - Hard Market Removal: orchestrate `revoke(submit calldata)` for
+    pending adapter/collateral/market cap submits + zero each cap +
+    `removeAdapter` if appropriate.
+  - Safe Market Removal: similar but with `forceDeallocate` for
+    withdrawable funds rather than burning shares.
+  - Sentinel Lockdown: `abdicate(selector)` over a curated list of
+    critical selectors (addAdapter, setLiquidityAdapterAndData,
+    setIsAllocator, …).
+- **`maxRate` / `forceDeallocatePenalty` ABI alignment tests**
+  alongside PR 13/15/17/26's setter family.
+- Two-step ownership transfer drawer.
+- `increaseTimelock(bytes4, uint256)` per-selector timelock editor.
+- Per-setter permission introspection (disable Edit up-front).
+- Pending caps section keyed on `executableAt > 0`.
+- Cap-history breadcrumb.

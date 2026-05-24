@@ -172,9 +172,35 @@ export const metaMorphoV2Abi = [
   {
     inputs: [
       { name: 'adapter', type: 'address' },
-      { name: 'penalty', type: 'uint256' },
+      { name: 'newForceDeallocatePenalty', type: 'uint256' },
     ],
     name: 'setForceDeallocatePenalty',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // PR 28 — read getter for the per-adapter force-deallocate penalty.
+  // Returns 0 when not set. uint256 on-chain.
+  {
+    inputs: [{ name: 'adapter', type: 'address' }],
+    name: 'forceDeallocatePenalty',
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  // PR 28 — vault-wide max yield rate (WAD/sec scaled). View returns
+  // `uint64`; setter takes `uint256` (the contract narrows internally).
+  // Aligned with SDK `vaultV2Abi`.
+  {
+    inputs: [],
+    name: 'maxRate',
+    outputs: [{ type: 'uint64' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'newMaxRate', type: 'uint256' }],
+    name: 'setMaxRate',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

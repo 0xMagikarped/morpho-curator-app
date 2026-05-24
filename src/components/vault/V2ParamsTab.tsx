@@ -15,13 +15,16 @@
  */
 import { useState } from 'react';
 import type { Address } from 'viem';
+import { useReadContract } from 'wagmi';
 import { useVaultInfo } from '../../lib/hooks/useVault';
+import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { AddressDisplay } from '../ui/AddressDisplay';
 import { V2SetterDrawer, type V2SetterIntent } from './params/V2SetterDrawer';
+import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 
 interface V2ParamsTabProps {
   chainId: number;
@@ -59,6 +62,18 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   const canEdit = permissions.canCurate || permissions.canManage || permissions.isAdmin;
   const timelockSeconds = vault.timelock;
   const allocators: Address[] = vault.allocators ?? [];
+
+  // PR 28 — read vault-wide maxRate (uint64 WAD/sec scaled) and the
+  // per-adapter forceDeallocatePenalty. The penalty getter is per
+  // adapter, so we fetch the active liquidity adapter's value as the
+  // first-class display. The Edit drawer takes an explicit adapter so
+  // the curator can target any adapter.
+  const { data: maxRate } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV2Abi,
+    functionName: 'maxRate',
+    chainId,
+  });
 
   return (
     <div className="space-y-4">
@@ -104,7 +119,27 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
           onEdit={() => setEditing({ kind: 'setManagementFeeRecipient', current: vault.managementFeeRecipient })}
           canEdit={canEdit}
         />
+        {/* PR 28 — Max Rate (vault-wide yield cap). Owner-only typically. */}
+        <Row
+          label="Max Rate"
+          value={maxRate !== undefined ? `${(Number(maxRate as bigint) / 1e16).toFixed(2)}%` : '—'}
+          onEdit={() =>
+            setEditing({
+              kind: 'setMaxRate',
+              currentWad: (maxRate as bigint | undefined) ?? 0n,
+            })
+          }
+          canEdit={canEdit && maxRate !== undefined}
+        />
       </Card>
+
+      {/* PR 28 — Force Deallocate Penalty (per-adapter) */}
+      <ForceDeallocatePenaltyCard
+        chainId={chainId}
+        vaultAddress={vaultAddress}
+        canEdit={canEdit}
+        onEdit={(adapter, current) => setEditing({ kind: 'setForceDeallocatePenalty', adapter, current })}
+      />
 
       {/* Roles */}
       <Card>
@@ -207,6 +242,90 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Per-adapter force-deallocate penalty card. One row per adapter on the
+ * vault, with current penalty (read from `forceDeallocatePenalty(adapter)`)
+ * and an Edit button that opens `V2SetterDrawer` with the adapter address
+ * baked into the intent.
+ */
+function ForceDeallocatePenaltyCard({
+  chainId,
+  vaultAddress,
+  canEdit,
+  onEdit,
+}: {
+  chainId: number;
+  vaultAddress: Address;
+  canEdit: boolean;
+  onEdit: (adapter: Address, current: bigint) => void;
+}) {
+  const { data: vault } = useVaultInfo(chainId, vaultAddress);
+  const { data: overview } = useV2AdapterOverview(chainId, vaultAddress, vault?.totalAssets);
+  const adapters = overview?.adapters ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Force Deallocate Penalty</CardTitle>
+        <Badge variant="info">V2</Badge>
+      </CardHeader>
+      <p className="text-[10px] text-text-tertiary px-3 pb-2">
+        Per-adapter penalty applied when an allocator force-deallocates this adapter (WAD).
+      </p>
+      {adapters.length === 0 ? (
+        <p className="text-[10px] text-text-tertiary italic p-3">
+          No adapters configured. Add one from the Adapters tab.
+        </p>
+      ) : (
+        adapters.map((a) => (
+          <ForceDeallocatePenaltyRow
+            key={a.address}
+            chainId={chainId}
+            vaultAddress={vaultAddress}
+            adapter={a.address}
+            adapterName={a.name ?? `Adapter ${a.address.slice(0, 10)}`}
+            canEdit={canEdit}
+            onEdit={onEdit}
+          />
+        ))
+      )}
+    </Card>
+  );
+}
+
+function ForceDeallocatePenaltyRow({
+  chainId,
+  vaultAddress,
+  adapter,
+  adapterName,
+  canEdit,
+  onEdit,
+}: {
+  chainId: number;
+  vaultAddress: Address;
+  adapter: Address;
+  adapterName: string;
+  canEdit: boolean;
+  onEdit: (adapter: Address, current: bigint) => void;
+}) {
+  const { data: penalty } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV2Abi,
+    functionName: 'forceDeallocatePenalty',
+    args: [adapter],
+    chainId,
+  });
+  const current = (penalty as bigint | undefined) ?? 0n;
+  return (
+    <Row
+      label={adapterName}
+      value={current > 0n ? `${(Number(current) / 1e16).toFixed(2)}%` : 'Not set'}
+      onEdit={() => onEdit(adapter, current)}
+      canEdit={canEdit}
+    />
   );
 }
 

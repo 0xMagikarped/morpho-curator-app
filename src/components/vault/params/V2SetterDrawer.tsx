@@ -40,7 +40,10 @@ export type V2SetterIntent =
   | { kind: 'setName'; current: string }
   | { kind: 'setSymbol'; current: string }
   | { kind: 'setIsAllocator'; defaultAddress?: Address; defaultGrant?: boolean }
-  | { kind: 'setIsSentinel'; defaultAddress?: Address; defaultGrant?: boolean };
+  | { kind: 'setIsSentinel'; defaultAddress?: Address; defaultGrant?: boolean }
+  // PR 28
+  | { kind: 'setMaxRate'; currentWad: bigint }
+  | { kind: 'setForceDeallocatePenalty'; adapter: Address; current: bigint };
 
 interface V2SetterDrawerProps {
   open: boolean;
@@ -73,8 +76,11 @@ export function V2SetterDrawer({
     return '';
   });
   const [feeInput, setFeeInput] = useState<string>(() => {
-    if (intent.kind === 'setPerformanceFee' || intent.kind === 'setManagementFee') {
+    if (intent.kind === 'setPerformanceFee' || intent.kind === 'setManagementFee' || intent.kind === 'setMaxRate') {
       return (Number(intent.currentWad) / 1e16).toString(); // WAD → %
+    }
+    if (intent.kind === 'setForceDeallocatePenalty') {
+      return (Number(intent.current) / 1e16).toString();
     }
     return '';
   });
@@ -134,6 +140,24 @@ export function V2SetterDrawer({
       case 'setIsSentinel':
         if (!isAddress(addressInput)) return undefined;
         return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setIsSentinel', args: [addressInput, grant] });
+      case 'setMaxRate': {
+        const pct = parseFloat(feeInput);
+        if (isNaN(pct) || pct < 0) return undefined;
+        const wad = BigInt(Math.floor(pct * 1e16));
+        if (wad === intent.currentWad) return undefined;
+        return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setMaxRate', args: [wad] });
+      }
+      case 'setForceDeallocatePenalty': {
+        const pct = parseFloat(feeInput);
+        if (isNaN(pct) || pct < 0 || pct > 100) return undefined;
+        const wad = BigInt(Math.floor(pct * 1e16));
+        if (wad === intent.current) return undefined;
+        return encodeFunctionData({
+          abi: metaMorphoV2Abi,
+          functionName: 'setForceDeallocatePenalty',
+          args: [intent.adapter, wad],
+        });
+      }
     }
   }, [intent, addressInput, feeInput, textInput, grant]);
 
@@ -178,6 +202,13 @@ export function V2SetterDrawer({
         return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setIsAllocator', args: [addressInput as Address, grant], chainId });
       case 'setIsSentinel':
         return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setIsSentinel', args: [addressInput as Address, grant], chainId });
+      case 'setMaxRate':
+        return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setMaxRate', args: [BigInt(Math.floor(parseFloat(feeInput) * 1e16))], chainId });
+      case 'setForceDeallocatePenalty':
+        return writeContract({
+          address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setForceDeallocatePenalty',
+          args: [intent.adapter, BigInt(Math.floor(parseFloat(feeInput) * 1e16))], chainId,
+        });
     }
   };
 
@@ -263,10 +294,24 @@ function CurrentValueRow({ intent }: { intent: V2SetterIntent }) {
       );
     case 'setPerformanceFee':
     case 'setManagementFee':
+    case 'setMaxRate':
       return (
         <div className="text-xs">
           <span className="text-text-tertiary">Current: </span>
           <span className="font-mono text-text-primary">{(Number(intent.currentWad) / 1e16).toFixed(2)}%</span>
+        </div>
+      );
+    case 'setForceDeallocatePenalty':
+      return (
+        <div className="text-xs space-y-1">
+          <div>
+            <span className="text-text-tertiary">Adapter: </span>
+            <span className="font-mono text-text-primary">{intent.adapter.slice(0, 10)}…{intent.adapter.slice(-4)}</span>
+          </div>
+          <div>
+            <span className="text-text-tertiary">Current: </span>
+            <span className="font-mono text-text-primary">{(Number(intent.current) / 1e16).toFixed(2)}%</span>
+          </div>
         </div>
       );
     case 'setName':
@@ -316,6 +361,14 @@ function IntentInput({
     case 'setManagementFee':
       return (
         <FeeField label="New Fee (%)" value={feeInput} onChange={setFeeInput} />
+      );
+    case 'setMaxRate':
+      return (
+        <FeeField label="New Max Rate (%)" value={feeInput} onChange={setFeeInput} hint="100% = 1e18 WAD" />
+      );
+    case 'setForceDeallocatePenalty':
+      return (
+        <FeeField label="New Penalty (%)" value={feeInput} onChange={setFeeInput} hint="Applied when allocators force-deallocate this adapter (WAD)." />
       );
     case 'setName':
     case 'setSymbol':
@@ -373,21 +426,30 @@ function AddressField({ label, value, onChange }: { label: string; value: string
   );
 }
 
-function FeeField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function FeeField({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  hint?: string;
+}) {
   return (
     <div>
       <label className="text-xs text-text-tertiary block mb-1">{label}</label>
       <input
         type="number"
         min="0"
-        max="100"
         step="0.01"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="0"
         className="w-full bg-bg-elevated border border-border-default px-3 py-2 text-sm text-text-primary placeholder-text-tertiary font-mono focus:border-border-focus focus:outline-none"
       />
-      <p className="text-[10px] text-text-tertiary mt-1">Stored as WAD on-chain (100% = 1e18).</p>
+      <p className="text-[10px] text-text-tertiary mt-1">{hint ?? 'Stored as WAD on-chain (100% = 1e18).'}</p>
     </div>
   );
 }
@@ -417,6 +479,8 @@ function labelForIntent(intent: V2SetterIntent): string {
     case 'setSymbol': return 'Set Vault Symbol';
     case 'setIsAllocator': return 'Manage Allocator';
     case 'setIsSentinel': return 'Manage Sentinel';
+    case 'setMaxRate': return 'Set Max Rate';
+    case 'setForceDeallocatePenalty': return 'Set Force Deallocate Penalty';
   }
 }
 
@@ -438,5 +502,9 @@ function invalidHint(intent: V2SetterIntent, addr: string, fee: string, text: st
     case 'setIsAllocator':
     case 'setIsSentinel':
       return isAddress(addr) ? 'Pick an address' : 'Enter a valid address';
+    case 'setMaxRate':
+    case 'setForceDeallocatePenalty':
+      if (!fee || isNaN(parseFloat(fee))) return 'Enter a rate %';
+      return 'Enter a different rate';
   }
 }
