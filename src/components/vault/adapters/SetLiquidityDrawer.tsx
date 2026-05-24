@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Address } from 'viem';
 import { encodeAbiParameters } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
@@ -11,6 +12,7 @@ import { formatTokenAmount } from '../../../lib/utils/format';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
 import type { V2AdapterFull } from '../../../lib/hooks/useV2Adapters';
 import { useV2VaultCapEntries, type MarketCapEntry } from '../../../hooks/useV2VaultCapEntries';
+import { vaultKeys } from '../../../lib/queryKeys';
 
 interface SetLiquidityDrawerProps {
   open: boolean;
@@ -71,6 +73,7 @@ export function SetLiquidityDrawer({
   decimals,
   assetSymbol,
 }: SetLiquidityDrawerProps) {
+  const queryClient = useQueryClient();
   const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
@@ -81,6 +84,19 @@ export function SetLiquidityDrawer({
   useEffect(() => {
     if (!open) setPickingMarketFor(null);
   }, [open]);
+
+  // PR 38 — when the tx confirms, invalidate the adapter family queries.
+  // Without this the Allocation tab's `useLiquidityTargetMarket` keeps
+  // its pre-change result (typically `null`) for the full staleTime
+  // window, so the Active Adapter row stays on the fallback
+  // address-only display instead of switching to the new
+  // `{collateral}/{loan} @ {lltv}%` shape PR 36/37 wired up.
+  useEffect(() => {
+    if (!isSuccess) return;
+    void queryClient.invalidateQueries({
+      queryKey: vaultKeys.adapters(chainId, vaultAddress),
+    });
+  }, [isSuccess, queryClient, chainId, vaultAddress]);
 
   // PR 23 event scan — markets that have caps configured on the vault,
   // filtered to the picked adapter in step 2.

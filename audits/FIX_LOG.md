@@ -2800,3 +2800,59 @@ Morpho's curator UI end-to-end:
   - On-chain `liquidityData()` returns those bytes
   - `useLiquidityTargetMarket` decodes them
   - Allocation tab renders `{collateral}/{loan} @ {lltv}%`
+
+---
+
+## PR 38 — SetLiquidityDrawer: invalidate adapter queries on tx success
+
+### User feedback
+> "I was able to change it but I don't see the specific market I'm
+> allocating here."
+
+The tx landed but the Active Adapter row kept rendering
+`Adapter 0x7764A05B [MKT] via 0x7764 ... 7a67` instead of the
+`{collateral}/{loan} @ {lltv}%` shape PR 36/37 wired up.
+
+### Diagnosis
+PR 36's `useLiquidityTargetMarket` hook reads `vault.liquidityData()`.
+Before the user's tx, it returned `null` (no liquidity-data set yet)
+and TanStack Query cached `null` for the full `staleTime` window (60s,
+plus the persisted entry in IndexedDB from PR 30/34).
+
+After the tx confirmed via `setLiquidityAdapterAndData(...)`, nothing
+invalidated the cached query — so the panel kept showing the cached
+`null` result → fallback to PR 33's address-only display.
+
+### Fix
+- **`src/components/vault/adapters/SetLiquidityDrawer.tsx`** — when
+  `useWaitForTransactionReceipt`'s `isSuccess` flips true, invalidate
+  the entire `vaultKeys.adapters(chainId, vaultAddress)` family. That
+  covers `useV2AdapterOverview` (which holds the liquidityAdapter
+  address) + `useLiquidityTargetMarket` (which holds the decoded
+  target market) + every PR 22/23/24 adapter-cap hook keyed off the
+  same root. Single `invalidateQueries` call.
+
+### Files changed (`git diff main --stat`)
+Modified: `src/components/vault/adapters/SetLiquidityDrawer.tsx`.
+
+### Tests
+No new tests this PR — the change is a one-effect invalidation tied
+to an already-tested wagmi state transition (`isSuccess`).
+
+### Verification
+- `npm run test:run` → **224 passed** (27 files, unchanged).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Pattern banked
+**Every write surface in this app needs an `invalidateQueries` on its
+tx success.** Without it the persister + TanStack staleTime combine
+to mask the new on-chain state for minutes. PR 38 fixes one site;
+sweep candidates for the same issue (still tracked):
+- `useDeployMarketAdapter` (PR 11) — partially covered by the
+  factory + adapter list queries being separate refetches.
+- `useBatchSetCaps` (PR 20) — invalidates via the wizard's
+  parent component.
+- `V2SetterDrawer` (PR 26) — does NOT invalidate. Fee / role / name
+  edits might suffer the same lag. Worth a follow-up sweep.
+- `V2TimelocksTab` (PR 31) — calls `refetch()` directly on its own
+  `useReadContracts` instance, which is correct.
