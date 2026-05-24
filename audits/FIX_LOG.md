@@ -1321,3 +1321,78 @@ no V1-only consumer changed shape.
 - **Cap readback**: Adapters tab cards (after PR 16) now show the
   adapter-level `Abs. Cap` / `Rel. Cap` values + usage bars, because
   `computeVaultAdapterId` is now keyed on the correct cap-map slot.
+
+---
+
+## PR 19 — Market lookup by ID for chains without Morpho API coverage
+
+### Diagnosis
+User in `AddMarketWizard` → Select Markets step pasted a 32-byte market
+ID into the search box on an XDC V2 vault. UI: `0 markets with USDC as
+loan token · No markets found.` The wizard's `MarketBrowser` calls
+`useMorphoMarkets(chainId, loanToken)`, which is gated by
+`isApiSupportedChain(chainId)` — XDC (50) and SEI (1329) are not in the
+support list. The hook is disabled, returns `[]`, and the search box
+filters an empty array → no result regardless of input.
+
+### Fix
+- **`src/hooks/useMarketLookup.ts`** (new) — TanStack-Query-backed
+  per-input lookup. Calls Morpho Blue's `idToMarketParams(id)` (which
+  returns a zero struct for unknown IDs rather than reverting), then
+  `market(id)` for state, and `fetchTokenInfo` for the two token sides.
+  Synthesizes a `MarketInfo` matching the API-derived shape so
+  downstream wizard steps don't need to branch.
+
+  Public helper `parseMarketIdInput(raw)`: forgiving parser accepting
+  `0x`+64 hex, bare 64 hex, mixed case, and trimming whitespace.
+  Pure — extracted for unit-testing without React.
+
+- **`src/components/vault/adapters/MarketBrowser.tsx`** —
+  - When `parseMarketIdInput(search)` returns a valid ID, fire the
+    lookup hook (`enabled` gate).
+  - Merge the resolved market into the displayed list (dedupe by ID
+    against the API result so we don't double-list on chains where
+    both work).
+  - Surface the four lookup states (`loading | not-found |
+    loan-token-mismatch | error`) as small inline messages below the
+    count line — does not crowd the regular filter UX.
+  - Updated placeholder to hint that pasting a market ID works.
+
+### Files changed (`git diff main --stat`)
+New: `src/hooks/useMarketLookup.ts`,
+`src/hooks/__tests__/parseMarketIdInput.test.ts`.
+Modified: `src/components/vault/adapters/MarketBrowser.tsx`.
+
+### Tests — fail on `main`, pass on branch
+8 cases for `parseMarketIdInput`:
+- accepts canonical `0x`+64
+- accepts bare 64 hex (no prefix)
+- accepts mixed-case + whitespace, normalizes lowercase
+- rejects empty / whitespace-only
+- rejects 63 / 65 hex (off-by-one paste)
+- rejects non-hex chars
+- rejects bare addresses (40 hex — different shape)
+
+On `main` the module doesn't exist → suite fails to load. On branch
+all pass.
+
+### Verification
+- `npm run test:run` → **179 passed** (21 files; was 171 + 8 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new files (hook + test), one modified component. The
+existing `useMorphoMarkets` GraphQL path stays untouched and is still
+the primary source on supported chains (1, 8453) — the lookup hook
+only fires when the user types a market-ID-shaped string and only
+*adds* to whatever the API returned. Dedupe by ID keeps the list
+clean.
+
+Future work (logged in `_followups.md`): an RPC-backed market scanner
+for XDC / SEI so users can BROWSE markets there too, not just resolve
+by known ID. That's a non-trivial scan (range over `CreateMarket`
+events) and out of scope for this fix.
+
+Pattern banked: for any "this chain isn't on the API" gap, provide a
+direct-lookup-by-stable-id RPC fallback before building a scanner.
+Market lookup, vault lookup, oracle lookup all fit this shape.

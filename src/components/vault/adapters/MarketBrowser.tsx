@@ -8,6 +8,7 @@ import { Search, ChevronDown, ChevronRight, ArrowUpRight, Check } from 'lucide-r
 import { Card } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { useMorphoMarkets } from '../../../hooks/useMorphoMarkets';
+import { useMarketLookup, parseMarketIdInput } from '../../../hooks/useMarketLookup';
 import { truncateAddress } from '../../../lib/utils/format';
 import type { MarketInfo } from '../../../types';
 
@@ -42,9 +43,31 @@ export function MarketBrowser({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const { data: markets, isLoading, error } = useMorphoMarkets(chainId, loanToken);
 
+  // PR 19 — direct lookup-by-ID fallback. On chains without Morpho API
+  // coverage (XDC, SEI) the GraphQL-backed `useMorphoMarkets` is empty,
+  // and even on supported chains a brand-new market may not have been
+  // indexed yet. If the search input looks like a 32-byte market ID, we
+  // resolve it via RPC (`idToMarketParams` on Morpho Blue) and synthesize
+  // a `MarketInfo` to merge into the displayed list.
+  const lookup = useMarketLookup({
+    chainId,
+    input: search,
+    expectedLoanToken: loanToken,
+    enabled: parseMarketIdInput(search) !== null,
+  });
+
   const filtered = useMemo(() => {
-    if (!markets) return [];
-    let result = markets;
+    const apiList = markets ?? [];
+
+    // Merge the manual-lookup result if present and not already in the
+    // API-derived list. Dedupe by ID.
+    const merged: MarketInfo[] = [...apiList];
+    if (lookup.kind === 'found') {
+      const exists = merged.some((m) => m.id.toLowerCase() === lookup.market.id.toLowerCase());
+      if (!exists) merged.push(lookup.market);
+    }
+
+    let result = merged;
 
     if (excludeMarketIds?.size) {
       result = result.filter((m) => !excludeMarketIds.has(m.id));
@@ -61,7 +84,7 @@ export function MarketBrowser({
     }
 
     return result;
-  }, [markets, search, excludeMarketIds]);
+  }, [markets, search, excludeMarketIds, lookup]);
 
   // Group by collateral token
   const groups = useMemo(() => {
@@ -127,7 +150,7 @@ export function MarketBrowser({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by collateral symbol or market ID..."
+          placeholder="Search by collateral, or paste a 0x… market ID"
           className="w-full pl-9 pr-3 py-2 text-xs bg-bg-hover border border-border-subtle text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent-primary"
         />
       </div>
@@ -136,6 +159,26 @@ export function MarketBrowser({
         {filtered.length} market{filtered.length !== 1 ? 's' : ''} with {assetSymbol} as loan token
         {groups.length > 0 && ` · ${groups.length} collateral${groups.length !== 1 ? 's' : ''}`}
       </p>
+
+      {/* PR 19 — lookup-by-ID feedback. Only renders when the search box
+          contains a valid bytes32 shape, so it doesn't crowd the regular
+          filter case. */}
+      {lookup.kind === 'loading' && (
+        <p className="text-[10px] text-text-tertiary italic">Resolving market ID via RPC…</p>
+      )}
+      {lookup.kind === 'not-found' && (
+        <p className="text-[10px] text-warning">
+          No Morpho Blue market with this ID on chain {chainId}.
+        </p>
+      )}
+      {lookup.kind === 'loan-token-mismatch' && (
+        <p className="text-[10px] text-warning">
+          Market exists but its loan token ({truncateAddress(lookup.actual)}) ≠ vault asset ({assetSymbol}).
+        </p>
+      )}
+      {lookup.kind === 'error' && (
+        <p className="text-[10px] text-danger">Lookup error: {lookup.message}</p>
+      )}
 
       {/* Grouped market list */}
       <div className="space-y-1 max-h-[400px] overflow-y-auto">
