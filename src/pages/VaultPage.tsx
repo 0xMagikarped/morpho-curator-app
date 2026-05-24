@@ -6,6 +6,7 @@ import { OverviewTab } from '../components/vault/OverviewTab';
 import { MarketsTab } from '../components/vault/MarketsTab';
 import { CapsTab } from '../components/vault/CapsTab';
 import { V2CapsTab } from '../components/vault/V2CapsTab';
+import { V2ParamsTab } from '../components/vault/V2ParamsTab';
 import { ReallocateTab } from '../components/vault/ReallocateTab';
 import { GuardianTab } from '../components/vault/GuardianTab';
 import { ProtocolTab } from '../components/vault/ProtocolTab';
@@ -26,7 +27,7 @@ import { useVaultFlavor } from '../lib/vault/flavor';
 import { useIsVaultBlacklisted } from '../lib/hooks/useMoolahSingleton';
 import { Lock } from 'lucide-react';
 
-type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security' | 'protocol';
+type TabId = 'overview' | 'markets' | 'caps' | 'adapters' | 'allocation' | 'queues' | 'reallocate' | 'guardian' | 'security' | 'protocol' | 'params';
 
 interface TabDef {
   id: TabId;
@@ -56,6 +57,9 @@ const TABS: TabDef[] = [
   { id: 'reallocate', label: 'Reallocate', requiresRole: 'isAllocator', v1Only: true },
   { id: 'guardian', label: 'Guardian', requiresRole: 'isEmergencyRole', v1Only: true },
   { id: 'security', label: 'Security', requiresRole: 'isEmergencyRole', v2Only: true },
+  // PR 26 — V2 vault parameters page (owner/curator/sentinel/allocator
+  // role mgmt, dual fee model, fee recipients, identity).
+  { id: 'params', label: 'Parameters', v2Only: true },
   { id: 'protocol', label: 'Protocol', protocols: ['moolah'] },
 ];
 
@@ -64,7 +68,7 @@ export function VaultPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const VALID_TABS: TabId[] = ['overview', 'markets', 'caps', 'adapters', 'allocation', 'queues', 'reallocate', 'guardian', 'security', 'protocol'];
+  const VALID_TABS: TabId[] = ['overview', 'markets', 'caps', 'adapters', 'allocation', 'queues', 'reallocate', 'guardian', 'security', 'protocol', 'params'];
   const tabParam = searchParams.get('tab') as TabId | null;
   const activeTab: TabId = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'overview';
 
@@ -290,6 +294,9 @@ export function VaultPage() {
         )}
         {activeTab === 'security' && isV2 && (
           <V2SecurityTab chainId={chainId} vaultAddress={vaultAddress} />
+        )}
+        {activeTab === 'params' && isV2 && (
+          <V2ParamsTab chainId={chainId} vaultAddress={vaultAddress} />
         )}
         {activeTab === 'protocol' && chainConfig?.protocol === 'moolah' && (
           <ProtocolTab chainId={chainId} />

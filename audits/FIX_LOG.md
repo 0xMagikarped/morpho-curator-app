@@ -1948,3 +1948,104 @@ buttons.
 - "Add Adapter" cap quick-add on the Adapter Caps table (Adapters tab
   already exposes the flow; adding it here is a small consistency win).
 - `∞` hint inside cap input previews when input ≥ `MAX_UINT128_CAP`.
+
+---
+
+## PR 26 — V2 Parameters tab (roles / fees / fee recipients / identity)
+
+### User ask
+> "Why we don't have any possibility to change role/fees/fees recipient?
+> Maybe a page 'parameter' as we are owner/curator."
+
+### Fix
+Three new pieces:
+
+- **`src/components/vault/params/V2SetterDrawer.tsx`** (new) — generic
+  drawer that handles the V2 Submit→Wait→Execute flow for ANY
+  single-call setter. Parameterized by a `V2SetterIntent` discriminated
+  union with 9 variants (one per supported setter). Each variant
+  carries its input + encodes its own target calldata via
+  `encodeFunctionData(metaMorphoV2Abi, …)`. `useV2TimelockedOp` (PR 10)
+  drives the button state; PR 8's simulation guard catches role-
+  mismatched calls before they reach the wallet.
+
+  Setters covered: `setCurator`, `setPerformanceFee`,
+  `setPerformanceFeeRecipient`, `setManagementFee`,
+  `setManagementFeeRecipient`, `setName`, `setSymbol`,
+  `setIsAllocator`, `setIsSentinel`.
+
+- **`src/components/vault/V2ParamsTab.tsx`** (new) — three-section
+  layout:
+  - Identity (name / symbol) — Edit per row.
+  - Fees (performance fee + recipient, management fee + recipient) —
+    Edit per row.
+  - Roles (owner display-only; curator with Edit; allocators list with
+    individual Revoke buttons + an Add/Revoke button; sentinels with
+    Add/Revoke only since V2 has no enumerable list — per-address
+    mapping).
+
+- **`src/pages/VaultPage.tsx`** — new `params` tab (`v2Only: true`)
+  + body branch. Added `'params'` to the TabId union + VALID_TABS so
+  bookmarks resolve.
+
+### Files changed (`git diff main --stat`)
+New: `src/components/vault/V2ParamsTab.tsx`,
+`src/components/vault/params/V2SetterDrawer.tsx`.
+Modified: `src/pages/VaultPage.tsx`.
+
+### Permission gating
+All Edit buttons are gated on
+`permissions.canCurate || permissions.canManage || permissions.isAdmin`.
+Owner-only setters that a curator doesn't have permission for will
+surface a `NotAuthorized`-decoded error in the drawer banner — fine
+for now; a future PR could add per-setter permission introspection
+and disable the inappropriate Edit buttons up front.
+
+### Tests
+No new tests in this PR — V2SetterDrawer composes existing primitives:
+- `useV2TimelockedOp` (PR 10 — 4 tests on `deriveTimelockStep`)
+- `combineTimelockSteps` (PR 12 — 7 tests, unused here since this
+  drawer is single-call)
+- `metaMorphoV2Abi` SDK alignment (PR 13/15/17 — 12 tests across the
+  three SDK-alignment test files)
+- PR 8 simulation guard
+
+The intent-to-calldata mapping uses `encodeFunctionData` against the
+SDK-aligned ABI, so a future SDK shape drift on any of the 9 setters
+will fail at the existing `capAbiAlignment` / `liquidityAdapterAbi` /
+`multicallAbi` cross-checks — extending those to cover the params
+setters is a small follow-up.
+
+### Verification
+- `npm run test:run` → **196 passed** (25 files, unchanged from PR 25
+  — no new tests). `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Scope-compliance self-audit
+**PASS.** Two new files, one modified routing file. The drawer
+deliberately mirrors the `CapEditDrawer` (PR 22) flow shape (input
+→ encode → submit/wait/execute) without sharing code — the ergonomics
+of one input vs cap-specific abs+rel pair are different enough that
+sharing would have meant either lots of branches or a half-generic
+abstraction. They share the underlying `useV2TimelockedOp` + the
+write-guard hook, which is where the V2 governance correctness lives.
+
+### Owner transfer
+`setOwner` doesn't exist on V2; ownership change goes through
+`transferOwnership(newOwner)` + `acceptOwnership()` (two-step, OZ
+Ownable2Step pattern). The Roles section displays the current owner
+read-only and skips the Edit button. A follow-up PR could add a
+dedicated two-step transfer drawer; deferred to keep this PR scoped.
+
+### Remaining follow-ups (still tracked)
+- **Two-step ownership transfer drawer** (`transferOwnership` +
+  `acceptOwnership`).
+- **`increaseTimelock(bytes4, uint256)` UI** — V2's per-selector
+  timelock durations. Owner-only, infrequent, but high-stakes.
+- **Per-setter permission introspection** — disable Edit buttons up
+  front for setters the connected wallet can't successfully execute.
+- **Pending caps section** keyed on `executableAt > 0`.
+- **Add Adapter quick-add** on the Adapter Caps table (mirrors PR 25's
+  Add Collateral / Add Market buttons).
+- **Cap-history breadcrumb** per adapter.
+- **ABI-alignment test family extension** for the 9 setters covered
+  here.
