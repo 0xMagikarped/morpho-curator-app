@@ -2309,3 +2309,82 @@ deferred to a focused PR:
      the rest.
 
 Logged for the next perf-focused PR.
+
+---
+
+## PR 30 — IndexedDB-persisted TanStack Query cache
+
+### Problem
+Cold reloads (refresh, tab close+reopen) re-fetched every read from RPC
+even when the data was still inside the 5-minute `staleTime` window. On
+public RPCs (~500–2000 ms per call) and a typical 20+ readContract calls
+per vault page, this meant 1–4 s of blank UI before any data showed.
+
+### Fix
+Persist the QueryClient cache to IndexedDB so reloads paint instantly
+from disk and then revalidate.
+
+- **`src/lib/persist/queryPersister.ts`** (new) — async storage persister
+  backed by `idb-keyval`. Custom serializer tags `bigint` values with a
+  `__BI__<decimal>` sentinel that round-trips through JSON (TanStack
+  Query's persister speaks JSON; every cached value in this app has
+  bigints somewhere — caps, allocations, balances). Cache key is
+  `morpho-curator:query-cache`; throttle 1 s.
+  - `QUERY_CACHE_BUSTER = 'v1'` — bump on any breaking query-shape
+    change. The persister discards the disk cache when buster mismatches,
+    the lightweight-migration equivalent.
+  - `QUERY_CACHE_MAX_AGE_MS = 24h`.
+
+- **`src/App.tsx`** — swapped `<QueryClientProvider>` for
+  `<PersistQueryClientProvider>`. Only `status: 'success'` queries are
+  dehydrated (in-flight + errored queries are noise that would just
+  trigger re-fetches anyway). `gcTime` bumped 30 min → 24 h so the
+  in-memory window matches the persisted maxAge — rehydration is
+  meaningful for the full window.
+
+### Files changed (`git diff main --stat`)
+New: `src/lib/persist/queryPersister.ts`,
+`src/lib/persist/__tests__/queryPersister.test.ts`.
+Modified: `src/App.tsx`, `package.json` (3 new deps).
+
+### Dependencies added
+- `@tanstack/react-query-persist-client` (sibling of react-query already
+  in deps; same major version)
+- `@tanstack/query-async-storage-persister`
+- `idb-keyval` — minimal IndexedDB key-value wrapper
+
+### Tests — 6 cases pinning the BigInt serializer
+- top-level bigint round-trips
+- zero + negative bigints round-trip
+- MAX_UINT256 round-trips without precision loss
+- bigints nested in objects + arrays round-trip
+- a string starting with the `__BI__` sentinel but not parsable as BigInt
+  survives as a string (defence against payload poisoning)
+- output is plain JSON (parsable by any consumer)
+
+Drift here would either runtime-throw on persistence OR — worse —
+silently turn bigints into strings on rehydration, breaking downstream
+equality checks.
+
+### Verification
+- `npm run test:run` → **202 passed** (26 files; 196 + 6 new).
+  `npx tsc -b` → **0**. `npm run build` → **success**.
+
+### Expected impact
+- **Cold reloads paint instantly** from the persisted cache for any
+  query refetched in the last 24 h.
+- Subsequent revalidation runs in the background; user sees data first,
+  fresh data swaps in.
+- Persists across tab close + restart (IndexedDB is durable until the
+  origin is cleared).
+
+### Remaining perf wins (still tracked, not in this PR)
+- **Server-side RPC proxy** (Vercel serverless / Cloudflare worker) in
+  front of a keyed provider (Alchemy / dRPC). Public RPCs are
+  500–2000 ms; keyed providers + edge sit around 80–200 ms. Sidesteps
+  PR 5's client-bundle leakage of API keys. Bigger structural change
+  than this PR.
+- **Incremental `getLogs`** — PR 23's event discovery scans `fromBlock=0`
+  on every cold load. Persisted cache (this PR) absorbs most of the
+  pain; an incremental fetch keyed on `lastKnown + 1` would close the
+  rest.

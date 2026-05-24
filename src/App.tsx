@@ -2,7 +2,9 @@ import * as Sentry from '@sentry/react';
 import { Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WagmiProvider } from 'wagmi';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { queryPersister, QUERY_CACHE_BUSTER, QUERY_CACHE_MAX_AGE_MS } from './lib/persist/queryPersister';
 import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit';
 import '@rainbow-me/rainbowkit/styles.css';
 
@@ -51,7 +53,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000,       // 5 min — DeFi data is fresh for 5 min
-      gcTime: 30 * 60 * 1000,         // 30 min — keep stale data in cache
+      // PR 30 — bumped from 30 min to 24h to match the IndexedDB-persisted
+      // cache window (QUERY_CACHE_MAX_AGE_MS). On disk the data may survive
+      // a tab close + restart; in-memory gc must outlive a single session
+      // to make rehydration meaningful.
+      gcTime: 24 * 60 * 60 * 1000,    // 24h
       retry: (failureCount, error) => {
         // Don't retry client errors (4xx)
         const status = (error as { status?: number })?.status;
@@ -125,7 +131,19 @@ function App() {
   return (
     <Sentry.ErrorBoundary fallback={({ error }) => <SentryFallback error={error as Error} />}>
       <WagmiProvider config={config}>
-        <QueryClientProvider client={queryClient}>
+        <PersistQueryClientProvider
+          client={queryClient}
+          persistOptions={{
+            persister: queryPersister,
+            maxAge: QUERY_CACHE_MAX_AGE_MS,
+            buster: QUERY_CACHE_BUSTER,
+            // Only persist successfully-resolved queries; in-flight / errored
+            // queries are noise that'd just trigger re-fetches anyway.
+            dehydrateOptions: {
+              shouldDehydrateQuery: (q) => q.state.status === 'success',
+            },
+          }}
+        >
           <RainbowKitProvider theme={lightTheme({ accentColor: '#00C060', accentColorForeground: '#FFFFFF', borderRadius: 'none' })}>
             <WalletConnectCopyLink />
             <BrowserRouter>
@@ -147,7 +165,7 @@ function App() {
               </Routes>
             </BrowserRouter>
           </RainbowKitProvider>
-        </QueryClientProvider>
+        </PersistQueryClientProvider>
       </WagmiProvider>
     </Sentry.ErrorBoundary>
   );
