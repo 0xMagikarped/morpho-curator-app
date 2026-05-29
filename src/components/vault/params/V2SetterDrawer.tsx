@@ -54,6 +54,7 @@ function aprPctToWadPerSecond(pct: number): bigint {
  * input + the encoded target calldata once committed.
  */
 export type V2SetterIntent =
+  | { kind: 'transferOwnership'; current: Address; pending?: Address }
   | { kind: 'setCurator'; current: Address }
   | { kind: 'setPerformanceFee'; currentWad: bigint }
   | { kind: 'setPerformanceFeeRecipient'; current: Address }
@@ -91,6 +92,7 @@ const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
  */
 function isDirectSetter(intent: V2SetterIntent): boolean {
   switch (intent.kind) {
+    case 'transferOwnership':
     case 'setCurator':
     case 'setName':
     case 'setSymbol':
@@ -114,6 +116,10 @@ export function V2SetterDrawer({
   const [addressInput, setAddressInput] = useState<string>(() => {
     if (intent.kind === 'setCurator' || intent.kind === 'setPerformanceFeeRecipient' || intent.kind === 'setManagementFeeRecipient') {
       return intent.current;
+    }
+    if (intent.kind === 'transferOwnership') {
+      // Don't pre-fill the current owner — user must type the new one.
+      return '';
     }
     if (intent.kind === 'setIsAllocator' || intent.kind === 'setIsSentinel') {
       return intent.defaultAddress ?? '';
@@ -154,6 +160,10 @@ export function V2SetterDrawer({
   // Encode the target calldata from the current input.
   const calldata = useMemo<`0x${string}` | undefined>(() => {
     switch (intent.kind) {
+      case 'transferOwnership':
+        if (!isAddress(addressInput)) return undefined;
+        if (addressInput.toLowerCase() === intent.current.toLowerCase()) return undefined;
+        return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'transferOwnership', args: [addressInput] });
       case 'setCurator':
         if (!isAddress(addressInput)) return undefined;
         if (addressInput.toLowerCase() === intent.current.toLowerCase()) return undefined;
@@ -237,6 +247,11 @@ export function V2SetterDrawer({
     // Execute by calling the target function directly with the same args
     // we used to build `calldata`. The V2 vault self-checks executableAt.
     switch (intent.kind) {
+      case 'transferOwnership':
+        // Ownable2Step — only initiates the transfer; the new owner must
+        // call `acceptOwnership()` to finish (surfaced inline on the
+        // current-value row when applicable).
+        return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'transferOwnership', args: [addressInput as Address], chainId });
       case 'setCurator':
         return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setCurator', args: [addressInput as Address], chainId });
       case 'setPerformanceFee':
@@ -339,6 +354,24 @@ export function V2SetterDrawer({
 
 function CurrentValueRow({ intent }: { intent: V2SetterIntent }) {
   switch (intent.kind) {
+    case 'transferOwnership':
+      return (
+        <div className="text-xs space-y-1">
+          <div>
+            <span className="text-text-tertiary">Current owner: </span>
+            <span className="font-mono text-text-primary">
+              {intent.current === ZERO_ADDR ? 'Not set' : intent.current}
+            </span>
+          </div>
+          {intent.pending && intent.pending !== ZERO_ADDR && (
+            <div>
+              <span className="text-text-tertiary">Pending owner: </span>
+              <span className="font-mono text-warning">{intent.pending}</span>{' '}
+              <span className="text-[10px] text-text-tertiary">(awaiting acceptOwnership)</span>
+            </div>
+          )}
+        </div>
+      );
     case 'setCurator':
     case 'setPerformanceFeeRecipient':
     case 'setManagementFeeRecipient':
@@ -417,6 +450,10 @@ function IntentInput({
   setGrant: (v: boolean) => void;
 }) {
   switch (intent.kind) {
+    case 'transferOwnership':
+      return (
+        <AddressField label="New Owner" value={addressInput} onChange={setAddressInput} />
+      );
     case 'setCurator':
     case 'setPerformanceFeeRecipient':
     case 'setManagementFeeRecipient':
@@ -541,6 +578,7 @@ function TextField({ label, value, onChange }: { label: string; value: string; o
 
 function labelForIntent(intent: V2SetterIntent): string {
   switch (intent.kind) {
+    case 'transferOwnership': return 'Transfer Ownership';
     case 'setCurator': return 'Set Curator';
     case 'setPerformanceFee': return 'Set Performance Fee';
     case 'setPerformanceFeeRecipient': return 'Set Performance Fee Recipient';
@@ -557,6 +595,9 @@ function labelForIntent(intent: V2SetterIntent): string {
 
 function invalidHint(intent: V2SetterIntent, addr: string, fee: string, text: string): string {
   switch (intent.kind) {
+    case 'transferOwnership':
+      if (!isAddress(addr)) return 'Enter a valid address';
+      return 'Enter a different address';
     case 'setCurator':
     case 'setPerformanceFeeRecipient':
     case 'setManagementFeeRecipient':
