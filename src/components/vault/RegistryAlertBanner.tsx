@@ -111,7 +111,7 @@ export function RegistryAlertBanner({ vaultAddress, chainId, isV2Vault }: Regist
         </div>
 
         <div className="flex items-center gap-2 ml-4 shrink-0">
-          {canManage && config.actionLabel && (
+          {config.actionLabel && (
             <Link
               to={`/vault/${chainId}/${vaultAddress}/registry`}
               className="px-3 py-1.5 text-xs font-medium bg-accent-primary text-white hover:bg-accent-primary-hover transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
