@@ -15,7 +15,7 @@
  */
 import { useState } from 'react';
 import type { Address } from 'viem';
-import { useReadContract } from 'wagmi';
+import { useReadContract, useAccount } from 'wagmi';
 import { useVaultInfo } from '../../lib/hooks/useVault';
 import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
@@ -62,6 +62,19 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   const canEdit = permissions.canCurate || permissions.canManage || permissions.isAdmin;
   const timelockSeconds = vault.timelock;
   const allocators: Address[] = vault.allocators ?? [];
+
+  // V2 `submit(bytes)` — used by every timelocked setter (incl. setIsAllocator)
+  // — is curator-gated on-chain. If `curator()` is `0x0` (fresh vault) or
+  // doesn't match the connected wallet, those submits revert with
+  // `NotAuthorized` at simulate time and the user sees the action "do
+  // nothing". `setCurator` itself is owner-only/direct (handled in the
+  // setter drawer), so the owner can bootstrap by setting themselves first.
+  const { address: connected } = useAccount();
+  const ZERO = '0x0000000000000000000000000000000000000000';
+  const curatorSet = vault.curator && vault.curator !== ZERO;
+  const isOwner = !!connected && vault.owner?.toLowerCase() === connected.toLowerCase();
+  const isCurator = !!connected && curatorSet && vault.curator!.toLowerCase() === connected.toLowerCase();
+  const showCuratorHint = canEdit && !isCurator;
 
   // PR 28 — read vault-wide maxRate (uint64 WAD/sec scaled) and the
   // per-adapter forceDeallocatePenalty. The penalty getter is per
@@ -190,6 +203,35 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
               </Button>
             )}
           </div>
+          {showCuratorHint && (
+            <div className="bg-warning/10 border border-warning/20 px-2 py-1.5 text-[10px] text-text-primary mb-2">
+              {!curatorSet ? (
+                <>
+                  <strong>Curator not set.</strong>{' '}
+                  {isOwner ? (
+                    <>
+                      Adding allocators is curator-gated on V2.{' '}
+                      <button
+                        className="underline text-accent-primary hover:text-accent-primary-hover"
+                        onClick={() => setEditing({ kind: 'setCurator', current: vault.curator })}
+                      >
+                        Set yourself as curator
+                      </button>{' '}
+                      first.
+                    </>
+                  ) : (
+                    <>Only the vault owner can set the curator.</>
+                  )}
+                </>
+              ) : (
+                <>
+                  <strong>Connected wallet is not the curator.</strong> Allocator
+                  changes can only be submitted by{' '}
+                  <span className="font-mono">{vault.curator!.slice(0, 6)}…{vault.curator!.slice(-4)}</span>.
+                </>
+              )}
+            </div>
+          )}
           {allocators.length === 0 ? (
             <p className="text-[10px] text-text-tertiary italic">No allocators configured.</p>
           ) : (

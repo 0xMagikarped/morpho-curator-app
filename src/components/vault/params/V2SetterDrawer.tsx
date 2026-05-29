@@ -78,6 +78,29 @@ interface V2SetterDrawerProps {
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
 
+/**
+ * Owner-only setters on Vault V2 are NOT routed through `submit(bytes)`.
+ * The wizard (`createVault.ts` "Owner-only functions (no timelock)") calls
+ * them directly. Routing them through `submit` reverts with `NotAuthorized`
+ * because `submit` is curator-gated — and on a fresh vault `curator()` is
+ * `0x0`, so the owner can't even bootstrap themselves into the curator role.
+ *
+ * The user-visible symptom on Pharos: "Add Allocator does nothing" — actually
+ * upstream of that, "Set Curator" silently failed for the same reason, so
+ * the curator was still zero and nobody could submit anything.
+ */
+function isDirectSetter(intent: V2SetterIntent): boolean {
+  switch (intent.kind) {
+    case 'setCurator':
+    case 'setName':
+    case 'setSymbol':
+    case 'setIsSentinel':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function V2SetterDrawer({
   open,
   onClose,
@@ -190,11 +213,12 @@ export function V2SetterDrawer({
     }
   }, [intent, addressInput, feeInput, textInput, grant]);
 
+  const direct = isDirectSetter(intent);
   const timelock = useV2TimelockedOp({
     vaultAddress,
     chainId,
     calldata,
-    enabled: open && !!calldata,
+    enabled: open && !!calldata && !direct,
   });
 
   const handleSubmit = () => {
@@ -267,23 +291,27 @@ export function V2SetterDrawer({
           setGrant={setGrant}
         />
 
-        {/* Timelock state banner */}
-        {timelock.step === 'pending' && (
+        {/* Timelock state banner — hidden for direct (owner-only) setters */}
+        {!direct && timelock.step === 'pending' && (
           <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary">
             <strong>Submitted to timelock.</strong> Executable at{' '}
             <span className="font-mono">{new Date(Number(timelock.executableAt) * 1000).toUTCString()}</span>.
           </div>
         )}
-        {timelock.step === 'executable' && (
+        {!direct && timelock.step === 'executable' && (
           <div className="bg-success/10 border border-success/20 px-3 py-2 text-xs text-text-primary">
             <strong>Ready to execute.</strong> Click <span className="font-mono">Execute</span>.
           </div>
         )}
 
-        {/* Action button — single button that swaps label by timelock state */}
+        {/* Action button — direct setters get a single Save; timelocked setters swap label by state. */}
         {!calldata ? (
           <Button className="w-full" disabled>
             {invalidHint(intent, addressInput, feeInput, textInput)}
+          </Button>
+        ) : direct ? (
+          <Button className="w-full" onClick={handleExecute} disabled={busy} loading={busy}>
+            Save
           </Button>
         ) : timelock.step === 'loading' ? (
           <Button className="w-full" disabled>Checking timelock…</Button>
@@ -300,8 +328,9 @@ export function V2SetterDrawer({
         )}
 
         <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
-          Timelocked change ({timelockDays.toFixed(1)}d). Submit queues the change; Execute applies
-          it once the timelock has elapsed. On a 0-timelock vault both can be sent back-to-back.
+          {direct
+            ? 'Owner-only setter — applied in a single transaction (no timelock queue).'
+            : `Timelocked change (${timelockDays.toFixed(1)}d). Submit queues the change; Execute applies it once the timelock has elapsed. On a 0-timelock vault both can be sent back-to-back.`}
         </div>
       </div>
     </Drawer>
