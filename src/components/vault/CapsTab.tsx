@@ -10,6 +10,7 @@ import { ProgressBar } from '../ui/ProgressBar';
 import { useVaultInfo, useVaultAllocation, useVaultMarketsFromApi, useVaultRole, useVaultPendingActions, useDiscoveredMarketStatuses } from '../../lib/hooks/useVault';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
+import { useVaultSubmitCapMarkets } from '../../lib/hooks/useVaultSubmitCapMarkets';
 import { fetchMarketParams, fetchTokenInfo } from '../../lib/data/rpcClient';
 import { formatTokenAmount, formatCountdown, parseTokenAmount, formatPercent, formatDuration } from '../../lib/utils/format';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
@@ -77,15 +78,18 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   // Compute discovered market IDs that are NOT already in vault queues
   const vaultAssetLower = vault?.asset?.toLowerCase();
   const existingMarketIds = useMemo(() => new Set(marketIds ?? []), [marketIds]);
-  const discoveredMarketIds = useMemo(() => {
-    if (!allChainMarkets || !vaultAssetLower) return [];
-    return allChainMarkets
-      .filter((m) => m.loanToken.toLowerCase() === vaultAssetLower && !existingMarketIds.has(m.marketId))
-      .map((m) => m.marketId);
-  }, [allChainMarkets, vaultAssetLower, existingMarketIds]);
 
-  // Read on-chain config + pendingCap for discovered markets
-  const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
+  // V1 vaults: also event-scan the vault's own SubmitCap logs so any market
+  // the curator has touched (including ones the global scanner hasn't yet
+  // indexed and ones added by manual ID) gets a live pendingCap read.
+  const isV1 = vault?.version === 'v1';
+  const v1Timelock = isV1 ? vault.timelock : 0n;
+  const { data: submitCapMarkets } = useVaultSubmitCapMarkets(
+    chainId,
+    vaultAddress,
+    v1Timelock,
+    !!isV1,
+  );
 
   const [expandedMarket, setExpandedMarket] = useState<string | null>(null);
   const [newCapValue, setNewCapValue] = useState('');
@@ -98,6 +102,37 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
   const [manualMarketLoading, setManualMarketLoading] = useState(false);
   const [manualMarketError, setManualMarketError] = useState<string | null>(null);
   const [manualMarkets, setManualMarkets] = useState<MarketLifecycleItem[]>([]);
+
+  // Union of every candidate marketId that could hold an active pendingCap
+  // for this vault and isn't already in supplyQueue/withdrawQueue:
+  //   - scanner-discovered markets whose loan token matches the vault asset
+  //   - markets the vault has emitted SubmitCap on within the timelock window
+  //   - markets the curator added by ID in this session
+  //
+  // All three sources feed useDiscoveredMarketStatuses so the pendingCap
+  // read happens once per id regardless of how it was found.
+  const discoveredMarketIds = useMemo(() => {
+    const set = new Set<`0x${string}`>();
+    if (allChainMarkets && vaultAssetLower) {
+      for (const m of allChainMarkets) {
+        if (m.loanToken.toLowerCase() === vaultAssetLower && !existingMarketIds.has(m.marketId)) {
+          set.add(m.marketId);
+        }
+      }
+    }
+    for (const id of submitCapMarkets ?? []) {
+      if (!existingMarketIds.has(id)) set.add(id);
+    }
+    for (const m of manualMarkets) {
+      if (!existingMarketIds.has(m.marketId as `0x${string}`)) {
+        set.add(m.marketId as `0x${string}`);
+      }
+    }
+    return [...set];
+  }, [allChainMarkets, vaultAssetLower, existingMarketIds, submitCapMarkets, manualMarkets]);
+
+  // Read on-chain config + pendingCap for discovered markets
+  const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
 
   const handleAddManualMarket = useCallback(async () => {
     const id = manualMarketId.trim();
@@ -301,12 +336,36 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
 
   // Merge manually-added markets (by ID) with scanner-discovered ones.
   // Dedup by marketId so a manual add that the scanner later discovers
-  // doesn't appear twice.
+  // doesn't appear twice. While we're here, override the manual entry's
+  // hardcoded `status: 'available'` with whatever discoveredStatusMap
+  // says — that's how a manually-added market with a live pendingCap
+  // ends up rendered as PENDING with a countdown instead of as a fresh
+  // "submit a cap" form (the savUSD case the user flagged).
   const allItems = useMemo(() => {
     const ids = new Set(lifecycleItems.map((li) => li.marketId.toLowerCase()));
-    const unique = manualMarkets.filter((m) => !ids.has(m.marketId.toLowerCase()));
+    const unique = manualMarkets
+      .filter((m) => !ids.has(m.marketId.toLowerCase()))
+      .map((m) => {
+        const onChain = discoveredStatusMap.get(m.marketId);
+        if (!onChain) return m;
+        if (onChain.pendingCap) {
+          return {
+            ...m,
+            status: 'pending' as MarketStatus,
+            discoveredPendingCap: onChain.pendingCap,
+          };
+        }
+        if (onChain.config.enabled || onChain.config.cap > 0n) {
+          return {
+            ...m,
+            status: 'enabled' as MarketStatus,
+            supplyCap: onChain.config.cap,
+          };
+        }
+        return m;
+      });
     return [...lifecycleItems, ...unique];
-  }, [lifecycleItems, manualMarkets]);
+  }, [lifecycleItems, manualMarkets, discoveredStatusMap]);
 
   const filteredItems = statusFilter === 'all'
     ? allItems

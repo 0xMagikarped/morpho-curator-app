@@ -14,13 +14,13 @@
  * the vault asset.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { parseAbiItem, type Address } from 'viem';
+import type { Address } from 'viem';
 import { Clock } from 'lucide-react';
 import {
   useReadContract,
   useWaitForTransactionReceipt,
 } from 'wagmi';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import {
   useVaultAllocation,
@@ -29,78 +29,14 @@ import {
   useVaultRole,
 } from '../../lib/hooks/useVault';
 import { useMarketScanner } from '../../lib/hooks/useMarketScanner';
+import { useVaultSubmitCapMarkets } from '../../lib/hooks/useVaultSubmitCapMarkets';
 import { vaultKeys } from '../../lib/queryKeys';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { morphoBlueAbi, metaMorphoV1Abi } from '../../lib/contracts/abis';
 import { getChainConfig } from '../../config/chains';
-import { getPublicClient } from '../../lib/data/rpcClient';
 import { formatTokenAmount } from '../../lib/utils/format';
-
-/**
- * Scan the vault's `SubmitCap` event logs over the timelock window.
- *
- * This is the cap-discovery path of last resort: the global MarketScanner
- * may not have indexed a brand-new market yet (it scans Morpho Blue's
- * CreateMarket events incrementally), so a pendingCap submitted on a
- * fresh market would silently miss the queue/scanner union. SubmitCap is
- * emitted by the vault itself on every submitCap call, so scanning the
- * vault's logs over `timelock + buffer` gives us every market that could
- * still hold a live pendingCap. Cheap on chains with short windows.
- */
-const SUBMIT_CAP_EVENT = parseAbiItem(
-  'event SubmitCap(address indexed caller, bytes32 indexed id, uint256 cap)',
-);
-
-function useVaultSubmitCapMarkets(
-  chainId: number,
-  vaultAddress: Address,
-  timelockSeconds: bigint,
-  enabled: boolean,
-) {
-  return useQuery({
-    queryKey: ['vault-submit-cap-markets', chainId, vaultAddress.toLowerCase()],
-    queryFn: async (): Promise<`0x${string}`[]> => {
-      const chainConfig = getChainConfig(chainId);
-      if (!chainConfig) return [];
-      const client = getPublicClient(chainId);
-      const latest = await client.getBlockNumber();
-      // blockTime is ms; treat it as 2s if unset to stay safe.
-      const blockSecs = Math.max(1, Math.floor(chainConfig.blockTime / 1000));
-      // Cover the full timelock plus a 24h buffer so an in-flight submit
-      // is still caught even if the timelock was recently lowered.
-      const lookbackBlocks = (Number(timelockSeconds) + 86_400) / blockSecs;
-      const span = BigInt(Math.ceil(lookbackBlocks));
-      const fromBlock = latest > span ? latest - span : 0n;
-      const chunk = BigInt(chainConfig.scanner.batchSize);
-
-      const ids = new Set<`0x${string}`>();
-      for (let from = fromBlock; from <= latest; from += chunk) {
-        const to = from + chunk - 1n > latest ? latest : from + chunk - 1n;
-        try {
-          const logs = await client.getLogs({
-            address: vaultAddress,
-            event: SUBMIT_CAP_EVENT,
-            fromBlock: from,
-            toBlock: to,
-          });
-          for (const log of logs) {
-            const id = log.args.id;
-            if (id) ids.add(id as `0x${string}`);
-          }
-        } catch (err) {
-          // Some RPCs cap the range tighter than batchSize; halve and retry once.
-          console.warn('[PendingCapsBanner] getLogs chunk failed, skipping', { from, to, err });
-        }
-      }
-      return [...ids];
-    },
-    enabled,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  });
-}
 
 interface PendingCapsBannerProps {
   chainId: number;
