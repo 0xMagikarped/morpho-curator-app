@@ -139,12 +139,33 @@ export function formatDuration(seconds: number | bigint): string {
 
 /**
  * Format a countdown from a future timestamp.
+ *
+ * Unlike `formatDuration` (which intentionally rounds to a single unit
+ * for static timelock labels — "3d" not "3d 2h"), countdowns surface
+ * the next-finer unit so the curator can tell "1h 35m" from "1h 02m":
+ *   < 60s        → "Xs"
+ *   < 1h         → "Xm Ys"
+ *   < 1d         → "Xh Ym"
+ *   ≥ 1d         → "Xd Yh"
  */
 export function formatCountdown(validAtSeconds: bigint): string {
   const now = BigInt(Math.floor(Date.now() / 1000));
   if (validAtSeconds <= now) return 'Ready';
-  const remaining = Number(validAtSeconds - now);
-  return formatDuration(remaining);
+  const s = Number(validAtSeconds - now);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r > 0 ? `${m}m ${r}s` : `${m}m`;
+  }
+  if (s < 86400) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  return h > 0 ? `${d}d ${h}h` : `${d}d`;
 }
 
 /**
