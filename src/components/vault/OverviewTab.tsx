@@ -11,6 +11,7 @@ import { RiskAlertBanner } from '../risk/RiskAlertBanner';
 import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
 import { RegistryAlertBanner } from './RegistryAlertBanner';
+import { PendingCapsBanner } from './PendingCapsBanner';
 import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
 import { useVaultPendingState } from './owner/useVaultPendingState';
 import { useVaultInfo, useVaultRole, useVaultMarketsFromApi, useVaultAllocators } from '../../lib/hooks/useVault';
@@ -120,6 +121,17 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
 
       {/* V2 Registry Alert */}
       <RegistryAlertBanner vaultAddress={vaultAddress} chainId={chainId} isV2Vault={vault.version === 'v2'} />
+
+      {/* V1 pendingCap submissions (matters on SEI where the Caps tab is
+          easy to overlook; renders nothing when no pending caps exist). */}
+      <PendingCapsBanner
+        chainId={chainId}
+        vaultAddress={vaultAddress}
+        vaultAsset={vault.asset}
+        assetSymbol={vault.assetInfo.symbol}
+        assetDecimals={vault.assetInfo.decimals}
+        isV1={vault.version === 'v1'}
+      />
 
       {/* Risk Alerts */}
       <RiskAlertBanner alerts={riskAlerts} />
