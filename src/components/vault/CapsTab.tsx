@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { isHex, type Address } from 'viem';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useVaultWrite } from '../../hooks/useVaultWrite';
 import { Clock, CheckCircle, Circle, ArrowRight, AlertTriangle, Plus } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
@@ -133,6 +133,74 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
 
   // Read on-chain config + pendingCap for discovered markets
   const { data: discoveredStatuses } = useDiscoveredMarketStatuses(chainId, vaultAddress, discoveredMarketIds);
+
+  // SubmitCap event-scan can name a market that NEITHER the global scanner
+  // NOR the manual-add input has surfaced yet (fresh market on a long
+  // chain, or the curator submitCap-ed before the indexer caught up).
+  // For each such id, fetch params + token info so we can synthesise a
+  // lifecycle row — otherwise the savUSD-style "vault has a pending
+  // cap but nothing renders" gap re-opens.
+  const scannerIdSet = useMemo(
+    () => new Set((allChainMarkets ?? []).map((m) => m.marketId.toLowerCase())),
+    [allChainMarkets],
+  );
+  const manualIdSet = useMemo(
+    () => new Set(manualMarkets.map((m) => m.marketId.toLowerCase())),
+    [manualMarkets],
+  );
+  const submitCapOnlyIds = useMemo(
+    () =>
+      (submitCapMarkets ?? []).filter((id) => {
+        const lower = id.toLowerCase();
+        return (
+          !existingMarketIds.has(id) &&
+          !scannerIdSet.has(lower) &&
+          !manualIdSet.has(lower)
+        );
+      }),
+    [submitCapMarkets, existingMarketIds, scannerIdSet, manualIdSet],
+  );
+  const { data: submitCapOnlyRecords } = useQuery({
+    queryKey: ['submit-cap-only-records', chainId, vaultAddress.toLowerCase(), submitCapOnlyIds.sort().join(',')],
+    queryFn: async (): Promise<MarketRecord[]> => {
+      const ZERO = '0x0000000000000000000000000000000000000000' as Address;
+      const results = await Promise.all(
+        submitCapOnlyIds.map(async (id) => {
+          try {
+            const params = await fetchMarketParams(chainId, id);
+            if (params.loanToken === ZERO) return null;
+            const [loan, collat] = await Promise.all([
+              fetchTokenInfo(chainId, params.loanToken).catch(() => ({
+                address: params.loanToken, name: '???', symbol: '???', decimals: 18,
+              })),
+              fetchTokenInfo(chainId, params.collateralToken).catch(() => ({
+                address: params.collateralToken, name: '???', symbol: '???', decimals: 18,
+              })),
+            ]);
+            return {
+              chainId,
+              marketId: id,
+              loanToken: params.loanToken,
+              collateralToken: params.collateralToken,
+              oracle: params.oracle,
+              irm: params.irm,
+              lltv: params.lltv.toString(),
+              discoveredAtBlock: 0,
+              loanTokenSymbol: loan.symbol,
+              loanTokenDecimals: loan.decimals,
+              collateralTokenSymbol: collat.symbol,
+              collateralTokenDecimals: collat.decimals,
+            } as MarketRecord;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return results.filter((r): r is MarketRecord => r !== null);
+    },
+    enabled: submitCapOnlyIds.length > 0,
+    staleTime: Infinity,
+  });
 
   const handleAddManualMarket = useCallback(async () => {
     const id = manualMarketId.trim();
@@ -331,8 +399,47 @@ export function CapsTab({ chainId, vaultAddress }: CapsTabProps) {
       }
     }
 
+    // 3. Markets surfaced ONLY by the SubmitCap event scan (not in queues
+    // and not yet indexed by the global scanner). Params + token info
+    // come from submitCapOnlyRecords above.
+    if (submitCapOnlyRecords) {
+      const seen = new Set(items.map((i) => i.marketId.toLowerCase()));
+      for (const m of submitCapOnlyRecords) {
+        if (seen.has(m.marketId.toLowerCase())) continue;
+        const onChain = discoveredStatusMap.get(m.marketId);
+        let status: MarketStatus = 'available';
+        let supplyCap = 0n;
+        let discoveredPendingCap: PendingCap | undefined;
+        if (onChain) {
+          if (onChain.pendingCap) {
+            status = 'pending';
+            discoveredPendingCap = onChain.pendingCap;
+          } else if (onChain.config.enabled || onChain.config.cap > 0n) {
+            status = 'enabled';
+            supplyCap = onChain.config.cap;
+          }
+        }
+        const collateralLabel = m.collateralTokenSymbol || m.collateralToken.slice(0, 10);
+        const loanLabel = m.loanTokenSymbol || m.loanToken.slice(0, 10);
+        items.push({
+          marketId: m.marketId,
+          status,
+          label: `${collateralLabel} / ${loanLabel}`,
+          collateralSymbol: collateralLabel,
+          loanSymbol: loanLabel,
+          irmAddress: m.irm as `0x${string}`,
+          lltv: Number(m.lltv) / 1e18,
+          supplyCap,
+          supplyAssets: 0n,
+          capUsedPct: 0,
+          discoveredMarket: m,
+          discoveredPendingCap,
+        });
+      }
+    }
+
     return items;
-  }, [markets, allocation, allChainMarkets, vaultAssetLower, existingMarketIds, pendingCapsByMarket, discoveredStatusMap]);
+  }, [markets, allocation, allChainMarkets, vaultAssetLower, existingMarketIds, pendingCapsByMarket, discoveredStatusMap, submitCapOnlyRecords]);
 
   // Merge manually-added markets (by ID) with scanner-discovered ones.
   // Dedup by marketId so a manual add that the scanner later discovers
