@@ -22,6 +22,24 @@ const SUBMIT_CAP_EVENT = parseAbiItem(
   'event SubmitCap(address indexed caller, bytes32 indexed id, uint256 cap)',
 );
 
+/**
+ * Per-call block span for the vault-scoped SubmitCap event scan.
+ *
+ * The chain-level `scanner.batchSize` is tuned for Morpho-Blue-wide
+ * CreateMarket scans where event density is high and 2k blocks already
+ * pushes log payload limits. SubmitCap events on a single vault are
+ * orders of magnitude sparser — a vault emits maybe one per week — so
+ * we can request a much wider window per RPC call. Empirically all the
+ * public SEI / ETH / Base RPCs accept 50k-block ranges; capped at
+ * scanner.batchSize when the chain config explicitly opts into a
+ * smaller window.
+ *
+ * On SEI specifically (400ms blocks → 648k blocks per 3-day timelock),
+ * 2k chunks blew up into ~324 sequential getLogs calls that throttled
+ * publicnode.com and cascaded into "generic read failures" elsewhere.
+ */
+const SUBMIT_CAP_CHUNK_BLOCKS = 50_000n;
+
 export function useVaultSubmitCapMarkets(
   chainId: number | undefined,
   vaultAddress: Address | undefined,
@@ -43,7 +61,12 @@ export function useVaultSubmitCapMarkets(
       const lookbackBlocks = (Number(timelockSeconds ?? 0n) + 86_400) / blockSecs;
       const span = BigInt(Math.ceil(lookbackBlocks));
       const fromBlock = latest > span ? latest - span : 0n;
-      const chunk = BigInt(chainConfig.scanner.batchSize);
+      // Don't honour `scanner.batchSize` here — it's a CreateMarket-density
+      // setting; SubmitCap on a single vault is sparse enough that a much
+      // wider window is fine and keeps the call count manageable on
+      // fast-block chains like SEI.
+      const configChunk = BigInt(chainConfig.scanner.batchSize);
+      const chunk = configChunk > SUBMIT_CAP_CHUNK_BLOCKS ? configChunk : SUBMIT_CAP_CHUNK_BLOCKS;
 
       const ids = new Set<`0x${string}`>();
       for (let from = fromBlock; from <= latest; from += chunk) {
@@ -66,7 +89,12 @@ export function useVaultSubmitCapMarkets(
       return [...ids];
     },
     enabled: enabled && !!chainId && !!vaultAddress,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
+    // Once we've seen a submission, the per-marketId pendingCap read
+    // (useDiscoveredMarketStatuses, 30s) drives the countdown; the
+    // submitter set itself is near-immutable, so the heavy getLogs scan
+    // doesn't need a tight refetch. Keep it at 5 min to stay safe under
+    // SEI publicnode rate limits.
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
   });
 }

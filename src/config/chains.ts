@@ -21,6 +21,7 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: [
       'https://sei-evm-rpc.publicnode.com',
+      'https://evm-rpc.sei-apis.com',
     ],
     blockExplorer: 'https://seiscan.io',
     morphoBlue: '0xc9cDAc20FCeAAF616f7EB0bb6Cd2c69dcfa9094c' as Address,
