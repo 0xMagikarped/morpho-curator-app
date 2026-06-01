@@ -890,9 +890,13 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
               <Button
                 variant="ghost"
                 onClick={handleReset}
-                disabled={!hasChanges}
+                // Stay enabled while the wallet popup is pending so the
+                // curator can recover from a popup that never appeared
+                // or a hung connector — wagmi's reset() clears isPending
+                // even when the underlying request is in flight.
+                disabled={!hasChanges && !isPending && !isConfirming}
               >
-                Reset
+                {isPending || isConfirming ? 'Cancel' : 'Reset'}
               </Button>
             </div>
           </div>

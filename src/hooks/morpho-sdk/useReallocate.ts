@@ -1,10 +1,7 @@
-import { useState } from "react";
 import { useWaitForTransactionReceipt, useAccount } from "wagmi";
 import { useGuardedWriteContract } from "../useGuardedWriteContract";
 import type { Address } from "viem";
-import { BaseError, ContractFunctionRevertedError } from "viem";
 import { metaMorphoV1Abi } from "../../lib/contracts/abis";
-import { getPublicClient } from "../../lib/data/rpcClient";
 
 export interface MarketAllocationArg {
   marketParams: {
@@ -29,17 +26,15 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
     writeContract,
     data: hash,
     isPending,
-    error: writeError,
+    error,
+    simulateError,
     reset,
   } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } =
     useWaitForTransactionReceipt({ hash });
   const { address: userAddress } = useAccount();
-  const [simulationError, setSimulationError] = useState<Error | null>(null);
 
   const reallocate = async (allocations: MarketAllocationArg[]) => {
-    setSimulationError(null);
-
     // Log the exact allocations for debugging
     console.log("[reallocate] Vault:", vaultAddress, "Chain:", chainId);
     console.log("[reallocate] Caller:", userAddress);
@@ -60,43 +55,11 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
       })),
     ] as const;
 
-    // Pre-flight: simulate the call via RPC to get the real revert reason
-    // This bypasses Rabby/wallet simulation which may fail on SEI with misleading errors
-    if (userAddress) {
-      try {
-        const client = getPublicClient(chainId);
-
-        await client.simulateContract({
-          address: vaultAddress,
-          abi: metaMorphoV1Abi,
-          functionName: "reallocate",
-          args,
-          account: userAddress,
-        });
-        console.log("[reallocate] Pre-flight simulation: SUCCESS");
-      } catch (simErr) {
-        // Extract meaningful revert reason
-        let reason = "Unknown revert";
-        if (simErr instanceof BaseError) {
-          const revertErr = simErr.walk((e) => e instanceof ContractFunctionRevertedError);
-          if (revertErr instanceof ContractFunctionRevertedError) {
-            reason = revertErr.data?.errorName ?? revertErr.shortMessage ?? reason;
-          } else {
-            reason = simErr.shortMessage ?? simErr.message;
-          }
-        } else if (simErr instanceof Error) {
-          reason = simErr.message;
-        }
-
-        console.error("[reallocate] Pre-flight simulation FAILED:", reason);
-        console.error("[reallocate] Full error:", simErr);
-
-        setSimulationError(new Error(`Reallocation would revert: ${reason}`));
-        return; // Don't submit a tx that will revert
-      }
-    }
-
-    // Explicit gas limit for wallet simulation compatibility on SEI
+    // useGuardedWriteContract already runs a `simulateContract` preflight
+    // on the exact args (PR-2 audit fix). The redundant manual simulate
+    // here doubled SEI RPC pressure and could hang silently before the
+    // wallet popup ever opened — drop it and rely on the guarded path.
+    // Explicit gas limit kept for SEI wallet compatibility.
     const gasEstimate = BigInt(200_000 + allocations.length * 150_000);
 
     writeContract({
@@ -109,8 +72,11 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
     });
   };
 
-  // Combine errors: simulation error takes priority
-  const error = simulationError ?? writeError;
+  // Surface the decoded simulate failure with the same "Reallocation would
+  // revert: …" framing the UI already expects.
+  const surfaced = simulateError
+    ? new Error(`Reallocation would revert: ${simulateError.message}`)
+    : error;
 
-  return { reallocate, hash, isPending, isConfirming, isSuccess, error, reset };
+  return { reallocate, hash, isPending, isConfirming, isSuccess, error: surfaced, reset };
 }
