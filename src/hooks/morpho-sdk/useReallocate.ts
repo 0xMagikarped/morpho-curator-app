@@ -30,8 +30,11 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
     simulateError,
     reset,
   } = useGuardedWriteContract();
+  // Pin the receipt watcher to the vault's chain. Without this wagmi V2
+  // defaults to the connected chain, which is fine 99% of the time but
+  // not robust if the wallet drifts mid-flight.
   const { isLoading: isConfirming, isSuccess } =
-    useWaitForTransactionReceipt({ hash });
+    useWaitForTransactionReceipt({ hash, chainId });
   const { address: userAddress } = useAccount();
 
   const reallocate = async (allocations: MarketAllocationArg[]) => {
@@ -55,20 +58,25 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
       })),
     ] as const;
 
-    // useGuardedWriteContract already runs a `simulateContract` preflight
-    // on the exact args (PR-2 audit fix). The redundant manual simulate
-    // here doubled SEI RPC pressure and could hang silently before the
-    // wallet popup ever opened — drop it and rely on the guarded path.
-    // Explicit gas limit kept for SEI wallet compatibility.
-    const gasEstimate = BigInt(200_000 + allocations.length * 150_000);
-
+    // No `gas:` override — every other write in this app (acceptCap,
+    // submit, V2 setters, …) lets viem call eth_estimateGas via the
+    // configured transport, and they all sign cleanly on SEI. The
+    // hardcoded budget here (added in cd8659c to bypass a Rabby
+    // Tenderly preflight on mainnet) made `useReallocate` the lone
+    // outlier and caused the wallet popup to hang on SEI: when `gas`
+    // is user-supplied, MetaMask/Rabby validate the override against
+    // their own (often slow) bundled SEI RPC instead of using viem's
+    // result, and a stalled wallet RPC leaves writeContract stuck on
+    // isPending forever. The PR-2 simulateContract preflight in
+    // useGuardedWriteContract already proves the call succeeds against
+    // the app's sei-apis-first transport, so estimateGas — running on
+    // the same path — won't fail either.
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: "reallocate",
       args,
       chainId,
-      gas: gasEstimate,
     });
   };
 
