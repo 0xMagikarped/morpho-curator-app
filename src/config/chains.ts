@@ -20,8 +20,11 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     protocol: 'morpho',
     defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: [
-      'https://sei-evm-rpc.publicnode.com',
+      // sei-apis (official Sei Labs endpoint) first — publicnode has been
+      // throttling burst reads, surfacing as "generic read failure" and
+      // hanging the wagmi writeContract preflight before the wallet popup.
       'https://evm-rpc.sei-apis.com',
+      'https://sei-evm-rpc.publicnode.com',
     ],
     blockExplorer: 'https://seiscan.io',
     morphoBlue: '0xc9cDAc20FCeAAF616f7EB0bb6Cd2c69dcfa9094c' as Address,

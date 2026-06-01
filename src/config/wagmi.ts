@@ -20,8 +20,13 @@ export const sei: Chain = {
   name: 'SEI',
   nativeCurrency: { name: 'SEI', symbol: 'SEI', decimals: 18 },
   rpcUrls: {
+    // sei-apis is the official Sei Labs endpoint; publicnode tends to
+    // throttle under burst load and was timing out wagmi's writeContract
+    // preflights, leaving the wallet popup hanging. Keep publicnode as
+    // a fallback in the wagmi transport list, but advertise sei-apis as
+    // the canonical chain URL.
     default: {
-      http: ['https://sei-evm-rpc.publicnode.com'],
+      http: ['https://evm-rpc.sei-apis.com'],
     },
   },
   blockExplorers: {
@@ -58,11 +63,18 @@ export const pharos: Chain = {
   testnet: false,
 };
 
-// Build transport lists — env-configured RPCs (e.g. Infura) get priority
+// Build transport lists — env-configured RPCs (e.g. Infura) get priority.
+// 3s timeout on each leaf transport so a throttled endpoint fails over
+// fast instead of holding the wagmi writeContract preflight for the
+// default 10s while the user stares at a "Signing…" spinner.
+const FAST_TIMEOUT_MS = 3_000;
 const seiTransports = [
-  ...(env.seiRpcUrl ? [http(env.seiRpcUrl)] : []),
-  http('https://sei-evm-rpc.publicnode.com'),
-  http('https://evm-rpc.sei-apis.com'),
+  ...(env.seiRpcUrl ? [http(env.seiRpcUrl, { timeout: FAST_TIMEOUT_MS })] : []),
+  // sei-apis FIRST — publicnode has been throttling SEI writes; rank: true
+  // re-orders later but every fresh page load tries the head of the list
+  // first, so the canonical endpoint goes there.
+  http('https://evm-rpc.sei-apis.com', { timeout: FAST_TIMEOUT_MS }),
+  http('https://sei-evm-rpc.publicnode.com', { timeout: FAST_TIMEOUT_MS }),
 ];
 const ethTransports = [
   ...(env.ethRpcUrl ? [http(env.ethRpcUrl)] : []),
