@@ -64,17 +64,24 @@ export const pharos: Chain = {
 };
 
 // Build transport lists — env-configured RPCs (e.g. Infura) get priority.
-// 3s timeout on each leaf transport so a throttled endpoint fails over
-// fast instead of holding the wagmi writeContract preflight for the
-// default 10s while the user stares at a "Signing…" spinner.
-const FAST_TIMEOUT_MS = 3_000;
+//
+// 3s was too aggressive: SEI reads on a healthy public endpoint can spike
+// to 4-5s under load (multicall batches, getLogs) and a tight timeout
+// just bounces between endpoints faster than they can warm up. 8s gives
+// each leaf a fair shot before failing over, and fallback() will still
+// switch to a different endpoint if one is truly down.
+const LEAF_TIMEOUT_MS = 8_000;
 const seiTransports = [
-  ...(env.seiRpcUrl ? [http(env.seiRpcUrl, { timeout: FAST_TIMEOUT_MS })] : []),
-  // sei-apis FIRST — publicnode has been throttling SEI writes; rank: true
-  // re-orders later but every fresh page load tries the head of the list
-  // first, so the canonical endpoint goes there.
-  http('https://evm-rpc.sei-apis.com', { timeout: FAST_TIMEOUT_MS }),
-  http('https://sei-evm-rpc.publicnode.com', { timeout: FAST_TIMEOUT_MS }),
+  ...(env.seiRpcUrl ? [http(env.seiRpcUrl, { timeout: LEAF_TIMEOUT_MS })] : []),
+  // sei-apis FIRST — the official Sei Labs endpoint.
+  http('https://evm-rpc.sei-apis.com', { timeout: LEAF_TIMEOUT_MS }),
+  // Diversify the fallback set. publicnode has been throttling under
+  // burst load (the "RPC error" the user reported); the additional
+  // community endpoints below pick up the slack so reads/simulates
+  // keep moving if any single host is down.
+  http('https://sei.drpc.org', { timeout: LEAF_TIMEOUT_MS }),
+  http('https://evm-rpc.sei.basementnodes.ca', { timeout: LEAF_TIMEOUT_MS }),
+  http('https://sei-evm-rpc.publicnode.com', { timeout: LEAF_TIMEOUT_MS }),
 ];
 const ethTransports = [
   ...(env.ethRpcUrl ? [http(env.ethRpcUrl)] : []),

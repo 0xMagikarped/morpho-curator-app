@@ -21,9 +21,11 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
     defaultVaultFlavor: 'metaMorphoV1',
     rpcUrls: [
       // sei-apis (official Sei Labs endpoint) first — publicnode has been
-      // throttling burst reads, surfacing as "generic read failure" and
-      // hanging the wagmi writeContract preflight before the wallet popup.
+      // throttling burst reads. drpc + basementnodes diversify the
+      // fallback so reads keep flowing if any one host is down.
       'https://evm-rpc.sei-apis.com',
+      'https://sei.drpc.org',
+      'https://evm-rpc.sei.basementnodes.ca',
       'https://sei-evm-rpc.publicnode.com',
     ],
     blockExplorer: 'https://seiscan.io',

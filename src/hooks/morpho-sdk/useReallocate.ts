@@ -58,25 +58,27 @@ export function useReallocate(vaultAddress: Address, chainId: number) {
       })),
     ] as const;
 
-    // No `gas:` override — every other write in this app (acceptCap,
-    // submit, V2 setters, …) lets viem call eth_estimateGas via the
-    // configured transport, and they all sign cleanly on SEI. The
-    // hardcoded budget here (added in cd8659c to bypass a Rabby
-    // Tenderly preflight on mainnet) made `useReallocate` the lone
-    // outlier and caused the wallet popup to hang on SEI: when `gas`
-    // is user-supplied, MetaMask/Rabby validate the override against
-    // their own (often slow) bundled SEI RPC instead of using viem's
-    // result, and a stalled wallet RPC leaves writeContract stuck on
-    // isPending forever. The PR-2 simulateContract preflight in
-    // useGuardedWriteContract already proves the call succeeds against
-    // the app's sei-apis-first transport, so estimateGas — running on
-    // the same path — won't fail either.
+    // Keep the explicit `gas:` (cd8659c). In wagmi v2 writeContract
+    // uses the wallet client; when `gas` is omitted, viem calls
+    // `eth_estimateGas` THROUGH THE WALLET'S PROVIDER — i.e. via the
+    // wallet's bundled SEI RPC, which on most setups is publicnode
+    // (slow / throttled). That extra round-trip was making the popup
+    // hang on SEI. Setting gas explicitly skips that wallet-RPC
+    // estimateGas hop entirely; the wallet still runs its own popup
+    // simulation but at least viem doesn't add a second slow call.
+    // Budget: 200k base + 250k per allocation, with a 600k floor so
+    // the single-market case has headroom (reallocate's per-market
+    // cost dominates writes/reads against Morpho Blue).
+    const proposed = 200_000n + BigInt(allocations.length) * 250_000n;
+    const gas = proposed > 600_000n ? proposed : 600_000n;
+
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV1Abi,
       functionName: "reallocate",
       args,
       chainId,
+      gas,
     });
   };
 
