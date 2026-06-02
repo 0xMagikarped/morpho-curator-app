@@ -73,6 +73,13 @@ const fetchOracleTokenInfo = async (
   address: string,
   chainId: number,
   setter: (info: OracleTokenInfo | null) => void,
+  /**
+   * Optional seed callback: invoked with the fetched decimals iff the
+   * decimals input is currently blank. The caller passes a function that
+   * checks the current input and only overwrites a blank one — this is
+   * the "auto-fill but don't clobber an explicit override" behavior.
+   */
+  seedDecimals?: (fetched: number) => void,
 ) => {
   if (!isAddress(address) || address === ZERO_ADDRESS) {
     setter(null);
@@ -95,11 +102,34 @@ const fetchOracleTokenInfo = async (
         functionName: 'decimals',
       }),
     ]);
-    setter({ name: name as string, decimals: Number(decimals) });
+    const dec = Number(decimals);
+    setter({ name: name as string, decimals: dec });
+    if (seedDecimals && Number.isFinite(dec)) seedDecimals(dec);
   } catch {
     setter(null);
   }
 };
+
+// ============================================================
+// Decimals input helper
+// ============================================================
+
+/**
+ * Parse the decimals input field. Returns `null` when the input is
+ * blank or not a non-negative integer in the valid ERC-20 range (we
+ * accept 0..36 — the MorphoChainlinkOracleV2 scale-factor exponent
+ * math doesn't tolerate larger values without overflow, and no real
+ * token uses more than 36 anyway). Used as the validate-gate signal
+ * so we never silently fall back to a default like 18.
+ */
+function parseDecimalsInput(s: string): number | null {
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  if (!/^\d{1,2}$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 0 || n > 36) return null;
+  return n;
+}
 
 // ============================================================
 // Section Header
@@ -109,6 +139,85 @@ function SectionLabel({ children }: { children: string }) {
   return (
     <div className="text-[10px] font-medium text-text-tertiary tracking-wider font-mono uppercase">
       // {children}
+    </div>
+  );
+}
+
+/**
+ * Editable decimals input with confirmation against the on-chain
+ * `decimals()` read. The curator has to either accept the fetched
+ * value or explicitly type a different one — there is no silent
+ * fallback to 18. If the entered value doesn't match the fetched
+ * value, the row turns warning to make the override impossible to
+ * miss. If the token-info fetch failed, the field stays empty and
+ * the validate gate stays closed.
+ */
+function DecimalsField({
+  label,
+  inputId,
+  value,
+  onChange,
+  fetched,
+}: {
+  label: string;
+  inputId: string;
+  value: string;
+  onChange: (v: string) => void;
+  fetched: OracleTokenInfo | null;
+}) {
+  const parsed = parseDecimalsInput(value);
+  const fetchedDec = fetched?.decimals ?? null;
+  const isOverride = parsed !== null && fetchedDec !== null && parsed !== fetchedDec;
+  const isInvalid = value.trim() !== '' && parsed === null;
+
+  return (
+    <div className="mt-1.5 space-y-1">
+      <label htmlFor={inputId} className="text-[10px] text-text-tertiary uppercase tracking-wider font-mono">
+        {label}
+      </label>
+      <div className="flex items-center gap-3">
+        <input
+          id={inputId}
+          type="number"
+          min={0}
+          max={36}
+          step={1}
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. 18"
+          className={`${INPUT_CLASS} w-24 ${
+            isInvalid
+              ? 'border-danger'
+              : isOverride
+                ? 'border-warning'
+                : ''
+          }`}
+        />
+        <div className="text-xs">
+          {fetched ? (
+            <span className="text-text-secondary">
+              <span className="text-text-tertiary">on-chain:</span>{' '}
+              <span className="font-mono">{fetched.name}</span>{' '}
+              <span className="text-text-tertiary">·</span>{' '}
+              <span className="font-mono">{fetched.decimals}d</span>
+            </span>
+          ) : (
+            <span className="text-text-tertiary">enter token address to auto-fill</span>
+          )}
+        </div>
+      </div>
+      {isInvalid && (
+        <p className="text-[11px] text-danger">
+          Decimals must be an integer between 0 and 36.
+        </p>
+      )}
+      {isOverride && (
+        <p className="text-[11px] text-warning">
+          ⚠ Overriding on-chain value ({fetchedDec}d). The deployed oracle will use{' '}
+          <span className="font-mono">{parsed}</span> — double-check this is what you intend.
+        </p>
+      )}
     </div>
   );
 }
@@ -140,6 +249,10 @@ function ConfigureStep({
   setBaseOracleTokenInfo,
   quoteOracleTokenInfo,
   setQuoteOracleTokenInfo,
+  baseDecimalsInput,
+  setBaseDecimalsInput,
+  quoteDecimalsInput,
+  setQuoteDecimalsInput,
   onValidate,
 }: {
   chainId: number;
@@ -164,15 +277,24 @@ function ConfigureStep({
   setBaseOracleTokenInfo: (info: OracleTokenInfo | null) => void;
   quoteOracleTokenInfo: OracleTokenInfo | null;
   setQuoteOracleTokenInfo: (info: OracleTokenInfo | null) => void;
+  baseDecimalsInput: string;
+  setBaseDecimalsInput: (v: string) => void;
+  quoteDecimalsInput: string;
+  setQuoteDecimalsInput: (v: string) => void;
   onValidate: () => void;
 }) {
   const chainIds = getSupportedChainIds();
 
+  // Parse the editable decimals; null = invalid / blank. The validate gate
+  // requires both to parse cleanly so we never silently fall back to 18.
+  const parsedBaseDecimals = parseDecimalsInput(baseDecimalsInput);
+  const parsedQuoteDecimals = parseDecimalsInput(quoteDecimalsInput);
+
   const canValidate =
     isAddress(baseToken) &&
     isAddress(quoteToken) &&
-    baseOracleTokenInfo !== null &&
-    quoteOracleTokenInfo !== null;
+    parsedBaseDecimals !== null &&
+    parsedQuoteDecimals !== null;
 
   return (
     <Card>
@@ -203,38 +325,56 @@ function ConfigureStep({
 
         {/* Base Token */}
         <div className="space-y-1.5">
-          <SectionLabel>Base Token Address</SectionLabel>
+          <SectionLabel>Base Token Address (Collateral)</SectionLabel>
           <input
             type="text"
             value={baseToken}
             onChange={(e) => setBaseToken(e.target.value)}
-            onBlur={() => fetchOracleTokenInfo(baseToken, chainId, setBaseOracleTokenInfo)}
+            onBlur={() =>
+              fetchOracleTokenInfo(baseToken, chainId, setBaseOracleTokenInfo, (fetched) => {
+                // Only seed if the field is blank — never clobber an
+                // explicit override the curator typed in.
+                if (parseDecimalsInput(baseDecimalsInput) === null) {
+                  setBaseDecimalsInput(String(fetched));
+                }
+              })
+            }
             placeholder="0x..."
             className={INPUT_CLASS}
           />
-          {baseOracleTokenInfo && (
-            <div className="text-xs text-text-secondary">
-              {baseOracleTokenInfo.name} — {baseOracleTokenInfo.decimals} decimals
-            </div>
-          )}
+          <DecimalsField
+            label="Base Token Decimals"
+            inputId="base-decimals"
+            value={baseDecimalsInput}
+            onChange={setBaseDecimalsInput}
+            fetched={baseOracleTokenInfo}
+          />
         </div>
 
         {/* Quote Token */}
         <div className="space-y-1.5">
-          <SectionLabel>Quote Token Address</SectionLabel>
+          <SectionLabel>Quote Token Address (Loan)</SectionLabel>
           <input
             type="text"
             value={quoteToken}
             onChange={(e) => setQuoteToken(e.target.value)}
-            onBlur={() => fetchOracleTokenInfo(quoteToken, chainId, setQuoteOracleTokenInfo)}
+            onBlur={() =>
+              fetchOracleTokenInfo(quoteToken, chainId, setQuoteOracleTokenInfo, (fetched) => {
+                if (parseDecimalsInput(quoteDecimalsInput) === null) {
+                  setQuoteDecimalsInput(String(fetched));
+                }
+              })
+            }
             placeholder="0x..."
             className={INPUT_CLASS}
           />
-          {quoteOracleTokenInfo && (
-            <div className="text-xs text-text-secondary">
-              {quoteOracleTokenInfo.name} — {quoteOracleTokenInfo.decimals} decimals
-            </div>
-          )}
+          <DecimalsField
+            label="Quote Token Decimals"
+            inputId="quote-decimals"
+            value={quoteDecimalsInput}
+            onChange={setQuoteDecimalsInput}
+            fetched={quoteOracleTokenInfo}
+          />
         </div>
 
         {/* Feeds */}
@@ -312,7 +452,9 @@ function ConfigureStep({
           </Button>
           {!canValidate && (
             <p className="text-xs text-text-tertiary mt-1.5">
-              Enter valid base and quote token addresses to proceed.
+              Enter valid base/quote token addresses AND confirm decimals (0–36)
+              to proceed. The deployed oracle will use the decimals you confirm
+              here — no silent defaults.
             </p>
           )}
         </div>
@@ -544,13 +686,27 @@ function DeployStep({
             <div className="flex justify-between">
               <span className="text-text-tertiary">Base Token</span>
               <span className="text-text-primary font-mono">
-                {baseOracleTokenInfo.name} ({baseOracleTokenInfo.decimals}d)
+                {baseOracleTokenInfo.name} ({config.baseTokenDecimals}d
+                {config.baseTokenDecimals !== baseOracleTokenInfo.decimals && (
+                  <span className="text-warning">
+                    {' '}
+                    — overrides on-chain {baseOracleTokenInfo.decimals}d
+                  </span>
+                )}
+                )
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">Quote Token</span>
               <span className="text-text-primary font-mono">
-                {quoteOracleTokenInfo.name} ({quoteOracleTokenInfo.decimals}d)
+                {quoteOracleTokenInfo.name} ({config.quoteTokenDecimals}d
+                {config.quoteTokenDecimals !== quoteOracleTokenInfo.decimals && (
+                  <span className="text-warning">
+                    {' '}
+                    — overrides on-chain {quoteOracleTokenInfo.decimals}d
+                  </span>
+                )}
+                )
               </span>
             </div>
             <div className="flex justify-between">
@@ -696,28 +852,50 @@ export function OracleDeployerPage() {
   const [baseVault, setBaseVault] = useState(ZERO_ADDRESS as string);
   const [quoteVault, setQuoteVault] = useState(ZERO_ADDRESS as string);
 
-  // Token info
+  // Token info (auto-fetched name + decimals; reference value the curator
+  // confirms against)
   const [baseOracleTokenInfo, setBaseOracleTokenInfo] = useState<OracleTokenInfo | null>(null);
   const [quoteOracleTokenInfo, setQuoteOracleTokenInfo] = useState<OracleTokenInfo | null>(null);
+
+  // Curator-confirmed decimals (editable, empty string = unset). These are
+  // the values that actually get sent to the factory — there is no silent
+  // fallback. The Run-Validation button stays disabled until both parse
+  // cleanly via parseDecimalsInput.
+  const [baseDecimalsInput, setBaseDecimalsInput] = useState('');
+  const [quoteDecimalsInput, setQuoteDecimalsInput] = useState('');
 
   // Validation state
   const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);
   const [scaleFactor, setScaleFactor] = useState<bigint | null>(null);
   const [isValidating, setIsValidating] = useState(false);
 
-  const buildConfig = (): OracleTestConfig => ({
-    chainId,
-    baseFeed1: (baseFeed1 || ZERO_ADDRESS) as Address,
-    baseFeed2: (baseFeed2 || ZERO_ADDRESS) as Address,
-    quoteFeed1: (quoteFeed1 || ZERO_ADDRESS) as Address,
-    quoteFeed2: (quoteFeed2 || ZERO_ADDRESS) as Address,
-    baseVault: (baseVault || ZERO_ADDRESS) as Address,
-    quoteVault: (quoteVault || ZERO_ADDRESS) as Address,
-    baseTokenAddress: baseToken as Address,
-    quoteTokenAddress: quoteToken as Address,
-    baseTokenDecimals: baseOracleTokenInfo?.decimals ?? 18,
-    quoteTokenDecimals: quoteOracleTokenInfo?.decimals ?? 18,
-  });
+  /**
+   * Build the test config. Fails closed: throws if the decimals inputs
+   * haven't been confirmed by the curator. This is reachable in principle
+   * via the deploy-step memo below, but the ConfigureStep gate also blocks
+   * it; the throw is defence in depth so a future refactor can't sneak a
+   * silent default 18 back in.
+   */
+  const buildConfig = (): OracleTestConfig => {
+    const baseDec = parseDecimalsInput(baseDecimalsInput);
+    const quoteDec = parseDecimalsInput(quoteDecimalsInput);
+    if (baseDec === null || quoteDec === null) {
+      throw new Error('Decimals not confirmed — enter base and quote token decimals before proceeding.');
+    }
+    return {
+      chainId,
+      baseFeed1: (baseFeed1 || ZERO_ADDRESS) as Address,
+      baseFeed2: (baseFeed2 || ZERO_ADDRESS) as Address,
+      quoteFeed1: (quoteFeed1 || ZERO_ADDRESS) as Address,
+      quoteFeed2: (quoteFeed2 || ZERO_ADDRESS) as Address,
+      baseVault: (baseVault || ZERO_ADDRESS) as Address,
+      quoteVault: (quoteVault || ZERO_ADDRESS) as Address,
+      baseTokenAddress: baseToken as Address,
+      quoteTokenAddress: quoteToken as Address,
+      baseTokenDecimals: baseDec,
+      quoteTokenDecimals: quoteDec,
+    };
+  };
 
   const handleValidate = async () => {
     setStep('validate');
@@ -790,6 +968,10 @@ export function OracleDeployerPage() {
           setBaseOracleTokenInfo={setBaseOracleTokenInfo}
           quoteOracleTokenInfo={quoteOracleTokenInfo}
           setQuoteOracleTokenInfo={setQuoteOracleTokenInfo}
+          baseDecimalsInput={baseDecimalsInput}
+          setBaseDecimalsInput={setBaseDecimalsInput}
+          quoteDecimalsInput={quoteDecimalsInput}
+          setQuoteDecimalsInput={setQuoteDecimalsInput}
           onValidate={handleValidate}
         />
       )}
