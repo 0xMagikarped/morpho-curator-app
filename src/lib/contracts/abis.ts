@@ -954,6 +954,17 @@ export const chainlinkFeedAbi = [
 // MorphoChainlinkOracleV2 Factory
 // ============================================================
 
+/**
+ * MorphoChainlinkOracleV2Factory ABI — verbatim from morpho-org/morpho-blue-oracles.
+ *
+ * The factory uses CREATE2 internally, so the 11th argument is the salt the
+ * curator chooses. With a fixed (params, salt) tuple the predicted address is
+ * deterministic; reusing the same tuple returns the previously-deployed oracle
+ * (idempotent). The `CreateMorphoChainlinkOracleV2(address indexed oracle)`
+ * event is emitted on first deploy and is the source of truth — DO NOT rely on
+ * a simulation `result` to identify the deployed address (it can be the
+ * existing-oracle address when the tuple has been used before).
+ */
 export const oracleV2FactoryAbi = [
   {
     name: 'createMorphoChainlinkOracleV2',
@@ -970,8 +981,25 @@ export const oracleV2FactoryAbi = [
       { name: 'quoteFeed1', type: 'address' },
       { name: 'quoteFeed2', type: 'address' },
       { name: 'quoteTokenDecimals', type: 'uint256' },
+      { name: 'salt', type: 'bytes32' },
     ],
     outputs: [{ name: 'oracle', type: 'address' }],
+  },
+  {
+    name: 'CreateMorphoChainlinkOracleV2',
+    type: 'event',
+    inputs: [
+      { name: 'caller', type: 'address', indexed: false },
+      { name: 'oracle', type: 'address', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    name: 'isMorphoChainlinkOracleV2',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
   },
 ] as const;
 

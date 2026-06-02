@@ -290,17 +290,7 @@ export async function decodeOracle(
 // SCALE FACTOR COMPUTATION
 // ============================================================
 
-/**
- * Compute the expected SCALE_FACTOR for a MorphoChainlinkOracleV2.
- *
- * Formula:
- *   10^(36 + quoteTokenDec + qf1Dec + qf2Dec - baseTokenDec - bf1Dec - bf2Dec)
- *     * quoteVaultSample / baseVaultSample
- *
- * When a feed is zero address, its decimals = 0.
- * When a vault is zero address, its sample = 1.
- */
-export function computeScaleFactor(params: {
+export interface ScaleFactorParams {
   baseTokenDecimals: number;
   quoteTokenDecimals: number;
   baseFeed1Decimals: number;
@@ -309,7 +299,38 @@ export function computeScaleFactor(params: {
   quoteFeed2Decimals: number;
   baseVaultConversionSample: bigint;
   quoteVaultConversionSample: bigint;
-}): bigint {
+}
+
+export interface ScaleFactorResult {
+  /** Decimals exponent `36 + qDecs - bDecs`. Negative = invalid config. */
+  exponent: number;
+  /**
+   * Computed scale factor (≥ 1 when exponent ≥ 0). Set to 0n when the
+   * exponent is negative — Morpho's on-chain `10**(uint256 exponent)` will
+   * revert (underflow on the unsigned subtraction), and we'd otherwise
+   * throw `RangeError: Exponent must be non-negative` inside the JS BigInt
+   * power op. The validator surfaces the negative-exponent case as a hard
+   * fail; consumers should check `valid` before trusting `scaleFactor`.
+   */
+  scaleFactor: bigint;
+  valid: boolean;
+}
+
+/**
+ * Compute the expected SCALE_FACTOR for a MorphoChainlinkOracleV2.
+ *
+ * Formula (matches `MorphoChainlinkOracleV2.SCALE_FACTOR`):
+ *   10^(36 + quoteTokenDec + qf1Dec + qf2Dec - baseTokenDec - bf1Dec - bf2Dec)
+ *     * quoteVaultSample / baseVaultSample
+ *
+ * Zero-address feed → decimals = 0. Zero-address vault → sample = 1.
+ *
+ * Negative-exponent configs are NOT valid Morpho oracles (the contract's
+ * unchecked uint256 math would underflow). We return `{ valid: false,
+ * scaleFactor: 0n }` instead of throwing so callers can surface a clean
+ * "configuration invalid" error to the user.
+ */
+export function computeScaleFactor(params: ScaleFactorParams): ScaleFactorResult {
   const exponent =
     36 +
     params.quoteTokenDecimals +
@@ -319,6 +340,12 @@ export function computeScaleFactor(params: {
     params.baseFeed1Decimals -
     params.baseFeed2Decimals;
 
+  if (exponent < 0) {
+    return { exponent, scaleFactor: 0n, valid: false };
+  }
+
   const base = 10n ** BigInt(exponent);
-  return (base * params.quoteVaultConversionSample) / params.baseVaultConversionSample;
+  const scaleFactor =
+    (base * params.quoteVaultConversionSample) / params.baseVaultConversionSample;
+  return { exponent, scaleFactor, valid: true };
 }

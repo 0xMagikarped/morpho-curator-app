@@ -36,6 +36,17 @@ export interface OracleTestConfig {
   quoteTokenAddress: Address;
   baseTokenDecimals: number;
   quoteTokenDecimals: number;
+  /**
+   * Power-of-10 conversion samples for the ERC-4626 wrappers. Morpho's
+   * MorphoChainlinkOracleV2 documents that each sample should be picked so
+   * `vault.convertToAssets(sample)` lands in `[1e18, 1e36]` to minimise
+   * precision loss; for a zero-address vault the spec says use 1. The
+   * deployer probes the vault on validate and surfaces the result here.
+   */
+  baseVaultConversionSample: bigint;
+  quoteVaultConversionSample: bigint;
+  /** CREATE2 salt for deterministic addressing; 0x0…0 is acceptable. */
+  salt: `0x${string}`;
 }
 
 // ============================================================
@@ -50,7 +61,58 @@ const vaultAssetAbi = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    name: 'decimals',
+    inputs: [],
+    outputs: [{ type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    name: 'convertToAssets',
+    inputs: [{ name: 'shares', type: 'uint256' }],
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const;
+
+/**
+ * Probe an ERC-4626 vault for the smallest `10**k` such that
+ * `convertToAssets(10**k)` lands in `[1e18, 1e36]` (Morpho's documented
+ * range for minimising scale-factor precision loss). Returns `1n` when
+ * the vault is the zero address (the Morpho spec sentinel). Returns
+ * `null` if probing failed for every k — surfaced as a validation
+ * failure rather than silently substituting a bad default.
+ */
+export async function pickVaultConversionSample(
+  client: PublicClient,
+  vault: Address,
+): Promise<bigint | null> {
+  if (vault === ZERO_ADDRESS) return 1n;
+  const LOWER = 10n ** 18n;
+  const UPPER = 10n ** 36n;
+  // Test k from 0 up to 36 — enough headroom for any sensible vault. Stop
+  // at the first power that lands in band.
+  for (let k = 0; k <= 36; k++) {
+    const sample = 10n ** BigInt(k);
+    try {
+      const out = (await client.readContract({
+        address: vault,
+        abi: vaultAssetAbi,
+        functionName: 'convertToAssets',
+        args: [sample],
+      })) as bigint;
+      if (out >= LOWER && out <= UPPER) return sample;
+    } catch {
+      // Not a 4626, or RPC failed for this k. Keep trying smaller/larger
+      // samples — a one-off revert at k=0 (some vaults guard zero) doesn't
+      // disqualify the vault.
+      continue;
+    }
+  }
+  return null;
+}
 
 // ============================================================
 // Helpers
@@ -152,11 +214,16 @@ async function checkFeedLiveness(
   }
 
   if (hasStale) {
+    // Promoted from `warn` to `fail` (H2 audit): deploying an oracle off
+    // a stale Chainlink feed gets users liquidated when the feed
+    // eventually wakes and snaps to a new price. Curators must
+    // explicitly resolve the staleness (different feed, or wait for
+    // refresh) — there is no "I acknowledge stale feed" path.
     return {
       id: 'feed-liveness',
       name: 'Feed Liveness',
-      status: 'warn',
-      message: 'One or more feeds are stale or have round mismatches.',
+      status: 'fail',
+      message: 'One or more feeds are stale (>24h) or have round mismatches.',
       details: issues.join('\n'),
     };
   }
@@ -324,9 +391,15 @@ async function checkPriceSanity(
     };
   }
 
-  // Compute rough price using BigInt arithmetic
-  // price = 10^exponent * bf1Answer * bf2Answer / (qf1Answer * qf2Answer)
-  const scaleFactor = exponent >= 0 ? 10n ** BigInt(exponent) : 1n;
+  // Compute rough price using BigInt arithmetic. The on-chain SCALE_FACTOR
+  // is `10^exponent * quoteVaultConversionSample / baseVaultConversionSample`
+  // (C4 audit fix — the previous version dropped the sample ratio,
+  // silently shifting the sanity-checked price by orders of magnitude
+  // whenever a vault was supplied).
+  //   price = SCALE_FACTOR * bf1 * bf2 / (qf1 * qf2)
+  const expPart = exponent >= 0 ? 10n ** BigInt(exponent) : 1n;
+  const scaleFactor =
+    (expPart * config.quoteVaultConversionSample) / config.baseVaultConversionSample;
   const numerator = scaleFactor * bf1Answer * bf2Answer;
   const denominator = qf1Answer * qf2Answer;
   const price = numerator / denominator;
@@ -508,7 +581,14 @@ async function checkScaleFactorOverflow(
     };
   }
 
-  const scaleFactor = 10n ** BigInt(exponent);
+  // C4 audit fix: include vault sample ratio. On-chain SCALE_FACTOR is
+  //   10^exponent * quoteVaultConversionSample / baseVaultConversionSample
+  // Ignoring the sample term silently shifted the overflow gate by up to
+  // 10^36 — a vault config that fits in uint256 in the validator would
+  // overflow on chain, or vice versa.
+  const expPart = 10n ** BigInt(exponent);
+  const scaleFactor =
+    (expPart * config.quoteVaultConversionSample) / config.baseVaultConversionSample;
 
   if (scaleFactor > MAX_UINT256) {
     return {
@@ -576,30 +656,104 @@ async function checkScaleFactorOverflow(
 // Main Validation Entry Point
 // ============================================================
 
+/**
+ * Side-channel from the validator: the exact feed decimals the on-chain
+ * factory will use when computing SCALE_FACTOR. Hoisted out of the
+ * individual checks so the UI's "previewed scale factor" can match
+ * reality — the preview was previously hardcoded to `feedDecimals: 0`
+ * everywhere, which only matched when all feeds were zero-address.
+ *
+ * Returns 0 for any feed whose `decimals()` read failed (also surfaced
+ * as a `feed-decimals-readable` validation failure so curators can't
+ * silently proceed with bad feed metadata).
+ */
+export interface FeedDecimalsBundle {
+  baseFeed1: number;
+  baseFeed2: number;
+  quoteFeed1: number;
+  quoteFeed2: number;
+  /** True iff every NON-zero-address feed returned a usable `decimals()`. */
+  allReadable: boolean;
+}
+
+async function readFeedDecimalsBundle(
+  client: PublicClient,
+  config: OracleTestConfig,
+): Promise<FeedDecimalsBundle> {
+  const slots: (keyof FeedDecimalsBundle)[] = ['baseFeed1', 'baseFeed2', 'quoteFeed1', 'quoteFeed2'];
+  const addrs: Address[] = [config.baseFeed1, config.baseFeed2, config.quoteFeed1, config.quoteFeed2];
+  const out: FeedDecimalsBundle = {
+    baseFeed1: 0,
+    baseFeed2: 0,
+    quoteFeed1: 0,
+    quoteFeed2: 0,
+    allReadable: true,
+  };
+  await Promise.all(
+    addrs.map(async (addr, i) => {
+      if (addr === ZERO_ADDRESS) return; // 0d is correct for absent feed
+      try {
+        const d = (await client.readContract({
+          address: addr,
+          abi: chainlinkFeedAbi,
+          functionName: 'decimals',
+        })) as number;
+        out[slots[i]] = Number(d) as never;
+      } catch {
+        out.allReadable = false;
+      }
+    }),
+  );
+  return out;
+}
+
+export interface OracleValidationReport {
+  results: ValidationResult[];
+  feedDecimals: FeedDecimalsBundle;
+}
+
 export async function validateOracleConfig(
   config: OracleTestConfig,
-): Promise<ValidationResult[]> {
+): Promise<OracleValidationReport> {
   const chainConfig = getChainConfig(config.chainId);
   if (!chainConfig) {
-    return [
-      {
-        id: 'chain-config',
-        name: 'Chain Configuration',
-        status: 'fail',
-        message: `No chain configuration found for chainId ${config.chainId}.`,
-      },
-    ];
+    return {
+      results: [
+        {
+          id: 'chain-config',
+          name: 'Chain Configuration',
+          status: 'fail',
+          message: `No chain configuration found for chainId ${config.chainId}.`,
+        },
+      ],
+      feedDecimals: { baseFeed1: 0, baseFeed2: 0, quoteFeed1: 0, quoteFeed2: 0, allReadable: false },
+    };
   }
 
   const client = getPublicClient(config.chainId);
 
-  const [liveness, decimals, priceSanity, vaultCompat, overflow] = await Promise.all([
+  const [liveness, decimals, priceSanity, vaultCompat, overflow, feedDecimals] = await Promise.all([
     checkFeedLiveness(client, config),
     checkDecimalsConsistency(client, config),
     checkPriceSanity(client, config),
     checkVaultCompatibility(client, config),
     checkScaleFactorOverflow(client, config),
+    readFeedDecimalsBundle(client, config),
   ]);
 
-  return [liveness, decimals, priceSanity, vaultCompat, overflow];
+  const results: ValidationResult[] = [liveness, decimals, priceSanity, vaultCompat, overflow];
+  if (!feedDecimals.allReadable) {
+    // Surface as fail rather than letting feed decimals silently default
+    // to 0 in the scale-factor math (the previous behaviour).
+    results.push({
+      id: 'feed-decimals-readable',
+      name: 'Feed Decimals Readable',
+      status: 'fail',
+      message:
+        'One or more price feeds did not return a valid decimals() — cannot compute scale factor reliably.',
+      details: JSON.stringify(feedDecimals, null, 2),
+    });
+  }
+
+  return { results, feedDecimals };
 }
