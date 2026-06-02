@@ -28,9 +28,14 @@ export function ChainBadge({ chainId, className, showProtocol }: ChainBadgeProps
         : '';
 
   if (!config) {
+    // Prefer the chain config name over the raw chainId so a freshly
+    // added chain that hasn't yet got an entry in `chainColors` still
+    // renders as e.g. "XDC Network" instead of "50". Last-ditch fall
+    // back to the raw id only when the chain is unknown to the app.
+    const label = chainConfig?.name ?? `Chain ${chainId}`;
     return (
-      <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-text-secondary bg-bg-hover', className)}>
-        {chainId}{suffix}
+      <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-text-secondary bg-bg-hover uppercase', className)}>
+        {label}{suffix}
       </span>
     );
   }
