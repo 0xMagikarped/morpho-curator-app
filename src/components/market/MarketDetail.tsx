@@ -2,6 +2,8 @@ import type { MarketRecord } from '../../lib/indexer/indexedDB';
 import { useEnrichedMarketState } from '../../lib/hooks/useMarketScanner';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
+import { AddressDisplay } from '../ui/AddressDisplay';
+import { HashDisplay } from '../ui/HashDisplay';
 import { OracleRiskCard } from '../oracle/OracleRiskCard';
 import {
   truncateAddress,
@@ -90,17 +92,17 @@ export function MarketDetail({ chainId, market, onClose }: MarketDetailProps) {
 
       {/* Contract addresses */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-        <div>
+        <div className="flex items-center gap-1.5">
           <span className="text-text-tertiary">Market ID: </span>
-          <span className="text-text-secondary font-mono">{truncateAddress(market.marketId, 8)}</span>
+          <HashDisplay value={market.marketId} chars={8} copyLabel="Copy market ID" />
         </div>
-        <div>
+        <div className="flex items-center gap-1.5">
           <span className="text-text-tertiary">Oracle: </span>
-          <span className="text-text-secondary font-mono">{truncateAddress(market.oracle)}</span>
+          <AddressDisplay address={market.oracle} chainId={chainId} />
         </div>
-        <div>
+        <div className="flex items-center gap-1.5">
           <span className="text-text-tertiary">IRM: </span>
-          <span className="text-text-secondary font-mono">{truncateAddress(market.irm)}</span>
+          <AddressDisplay address={market.irm} chainId={chainId} />
         </div>
         <div>
           <span className="text-text-tertiary">Discovered at block: </span>

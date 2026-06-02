@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { Badge } from '../ui/Badge';
 import { ProgressBar } from '../ui/ProgressBar';
+import { AddressDisplay } from '../ui/AddressDisplay';
+import { HashDisplay } from '../ui/HashDisplay';
 import { OracleRiskCard } from '../oracle/OracleRiskCard';
 import { useEnrichedMarketState } from '../../lib/hooks/useMarketScanner';
 import { useMarketVaults, useTrackedVaultMarketMatch, type MarketVaultAllocation } from '../../lib/hooks/useMarketVaults';
@@ -103,12 +105,12 @@ function OverviewTab({
         <DataPair
           label="Loan Token"
           value={market.loanTokenSymbol ?? truncateAddress(market.loanToken)}
-          sub={truncateAddress(market.loanToken)}
+          sub={<AddressDisplay address={market.loanToken} chainId={chainId} />}
         />
         <DataPair
           label="Collateral"
           value={market.collateralTokenSymbol ?? truncateAddress(market.collateralToken)}
-          sub={truncateAddress(market.collateralToken)}
+          sub={<AddressDisplay address={market.collateralToken} chainId={chainId} />}
         />
       </div>
 
@@ -143,9 +145,21 @@ function OverviewTab({
 
       {/* Contract addresses */}
       <div className="pt-2 border-t border-border-subtle space-y-1.5">
-        <DataPair label="Market ID" value={truncateAddress(market.marketId, 8)} mono />
-        <DataPair label="Oracle" value={truncateAddress(market.oracle)} mono />
-        <DataPair label="IRM" value={truncateAddress(market.irm)} mono />
+        <DataPair
+          label="Market ID"
+          value={<HashDisplay value={market.marketId} chars={8} copyLabel="Copy market ID" />}
+          mono
+        />
+        <DataPair
+          label="Oracle"
+          value={<AddressDisplay address={market.oracle} chainId={chainId} />}
+          mono
+        />
+        <DataPair
+          label="IRM"
+          value={<AddressDisplay address={market.irm} chainId={chainId} />}
+          mono
+        />
         <DataPair label="Discovered Block" value={market.discoveredAtBlock?.toString() || 'N/A'} />
       </div>
     </div>
@@ -446,15 +460,15 @@ function CuratorTabContent({
             >
               <div>
                 <p className="text-sm text-text-primary font-medium">{vault.vaultName}</p>
-                <p className="text-[10px] font-mono text-text-tertiary">
-                  {truncateAddress(vault.vaultAddress)}
-                </p>
+                <div className="text-[10px] font-mono text-text-tertiary">
+                  <AddressDisplay address={vault.vaultAddress} chainId={chainId} />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <DataPair
                   label="Curator"
-                  value={truncateAddress(vault.curator)}
+                  value={<AddressDisplay address={vault.curator} chainId={chainId} />}
                   mono
                 />
                 <DataPair
@@ -521,18 +535,20 @@ function DataPair({
   mono,
 }: {
   label: string;
-  value: string;
-  sub?: string;
+  // Accept arbitrary nodes so callers can pass <AddressDisplay/> / <HashDisplay/>
+  // for click-to-copy on every address-like field, not just strings.
+  value: ReactNode;
+  sub?: ReactNode;
   mono?: boolean;
 }) {
   return (
     <div>
       <span className="text-[10px] text-text-tertiary uppercase tracking-wider">{label}</span>
-      <p className={cn('text-sm text-text-primary mt-0.5', mono && 'font-mono text-xs')}>
+      <div className={cn('text-sm text-text-primary mt-0.5', mono && 'font-mono text-xs')}>
         {value}
-      </p>
+      </div>
       {sub && (
-        <p className="text-[10px] font-mono text-text-tertiary mt-0.5">{sub}</p>
+        <div className="text-[10px] font-mono text-text-tertiary mt-0.5">{sub}</div>
       )}
     </div>
   );

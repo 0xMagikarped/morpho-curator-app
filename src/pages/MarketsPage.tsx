@@ -15,6 +15,8 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Drawer } from '../components/ui/Drawer';
 import { OracleHealthIndicator } from '../components/oracle/OracleHealthIndicator';
+import { AddressDisplay } from '../components/ui/AddressDisplay';
+import { HashDisplay } from '../components/ui/HashDisplay';
 import { MarketDrawerContent } from '../components/market/MarketDrawerContent';
 import { MarketSearchOverlay } from '../components/market/MarketSearchOverlay';
 import { getChainConfig, getSupportedChainIds } from '../config/chains';
@@ -350,9 +352,14 @@ export function MarketsPage() {
                           <span className="text-[13px] text-text-primary font-medium">
                             {market.loanTokenSymbol ?? truncateAddress(market.loanToken)}
                           </span>
-                          <p className="text-[10px] font-mono text-text-tertiary mt-0.5">
-                            {truncateAddress(market.marketId, 4)}
-                          </p>
+                          <div
+                            className="text-[10px] mt-0.5"
+                            // Stop the row click from firing when the user
+                            // clicks the copy button inside.
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <HashDisplay value={market.marketId} chars={4} copyLabel="Copy market ID" />
+                          </div>
                         </div>
                       </td>
                       <td className="py-2.5 px-3 text-[13px]">
@@ -363,13 +370,16 @@ export function MarketsPage() {
                         )}
                       </td>
                       <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5 text-xs font-mono text-text-secondary">
+                        <div
+                          className="flex items-center gap-1.5 text-xs font-mono text-text-secondary"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {market.oracle === '0x0000000000000000000000000000000000000000' ? (
                             <Badge variant="warning" className="text-[10px]">None</Badge>
                           ) : (
                             <>
                               <OracleHealthIndicator health={oracleHealthMap?.get(market.oracle as Address) ?? null} />
-                              {truncateAddress(market.oracle)}
+                              <AddressDisplay address={market.oracle} chainId={selectedChainId} />
                             </>
                           )}
                         </div>
