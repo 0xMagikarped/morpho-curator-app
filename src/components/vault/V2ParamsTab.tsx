@@ -41,6 +41,16 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   const { data: discoveredAllocators, isLoading: allocatorsLoading } =
     useVaultAllocators(chainId, vaultAddress);
   const [editing, setEditing] = useState<V2SetterIntent | null>(null);
+  const { address: connected } = useAccount();
+  // PR 28 — vault-wide maxRate (uint64 WAD/sec scaled); surfaced as APR%.
+  // Hooks must run before any early return (Rules of Hooks), so this lives
+  // here rather than below the loading/version guards.
+  const { data: maxRate } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV2Abi,
+    functionName: 'maxRate',
+    chainId,
+  });
 
   if (isLoading || !vault) {
     return (
@@ -65,7 +75,6 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   // unauthorized callers (the drawer's error banner shows the revert
   // reason — typically a `NotAuthorized` decoded via the PR 1 error
   // fragments).
-  const canEdit = permissions.canCurate || permissions.canManage || permissions.isAdmin;
   const timelockSeconds = vault.timelock;
   const allocators: Address[] = discoveredAllocators ?? vault.allocators ?? [];
 
@@ -75,24 +84,20 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   // `NotAuthorized` at simulate time and the user sees the action "do
   // nothing". `setCurator` itself is owner-only/direct (handled in the
   // setter drawer), so the owner can bootstrap by setting themselves first.
-  const { address: connected } = useAccount();
   const ZERO = '0x0000000000000000000000000000000000000000';
   const curatorSet = vault.curator && vault.curator !== ZERO;
   const isOwner = !!connected && vault.owner?.toLowerCase() === connected.toLowerCase();
   const isCurator = !!connected && curatorSet && vault.curator!.toLowerCase() === connected.toLowerCase();
-  const showCuratorHint = canEdit && !isCurator;
 
-  // PR 28 — read vault-wide maxRate (uint64 WAD/sec scaled) and the
-  // per-adapter forceDeallocatePenalty. The penalty getter is per
-  // adapter, so we fetch the active liquidity adapter's value as the
-  // first-class display. The Edit drawer takes an explicit adapter so
-  // the curator can target any adapter.
-  const { data: maxRate } = useReadContract({
-    address: vaultAddress,
-    abi: metaMorphoV2Abi,
-    functionName: 'maxRate',
-    chainId,
-  });
+  // Edit gate. Derive primarily from the reliable `useVaultInfo` data
+  // (owner/curator — the same source as the "YOU ARE OWNER" badge), so the
+  // Edit buttons don't flicker on/off when the separate role-snapshot or
+  // flavor probe behind `useVaultPermissions` hiccups on a given chain's RPC
+  // (the "random per chain" bug). Permissions are kept as an additional
+  // allow so V1-style admin/curate paths still work.
+  const canEdit =
+    isOwner || isCurator || permissions.canCurate || permissions.canManage || permissions.isAdmin;
+  const showCuratorHint = canEdit && !isCurator;
 
   return (
     <div className="space-y-4">
