@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Address } from 'viem';
 import { Badge } from '../components/ui/Badge';
+import { ChainBadge } from '../components/ui/ChainBadge';
 import { Button } from '../components/ui/Button';
 import { OverviewTab } from '../components/vault/OverviewTab';
 import { MarketsTab } from '../components/vault/MarketsTab';
@@ -179,7 +180,7 @@ export function VaultPage() {
           </h1>
           {vault && (
             <div className="flex gap-1.5 items-center">
-              <Badge variant="info">{chainId}</Badge>
+              <ChainBadge chainId={chainId} />
               <Badge>{vault.version.toUpperCase()}</Badge>
               <ProtocolChip flavor={vaultFlavor} />
               {dataSource === 'rpc' && isApiSupportedChain(chainId) && (
