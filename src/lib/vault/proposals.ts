@@ -127,6 +127,10 @@ const LOG_WINDOW_CONFIG: Record<number, LogWindowConfig> = {
   // BSC public-RPC hard cap is 5000 per request. Default to 14 h of
   // history so the curator sees last-day proposals without paginating.
   56: { pageWindow: 5_000n, defaultScan: 16_000n, maxScan: 900_000n },
+  // Pharos public RPC (rpc.pharos.xyz) hard-caps `eth_getLogs` at 1000
+  // blocks per request ("The block range is too large"). 2 s blocks, so
+  // defaultScan ≈ 22 h of history.
+  1672: { pageWindow: 1_000n, defaultScan: 40_000n, maxScan: 4_000_000n },
 };
 const FALLBACK_CONFIG: LogWindowConfig = {
   pageWindow: 50_000n,
@@ -136,6 +140,16 @@ const FALLBACK_CONFIG: LogWindowConfig = {
 
 export function getLogWindowConfig(chainId: number): LogWindowConfig {
   return LOG_WINDOW_CONFIG[chainId] ?? FALLBACK_CONFIG;
+}
+
+/**
+ * True when a chain's RPC caps `eth_getLogs` block ranges and therefore
+ * requires a paginated scan (single 0→latest requests are rejected).
+ * Callers should bound the scan floor (e.g. the contract deployment block)
+ * to keep the page count tractable.
+ */
+export function isLogRangeLimited(chainId: number): boolean {
+  return chainId in LOG_WINDOW_CONFIG;
 }
 
 /**

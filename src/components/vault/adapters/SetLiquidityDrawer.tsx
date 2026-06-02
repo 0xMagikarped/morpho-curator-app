@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Address } from 'viem';
 import { encodeAbiParameters } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
@@ -74,16 +74,33 @@ export function SetLiquidityDrawer({
   assetSymbol,
 }: SetLiquidityDrawerProps) {
   const queryClient = useQueryClient();
-  const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
+  const { writeContract, data: txHash, isPending, error, simulateError, reset } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
   // Two-step flow state — when null we're in step 1 (pick adapter).
   const [pickingMarketFor, setPickingMarketFor] = useState<V2AdapterFull | null>(null);
 
+  // Close + clear the write state so a stale `isSuccess` (the prior tx hash
+  // lingers in wagmi) can't re-show the success screen on the next open.
+  const handleClose = useCallback(() => {
+    reset();
+    onClose();
+  }, [reset, onClose]);
+
   // Reset whenever the drawer closes so step 1 is fresh on re-open.
   useEffect(() => {
     if (!open) setPickingMarketFor(null);
   }, [open]);
+
+  // PR 41 — auto-close shortly after the tx confirms. Previously the success
+  // screen stayed up indefinitely (notably on the "Set Idle" path, which has
+  // no step 2), leaving the curator unsure whether it worked. Show the
+  // confirmation briefly, then return to the adapter view.
+  useEffect(() => {
+    if (!isSuccess) return;
+    const t = setTimeout(handleClose, 1500);
+    return () => clearTimeout(t);
+  }, [isSuccess, handleClose]);
 
   // PR 38 — when the tx confirms, invalidate the adapter family queries.
   // Without this the Allocation tab's `useLiquidityTargetMarket` keeps
@@ -175,7 +192,7 @@ export function SetLiquidityDrawer({
   return (
     <Drawer
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={pickingMarketFor ? 'Pick Target Market' : 'Set Liquidity Adapter'}
     >
       {isSuccess ? (
@@ -183,6 +200,9 @@ export function SetLiquidityDrawer({
           <Badge variant="success" className="mb-2">Updated</Badge>
           <p className="text-sm text-text-primary">Liquidity adapter updated.</p>
           <p className="text-xs text-text-tertiary mt-1">Takes effect immediately.</p>
+          <Button size="sm" variant="secondary" onClick={handleClose} className="mt-4">
+            Done
+          </Button>
         </div>
       ) : pickingMarketFor ? (
         // === STEP 2 — market picker for market-v1 adapter ===========

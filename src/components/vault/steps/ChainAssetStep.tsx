@@ -55,8 +55,13 @@ export function ChainAssetStep({ state, onUpdate, onNext }: StepProps) {
         assetSymbol: symbol,
         assetDecimals: decimals,
       });
-    } catch {
-      setTokenError('Failed to read token — is this a valid ERC-20?');
+    } catch (err) {
+      const detail = err instanceof Error ? err.message.split('\n')[0] : '';
+      setTokenError(
+        detail
+          ? `Failed to read token: ${detail}`
+          : 'Failed to read token — is this a valid ERC-20?',
+      );
     } finally {
       setLoadingToken(false);
     }

@@ -1,8 +1,7 @@
 import type { Address, PublicClient } from 'viem';
 import { morphoBlueAbi } from '../contracts/abis';
 
-// Re-export shared types from createVault to avoid duplication
-export { computeMarketId, type MarketParamsStruct } from '../vault/createVault';
+export { computeMarketId, type MarketParamsStruct } from './marketId';
 
 /**
  * Check whether a market already exists on Morpho Blue.

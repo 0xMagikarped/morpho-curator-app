@@ -26,6 +26,7 @@ import { decodeAbiParameters, parseAbiItem } from 'viem';
 import { getPublicClient, fetchTokenInfo } from '../lib/data/rpcClient';
 import { metaMorphoV2Abi } from '../lib/contracts/metaMorphoV2Abi';
 import { computeMarketId } from '../lib/market/marketId';
+import { scanContractEvent } from '../lib/data/eventScan';
 import { vaultKeys } from '../lib/queryKeys';
 import type { TokenInfo, MarketParams } from '../types';
 
@@ -160,28 +161,20 @@ async function fetchVaultCapEntries(
 
   // Scan increase events only — they create a cap-map slot; decreases just
   // mutate an existing slot, so they always have a matching `Increase…` in
-  // the history (a slot can't be decreased before being set).
+  // the history (a slot can't be decreased before being set). Range-limited
+  // RPCs (e.g. Pharos, 1000-block cap) are scanned in paginated windows.
   const [absLogs, relLogs] = await Promise.all([
-    client.getLogs({
-      address: vaultAddress,
-      event: INCREASE_ABS_EVENT,
-      fromBlock: 0n,
-      toBlock: 'latest',
-    }),
-    client.getLogs({
-      address: vaultAddress,
-      event: INCREASE_REL_EVENT,
-      fromBlock: 0n,
-      toBlock: 'latest',
-    }),
+    scanContractEvent(client, chainId, vaultAddress, INCREASE_ABS_EVENT),
+    scanContractEvent(client, chainId, vaultAddress, INCREASE_REL_EVENT),
   ]);
 
   // Collect unique (id, idData) pairs. `id` is the indexed topic = keccak256(idData),
   // so multiple events for the same entry coalesce.
   const seen = new Map<`0x${string}`, `0x${string}`>(); // id → idData
   for (const log of [...absLogs, ...relLogs]) {
-    const id = log.args.id as `0x${string}` | undefined;
-    const idData = log.args.idData as `0x${string}` | undefined;
+    const args = (log as { args?: { id?: `0x${string}`; idData?: `0x${string}` } }).args;
+    const id = args?.id;
+    const idData = args?.idData;
     if (id && idData && !seen.has(id)) {
       seen.set(id, idData);
     }

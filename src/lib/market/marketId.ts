@@ -1,6 +1,6 @@
 import { encodeAbiParameters, keccak256, parseAbiParameters, type Address } from 'viem';
 
-export interface MarketParamsInput {
+export interface MarketParamsStruct {
   loanToken: Address;
   collateralToken: Address;
   oracle: Address;
@@ -8,7 +8,7 @@ export interface MarketParamsInput {
   lltv: bigint;
 }
 
-export function computeMarketId(params: MarketParamsInput): `0x${string}` {
+export function computeMarketId(params: MarketParamsStruct): `0x${string}` {
   const encoded = encodeAbiParameters(
     parseAbiParameters('address, address, address, address, uint256'),
     [params.loanToken, params.collateralToken, params.oracle, params.irm, params.lltv]

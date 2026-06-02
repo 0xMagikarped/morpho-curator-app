@@ -2,6 +2,12 @@
  * Flavor-aware vault permissions.
  *
  * On MetaMorpho V1, write authority = `owner()` or `curator()`.
+ * On MetaMorpho V2, write authority = `owner()` (owner-only setters) or
+ *   `curator()` (timelocked setters). V2 is NOT a distinct `VaultFlavor`
+ *   (the flavor probe sees it as `metaMorphoV1`), and the role-snapshot
+ *   reader has no V2 branch + can fail intermittently on flaky RPCs — which
+ *   made write gates flicker per chain. So for V2 we derive permissions from
+ *   the reliable `useVaultInfo` data (owner/curator) instead of the snapshot.
  * On Moolah, write authority = PROPOSER_ROLE on the relevant TimeLock.
  *
  * This hook consumes the VaultSnapshot (which already enumerates timelock
@@ -11,11 +17,15 @@
  */
 
 import { useMemo } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, useReadContract } from 'wagmi';
 import type { Address } from 'viem';
-import type { VaultFlavor } from '../types';
+import type { VaultFlavor, VaultInfoV2 } from '../types';
 import type { VaultSnapshot } from '../lib/vault/adapter';
 import { useVaultSnapshot } from '../lib/vault/adapter';
+import { useVaultInfo } from '../lib/hooks/useVault';
+import { metaMorphoV2Abi } from '../lib/contracts/metaMorphoV2Abi';
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export interface VaultPermissions {
   canCurate: boolean;
@@ -98,6 +108,39 @@ function computePermissions(
 }
 
 /**
+ * V2 permissions, derived from the reliable `useVaultInfo` data (owner +
+ * curator) rather than the role-snapshot. `isAllocator` can't be read from
+ * an enumerable list on V2 (per-address mapping), so it's checked on-chain
+ * separately and passed in.
+ */
+function derivePermissionsV2(
+  vault: VaultInfoV2,
+  address: Address,
+  isAllocatorOnChain: boolean,
+): VaultPermissions {
+  const isOwner = eq(vault.owner, address);
+  const curatorSet = !!vault.curator && vault.curator !== ZERO_ADDRESS;
+  const isCurator = curatorSet && eq(vault.curator, address);
+
+  return {
+    // Owner can bootstrap (owner-only setters) and is the ultimate admin;
+    // curator drives the timelocked setters.
+    canCurate: isOwner || isCurator,
+    canManage: isOwner,
+    canPropose: isOwner || isCurator,
+    // Sentinels can also cancel, but there's no cheap enumeration; the owner
+    // always can, which covers the gate's purpose.
+    canCancel: isOwner,
+    isAdmin: isOwner,
+    isAllocator: isAllocatorOnChain || isOwner,
+    isLoading: false,
+    // No `metaMorphoV2` enum value — report `metaMorphoV1` (i.e. "not moolah")
+    // so existing flavor branches behave as before.
+    flavor: 'metaMorphoV1',
+  };
+}
+
+/**
  * Main hook — call from any component that needs to know whether the
  * connected wallet can write. Consumes `useVaultSnapshot` internally so
  * callers don't have to thread the snapshot through.
@@ -108,11 +151,28 @@ export function useVaultPermissions(
 ): VaultPermissions {
   const { address } = useAccount();
   const { data: snapshot, isLoading } = useVaultSnapshot(chainId, vaultAddress);
+  const { data: vault } = useVaultInfo(chainId, vaultAddress);
+  const isV2 = vault?.version === 'v2';
+
+  // V2 has no enumerable allocator list — check the connected wallet directly.
+  // Always called (Rules of Hooks); enabled only for a connected V2 vault.
+  const { data: isAllocatorV2 } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV2Abi,
+    functionName: 'isAllocator',
+    args: address ? [address] : undefined,
+    chainId,
+    query: { enabled: Boolean(isV2 && address && vaultAddress) },
+  });
 
   return useMemo(() => {
-    if (!snapshot || !address || isLoading) return EMPTY;
+    if (!address) return EMPTY;
+    if (isV2 && vault) {
+      return derivePermissionsV2(vault as VaultInfoV2, address, Boolean(isAllocatorV2));
+    }
+    if (!snapshot || isLoading) return EMPTY;
     return computePermissions(snapshot, address);
-  }, [snapshot, address, isLoading]);
+  }, [snapshot, address, isLoading, isV2, vault, isAllocatorV2]);
 }
 
 /**
