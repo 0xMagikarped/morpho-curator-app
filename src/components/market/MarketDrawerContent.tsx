@@ -58,7 +58,7 @@ export function MarketDrawerContent({ chainId, market }: MarketDrawerContentProp
 
       {/* Tab content */}
       {activeTab === 'overview' && (
-        <OverviewTab market={market} state={state} isLoading={isLoading} lltv={lltv} />
+        <OverviewTab market={market} state={state} isLoading={isLoading} lltv={lltv} chainId={chainId} />
       )}
       {activeTab === 'risk' && (
         <RiskTab market={market} chainId={chainId} lltvPct={lltvPct} state={state} />
@@ -82,11 +82,13 @@ function OverviewTab({
   state,
   isLoading,
   lltv,
+  chainId,
 }: {
   market: MarketRecord;
   state: EnrichedMarketState | null | undefined;
   isLoading: boolean;
   lltv: bigint;
+  chainId: number;
 }) {
   if (isLoading) {
     return (
@@ -322,7 +324,7 @@ function CuratorTab({ chainId, marketId }: { chainId: number; marketId: MarketId
   }
 
   if (!useFallback && apiVaults) {
-    return <CuratorTabContent vaults={apiVaults} isApiChain={isApiChain} />;
+    return <CuratorTabContent vaults={apiVaults} isApiChain={isApiChain} chainId={chainId} />;
   }
 
   // Fallback: use tracked vaults
@@ -397,7 +399,7 @@ function TrackedVaultsResolver({
           ))}
         </div>
       ) : (
-        <CuratorTabContent vaults={matches} isApiChain={isApiChain} />
+        <CuratorTabContent vaults={matches} isApiChain={isApiChain} chainId={chainId} />
       )}
     </div>
   );
@@ -428,9 +430,11 @@ function VaultMatchChecker({
 function CuratorTabContent({
   vaults,
   isApiChain,
+  chainId,
 }: {
   vaults: MarketVaultAllocation[];
   isApiChain: boolean;
+  chainId: number;
 }) {
   if (vaults.length === 0) {
     return <CuratorEmptyState isApiChain={isApiChain} />;
