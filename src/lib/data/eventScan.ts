@@ -57,10 +57,42 @@ export async function findDeploymentBlock(
   return result;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Rate-limit / "too fast" responses we should back off and retry on (e.g.
+ *  Pharos's zan.top RPC returns 429 / code -32011 "cu limit exceeded"). */
+function isRateLimit(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b429\b|rate.?limit|too fast|too many request|cu limit|-32011/i.test(msg);
+}
+
 /**
- * Paginated `getLogs` over an explicit block range. Pages are fetched in
- * small concurrent batches to bound latency over hundreds of windows.
+ * `getLogs` for one window with exponential backoff on rate-limit errors.
+ * Total concurrent requests are bounded globally by the per-chain transport
+ * throttle in `getPublicClient` (rpcClient.ts), so the backoff here is just a
+ * safety net for any 429 that still slips through.
  */
+async function getLogsWithRetry(
+  client: PublicClient,
+  address: Address,
+  event: AbiEvent,
+  fromBlock: bigint,
+  toBlock: bigint,
+  retries = 6,
+): Promise<Log[]> {
+  let delay = 400;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await client.getLogs({ address, event, fromBlock, toBlock });
+    } catch (err) {
+      if (attempt >= retries || !isRateLimit(err)) throw err;
+      // jitter so concurrent workers don't retry in lockstep
+      await sleep(delay + Math.floor((attempt * 137) % 250));
+      delay = Math.min(delay * 2, 5000);
+    }
+  }
+}
+
 async function getLogsPaginated(
   client: PublicClient,
   address: Address,
@@ -75,13 +107,15 @@ async function getLogsPaginated(
     ranges.push({ from: start, to: end });
   }
   const acc: Log[] = [];
-  const CONCURRENCY = 12;
+  // Batch size just bounds how many page-promises are pending at once — the
+  // REAL concurrency cap is the per-chain transport throttle in
+  // getPublicClient (rpcClient.ts), which gates total in-flight requests
+  // across all scans + reads so Pharos's per-second CU limit isn't tripped.
+  const CONCURRENCY = 4;
   for (let i = 0; i < ranges.length; i += CONCURRENCY) {
     const batch = ranges.slice(i, i + CONCURRENCY);
     const pages = await Promise.all(
-      batch.map((r) =>
-        client.getLogs({ address, event, fromBlock: r.from, toBlock: r.to }),
-      ),
+      batch.map((r) => getLogsWithRetry(client, address, event, r.from, r.to)),
     );
     for (const page of pages) acc.push(...page);
   }

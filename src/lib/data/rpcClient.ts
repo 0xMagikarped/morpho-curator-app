@@ -5,7 +5,7 @@
 // The Moolah legacy fallback at `fetchMoolahVaultInfoLegacy` exists
 // solely to keep `useVaultFullData` populated while other consumers
 // migrate — it is NOT authoritative.
-import { createPublicClient, http, fallback, type Address, type PublicClient, type Chain, defineChain } from 'viem';
+import { createPublicClient, createTransport, http, fallback, type Address, type PublicClient, type Chain, type Transport, defineChain } from 'viem';
 import { mainnet, base, bsc } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
 import { metaMorphoV2Abi } from '../contracts/metaMorphoV2Abi';
@@ -73,6 +73,58 @@ const ENV_RPC_URLS: Record<number, string | undefined> = {
   1672: env.pharosRpcUrl || undefined,
 };
 
+/**
+ * Per-chain global cap on concurrent JSON-RPC requests. Some public RPCs
+ * (Pharos / zan.top free tier) reject bursts with HTTP 429 "cu limit
+ * exceeded; Request too fast per second". The whole vault page fans out
+ * dozens of reads + hundreds of paginated `getLogs` at once, which trips it
+ * hard. Sequential is clean; empirically ≤3 concurrent runs without 429s
+ * while 4 storms. Bounding at the transport means EVERY request (reads,
+ * multicall, getLogs) shares the budget. Chains absent here are unthrottled.
+ * Override with a dedicated keyed endpoint (VITE_PHAROS_RPC_URL) for speed.
+ */
+const RPC_MAX_CONCURRENCY: Record<number, number> = {
+  1672: 3, // Pharos
+};
+
+interface Gate {
+  active: number;
+  waiters: Array<() => void>;
+}
+const rpcGates = new Map<number, Gate>();
+
+function throttleTransport(inner: Transport, chainId: number, max: number): Transport {
+  return (params) => {
+    const t = inner(params);
+    const gate: Gate = rpcGates.get(chainId) ?? { active: 0, waiters: [] };
+    rpcGates.set(chainId, gate);
+
+    const acquire = (): Promise<void> => {
+      if (gate.active < max) {
+        gate.active++;
+        return Promise.resolve();
+      }
+      return new Promise((res) => gate.waiters.push(res));
+    };
+    const release = () => {
+      const next = gate.waiters.shift();
+      if (next) next(); // hand the slot off directly (active unchanged)
+      else gate.active--;
+    };
+
+    const request = (async (...args: Parameters<typeof t.request>) => {
+      await acquire();
+      try {
+        return await t.request(...args);
+      } finally {
+        release();
+      }
+    }) as typeof t.request;
+
+    return createTransport({ ...t.config, request }, t.value);
+  };
+}
+
 export function getPublicClient(chainId: number): PublicClient {
   const existing = clientCache.get(chainId);
   if (existing) return existing;
@@ -83,11 +135,15 @@ export function getPublicClient(chainId: number): PublicClient {
   // Build transport with fallback across all configured RPCs
   const envUrl = ENV_RPC_URLS[chainId];
   const urls = envUrl ? [envUrl, ...chainConfig.rpcUrls] : chainConfig.rpcUrls;
-  const transport = urls.length > 1
+  const baseTransport = urls.length > 1
     // `rank: true` — viem health-ranks transports and deprioritises a slow or
     // 429-ing endpoint instead of always hammering the first one.
     ? fallback(urls.map(url => http(url, { fetchOptions: { cache: 'no-store' } })), { rank: true })
     : http(urls[0], { fetchOptions: { cache: 'no-store' } });
+
+  // Throttle total concurrent requests on rate-limited chains.
+  const max = RPC_MAX_CONCURRENCY[chainId];
+  const transport = max ? throttleTransport(baseTransport, chainId, max) : baseTransport;
 
   const client = createPublicClient({
     chain: VIEM_CHAINS[chainId],
