@@ -346,12 +346,24 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       decimals: 18,
       wrapped: '0x52C48d4213107b20bC583832b0d951FB9CA8F0B0' as Address,
     },
-    stablecoins: [],
+    // USDC verified on-chain (symbol/decimals via eth_call, 2026-06).
+    stablecoins: [
+      {
+        symbol: 'USDC',
+        address: '0xc879c018db60520f4355c26ed1a6d572cdac1815' as Address,
+        decimals: 6,
+      },
+    ],
     oracleProviders: ['chainlink-push'],
     deploymentBlock: 0,
     verified: true,
     scanner: {
-      batchSize: 5_000,
+      // Pharos public RPC hard-caps `eth_getLogs` at 1000 blocks/request.
+      // This is the adaptive-split floor in marketScanner; kept under the cap
+      // (range is exclusive, so 1000 → 1001 inclusive blocks → rejected).
+      // Anything larger makes every request fail and the scan silently
+      // returns nothing.
+      batchSize: 900,
       pollIntervalMs: 5_000,
     },
   },

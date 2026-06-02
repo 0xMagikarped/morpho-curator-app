@@ -9,6 +9,7 @@ import { Card } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { useMorphoMarkets } from '../../../hooks/useMorphoMarkets';
 import { useMarketLookup, parseMarketIdInput } from '../../../hooks/useMarketLookup';
+import { isApiSupportedChain } from '../../../lib/data/morphoApi';
 import { truncateAddress } from '../../../lib/utils/format';
 import type { MarketInfo } from '../../../types';
 
@@ -42,6 +43,12 @@ export function MarketBrowser({
   const [search, setSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const { data: markets, isLoading, error } = useMorphoMarkets(chainId, loanToken);
+
+  // On chains without Morpho API coverage (Pharos, XDC, SEI) there's no
+  // market index to list — the only way to add a market is to paste its
+  // 32-byte ID, which we resolve via RPC. Surface that guidance instead of
+  // a bare "No markets found".
+  const apiUnsupported = !isApiSupportedChain(chainId);
 
   // PR 19 — direct lookup-by-ID fallback. On chains without Morpho API
   // coverage (XDC, SEI) the GraphQL-backed `useMorphoMarkets` is empty,
@@ -183,9 +190,21 @@ export function MarketBrowser({
       {/* Grouped market list */}
       <div className="space-y-1 max-h-[400px] overflow-y-auto">
         {groups.length === 0 ? (
-          <p className="text-xs text-text-tertiary text-center py-4">
-            No markets found.
-          </p>
+          apiUnsupported && !search.trim() ? (
+            <div className="text-center py-6 px-4 space-y-1">
+              <p className="text-xs text-text-secondary">
+                Automatic market discovery isn't available on this chain.
+              </p>
+              <p className="text-[10px] text-text-tertiary">
+                Paste a Morpho Blue market ID (0x… 32 bytes) in the search box above to add it.
+                Create one first on the Markets page if none exist yet.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-text-tertiary text-center py-4">
+              No markets found.
+            </p>
+          )
         ) : (
           groups.map((group) => {
             const key = group.address.toLowerCase();

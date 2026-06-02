@@ -169,60 +169,6 @@ export function useVaultAllocation(chainId: number | undefined, vaultAddress: Ad
   };
 }
 
-// ============================================================
-// useVaultMarkets (RPC-only, for non-API chains)
-// ============================================================
-
-/**
- * Fetch market info via RPC. For API-supported chains, use useVaultMarketsFromApi instead.
- */
-export function useVaultMarkets(
-  chainId: number | undefined,
-  marketIds: `0x${string}`[] | undefined,
-) {
-  return useQuery({
-    queryKey: [...vaultKeys.detail(chainId!, ''), 'markets', ...(marketIds ?? [])],
-    queryFn: async () => {
-      if (!chainId || !marketIds?.length) return [];
-
-      const markets: MarketInfo[] = await Promise.all(
-        marketIds.map(async (id) => {
-          const [params, state] = await Promise.all([
-            fetchMarketParams(chainId, id),
-            fetchMarketState(chainId, id),
-          ]);
-
-          const [loanToken, collateralToken] = await Promise.all([
-            fetchTokenInfo(chainId, params.loanToken),
-            fetchTokenInfo(chainId, params.collateralToken),
-          ]);
-
-          const utilization = calcUtilization(
-            state.totalBorrowAssets,
-            state.totalSupplyAssets,
-          );
-
-          return {
-            id,
-            params,
-            state,
-            loanToken,
-            collateralToken,
-            supplyAPY: 0,
-            borrowAPY: 0,
-            utilization,
-            rewards: [],
-          } as MarketInfo;
-        }),
-      );
-
-      return markets;
-    },
-    enabled: !!chainId && !!marketIds?.length && !isApiSupportedChain(chainId ?? 0),
-    staleTime: 60_000,
-  });
-}
-
 /**
  * Returns markets from the shared full-data query (works for all chains).
  */
@@ -313,6 +259,47 @@ export function useVaultRole(
 const SET_IS_ALLOCATOR_SELECTOR = '0xb192a84a';
 const SET_IS_ALLOCATOR_EVENT = '0x74dc60cbc81a9472d04ad1d20e151d369c41104d655ed3f2f3091166a502cd8d';
 
+/** Blockscout-style explorer API base for chains that have one, else null. */
+function explorerBaseFor(chainId: number): string | null {
+  switch (chainId) {
+    case 1329: return 'https://seitrace.com/pacific-1/api/v2';
+    case 1: return 'https://eth.blockscout.com/api/v2';
+    case 8453: return 'https://base.blockscout.com/api/v2';
+    default: return null;
+  }
+}
+
+/**
+ * localStorage cache for discovered allocators on RPC-scanned chains. The
+ * SetIsAllocator full-history scan is expensive on range-limited RPCs
+ * (Pharos: ~700 paginated requests, ~100s in-browser). We persist the
+ * verified set + the last-scanned block so subsequent loads return instantly
+ * (via `placeholderData`) and only scan the *delta* since `lastBlock`.
+ */
+interface AllocatorCache {
+  allocators: string[];
+  lastBlock: string;
+}
+function allocCacheKey(chainId: number, vault: string): string {
+  return `morpho.allocators.${chainId}.${vault.toLowerCase()}`;
+}
+function readAllocCache(chainId?: number, vault?: string): AllocatorCache | null {
+  if (!chainId || !vault) return null;
+  try {
+    const raw = localStorage.getItem(allocCacheKey(chainId, vault));
+    return raw ? (JSON.parse(raw) as AllocatorCache) : null;
+  } catch {
+    return null;
+  }
+}
+function writeAllocCache(chainId: number, vault: string, value: AllocatorCache): void {
+  try {
+    localStorage.setItem(allocCacheKey(chainId, vault), JSON.stringify(value));
+  } catch {
+    // quota / disabled storage — non-fatal, just lose the cache.
+  }
+}
+
 /**
  * Discover all current allocator addresses for a vault.
  *
@@ -338,16 +325,17 @@ export function useVaultAllocators(
       const { getChainConfig } = await import('../../config/chains');
       const chainConfig = getChainConfig(chainId);
 
+      // Seed from the localStorage cache so previously-found allocators are
+      // re-verified (and re-displayed) instantly even before the delta scan.
+      const cache = readAllocCache(chainId, vaultAddress);
+      for (const a of cache?.allocators ?? []) candidates.add(a.toLowerCase());
+      // Track how far the RPC scan covered, to persist as the next cursor.
+      let scannedTo: bigint | null = null;
+
       // Source 1: Explorer event logs (SetIsAllocator events)
       // This catches allocators set via Safe multisig, multicall, or direct calls
       try {
-        const explorerBase = chainId === 1329
-          ? 'https://seitrace.com/pacific-1/api/v2'
-          : chainId === 1
-            ? 'https://eth.blockscout.com/api/v2'
-            : chainId === 8453
-              ? 'https://base.blockscout.com/api/v2'
-              : null;
+        const explorerBase = explorerBaseFor(chainId);
 
         if (explorerBase) {
           const logsUrl = `${explorerBase}/addresses/${vaultAddress}/logs?topic0=${SET_IS_ALLOCATOR_EVENT}`;
@@ -382,6 +370,34 @@ export function useVaultAllocators(
         // Explorer APIs failed — continue with known addresses
       }
 
+      // Source 2b: RPC event scan — for chains without a blockscout-style
+      // explorer (Pharos, XDC), discover SetIsAllocator events directly via
+      // `eth_getLogs`, paginated for range-limited RPCs (Pharos caps at 1000
+      // blocks/request). Without this, allocators set during vault init never
+      // surface in the Parameters tab on those chains.
+      if (!explorerBaseFor(chainId)) {
+        try {
+          const { getPublicClient } = await import('../data/rpcClient');
+          const { scanContractEvent } = await import('../data/eventScan');
+          const { parseAbiItem } = await import('viem');
+          const event = parseAbiItem(
+            'event SetIsAllocator(address indexed account, bool isAllocator)',
+          );
+          const client = getPublicClient(chainId);
+          const latest = await client.getBlockNumber();
+          // Incremental: if we've scanned before, only cover new blocks.
+          const since = cache ? BigInt(cache.lastBlock) + 1n : undefined;
+          const logs = await scanContractEvent(client, chainId, vaultAddress, event, since, latest);
+          for (const log of logs) {
+            const acct = (log as { args?: { account?: string } }).args?.account;
+            if (acct) candidates.add(acct.toLowerCase());
+          }
+          scannedTo = latest;
+        } catch {
+          // RPC scan failed — fall back to known addresses below.
+        }
+      }
+
       // Source 3: Known addresses
       if (chainConfig?.periphery?.publicAllocator) {
         candidates.add(chainConfig.periphery.publicAllocator.toLowerCase());
@@ -390,9 +406,8 @@ export function useVaultAllocators(
         candidates.add(userAddress.toLowerCase());
       }
 
-      if (candidates.size === 0) return [];
-
-      // Step 2: Verify ALL candidates on-chain via isAllocator()
+      // Step 2: Verify ALL candidates on-chain via isAllocator(). (A cached
+      // allocator that's since been revoked fails here and drops out.)
       const verified: Address[] = [];
       const checks = await Promise.allSettled(
         [...candidates].map(async (addr) => {
@@ -407,10 +422,24 @@ export function useVaultAllocators(
         }
       }
 
+      // Persist the verified set + scan cursor so the next load is instant
+      // and only scans the delta. Only when we actually advanced the cursor.
+      if (scannedTo !== null) {
+        writeAllocCache(chainId, vaultAddress, {
+          allocators: verified,
+          lastBlock: scannedTo.toString(),
+        });
+      }
+
       return verified;
     },
     enabled: !!chainId && !!vaultAddress,
     staleTime: 5 * 60_000,
+    // Show the cached allocators immediately while the (delta) scan runs.
+    placeholderData: () => {
+      const c = readAllocCache(chainId, vaultAddress);
+      return c ? (c.allocators as Address[]) : undefined;
+    },
   });
 }
 

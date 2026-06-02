@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import type { Address } from 'viem';
 import { useReadContract, useAccount, useWaitForTransactionReceipt } from 'wagmi';
-import { useVaultInfo } from '../../lib/hooks/useVault';
+import { useVaultInfo, useVaultAllocators } from '../../lib/hooks/useVault';
 import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
@@ -35,6 +35,11 @@ interface V2ParamsTabProps {
 export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   const { data: vault, isLoading } = useVaultInfo(chainId, vaultAddress);
   const permissions = useVaultPermissions(chainId, vaultAddress);
+  // V2 has no enumerable allocator list on-chain — `vault.allocators` is
+  // always empty. Discover them via SetIsAllocator events + on-chain
+  // isAllocator() verification (works on all chains, incl. Pharos/XDC).
+  const { data: discoveredAllocators, isLoading: allocatorsLoading } =
+    useVaultAllocators(chainId, vaultAddress);
   const [editing, setEditing] = useState<V2SetterIntent | null>(null);
 
   if (isLoading || !vault) {
@@ -62,7 +67,7 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
   // fragments).
   const canEdit = permissions.canCurate || permissions.canManage || permissions.isAdmin;
   const timelockSeconds = vault.timelock;
-  const allocators: Address[] = vault.allocators ?? [];
+  const allocators: Address[] = discoveredAllocators ?? vault.allocators ?? [];
 
   // V2 `submit(bytes)` — used by every timelocked setter (incl. setIsAllocator)
   // — is curator-gated on-chain. If `curator()` is `0x0` (fresh vault) or
@@ -256,7 +261,13 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
             </div>
           )}
           {allocators.length === 0 ? (
-            <p className="text-[10px] text-text-tertiary italic">No allocators configured.</p>
+            allocatorsLoading ? (
+              <p className="text-[10px] text-text-tertiary italic">
+                Scanning allocator history… (can take ~1–2 min on this chain)
+              </p>
+            ) : (
+              <p className="text-[10px] text-text-tertiary italic">No allocators configured.</p>
+            )
           ) : (
             <div className="space-y-1">
               {allocators.map((a) => (

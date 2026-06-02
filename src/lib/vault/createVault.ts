@@ -1,7 +1,5 @@
 import {
   encodeFunctionData,
-  encodeAbiParameters,
-  keccak256,
   decodeEventLog,
   type Hash,
   type TransactionReceipt,
@@ -16,6 +14,9 @@ import {
   MOOLAH_MIN_TIMELOCK_DELAY,
 } from '../contracts/abis';
 import { getChainConfig } from '../../config/chains';
+import { computeMarketId, type MarketParamsStruct } from '../market/marketId';
+
+export { computeMarketId, type MarketParamsStruct };
 
 // ============================================================
 // Types
@@ -29,14 +30,6 @@ export interface VaultCreationParams {
   name: string;
   symbol: string;
   salt: `0x${string}`;
-}
-
-export interface MarketParamsStruct {
-  loanToken: `0x${string}`;
-  collateralToken: `0x${string}`;
-  oracle: `0x${string}`;
-  irm: `0x${string}`;
-  lltv: bigint;
 }
 
 export interface PostDeployConfig {
@@ -64,25 +57,6 @@ export interface TransactionStep {
   error?: string;
   requiresWait?: number; // seconds to wait before executing
   operations?: string[]; // Human-readable labels for multicall sub-operations
-}
-
-// ============================================================
-// Market ID computation
-// ============================================================
-
-export function computeMarketId(params: MarketParamsStruct): `0x${string}` {
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'address' },
-        { type: 'uint256' },
-      ],
-      [params.loanToken, params.collateralToken, params.oracle, params.irm, params.lltv],
-    ),
-  );
 }
 
 // ============================================================

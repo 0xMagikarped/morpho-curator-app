@@ -17,15 +17,18 @@
  * 22) which is cap-specific (abs + rel pair). This drawer takes ONE
  * input per setter and bakes Submit/Wait/Execute around it.
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { Address } from 'viem';
 import { encodeFunctionData, isAddress } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { useV2TimelockedOp } from '../../../lib/hooks/useV2TimelockedOp';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
+import { Badge } from '../../ui/Badge';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
+import { vaultKeys } from '../../../lib/queryKeys';
 
 /**
  * PR 29 — `maxRate` is `interestRatePerSecond` in WAD. UI surfaces APR%
@@ -153,9 +156,34 @@ export function V2SetterDrawer({
     return true;
   });
 
-  const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const queryClient = useQueryClient();
+  const { writeContract, data: txHash, isPending, error, simulateError, reset } = useGuardedWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
   const busy = isPending || isConfirming;
+
+  // Track which of the two-step actions is in flight so we only treat the
+  // EXECUTE confirmation as "done" — a Submit confirmation just queues the
+  // timelocked op and must keep the drawer open for the Execute step.
+  const [lastAction, setLastAction] = useState<'submit' | 'execute' | null>(null);
+  const executed = isSuccess && lastAction === 'execute';
+
+  const handleClose = useCallback(() => {
+    reset();
+    setLastAction(null);
+    onClose();
+  }, [reset, onClose]);
+
+  // On a confirmed Execute: refresh the vault data (so the new value shows)
+  // + the allocator list, then auto-close after a brief confirmation.
+  useEffect(() => {
+    if (!executed) return;
+    void queryClient.invalidateQueries({ queryKey: vaultKeys.fullData(chainId, vaultAddress) });
+    void queryClient.invalidateQueries({
+      queryKey: [...vaultKeys.fullData(chainId, vaultAddress), 'allocators'],
+    });
+    const t = setTimeout(handleClose, 1500);
+    return () => clearTimeout(t);
+  }, [executed, queryClient, chainId, vaultAddress, handleClose]);
 
   // Encode the target calldata from the current input.
   const calldata = useMemo<`0x${string}` | undefined>(() => {
@@ -233,6 +261,7 @@ export function V2SetterDrawer({
 
   const handleSubmit = () => {
     if (!calldata) return;
+    setLastAction('submit');
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
@@ -244,6 +273,7 @@ export function V2SetterDrawer({
 
   const handleExecute = () => {
     if (!calldata) return;
+    setLastAction('execute');
     // Execute by calling the target function directly with the same args
     // we used to build `calldata`. The V2 vault self-checks executableAt.
     switch (intent.kind) {
@@ -283,8 +313,23 @@ export function V2SetterDrawer({
   const timelockDays = Number(timelockSeconds) / 86400;
   const title = labelForIntent(intent);
 
+  if (executed) {
+    return (
+      <Drawer open={open} onClose={handleClose} title={title}>
+        <div className="text-center py-8">
+          <Badge variant="success" className="mb-2">Done</Badge>
+          <p className="text-sm text-text-primary">Change applied.</p>
+          <p className="text-xs text-text-tertiary mt-1">The vault parameters have been updated.</p>
+          <Button size="sm" variant="secondary" onClick={handleClose} className="mt-4">
+            Back to vault
+          </Button>
+        </div>
+      </Drawer>
+    );
+  }
+
   return (
-    <Drawer open={open} onClose={onClose} title={title}>
+    <Drawer open={open} onClose={handleClose} title={title}>
       <div className="space-y-4">
         {(simulateError || error) && (
           <div role="alert" className="bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger">

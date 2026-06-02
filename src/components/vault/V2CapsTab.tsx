@@ -29,6 +29,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { AddressDisplay } from '../ui/AddressDisplay';
+import { HashDisplay } from '../ui/HashDisplay';
 import { ProgressBar } from '../ui/ProgressBar';
 import { CapEditDrawer } from './adapters/CapEditDrawer';
 import { AddCollateralCapDrawer } from './caps/AddCollateralCapDrawer';
@@ -264,9 +265,7 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
                 </span>
               ),
               subTarget: (
-                <span className="font-mono text-[10px] text-text-tertiary">
-                  {e.id.slice(0, 10)}…{e.id.slice(-4)}
-                </span>
+                <HashDisplay value={e.marketId} copyLabel="Copy market ID" className="text-[10px]" />
               ),
               allocation: e.allocation,
               absoluteCap: e.absoluteCap,
