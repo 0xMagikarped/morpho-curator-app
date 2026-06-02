@@ -11,6 +11,30 @@ import {
 } from '@rainbow-me/rainbowkit/wallets';
 import type { Chain } from 'wagmi/chains';
 import { env } from './env';
+import { isProxiedChain, isProxyOnlyChain, proxyRpcUrl } from './rpcProxy';
+
+/**
+ * Build a chain's transport. Proxied chains (Alchemy via the same-origin
+ * /api/rpc proxy) put the proxy FIRST in an ordered fallback so it's always
+ * preferred — the public RPCs are failover only, not rank-balanced (we don't
+ * want viem drifting back onto a flaky/ratelimited public endpoint). The
+ * proxy carries the first public URL as its own server-side fallback.
+ */
+function chainTransport(
+  chainId: number,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  publicTransports: any[],
+  firstPublicUrl: string,
+) {
+  if (isProxiedChain(chainId)) {
+    const proxy = http(proxyRpcUrl(chainId, firstPublicUrl));
+    // Proxy-only chains (Pharos): no public fallback — see rpcProxy.ts.
+    return isProxyOnlyChain(chainId)
+      ? fallback([proxy])
+      : fallback([proxy, ...publicTransports]);
+  }
+  return fallback(publicTransports, { rank: true });
+}
 
 /**
  * SEI chain definition for wagmi (not included in wagmi/chains).
@@ -117,12 +141,13 @@ export const config = getDefaultConfig({
   projectId: env.walletConnectProjectId,
   chains: [sei, mainnet, base, bsc, pharos, xdc],
   transports: {
-    // `rank: true` — health-rank endpoints so a slow/429-ing RPC is deprioritised.
-    [sei.id]: fallback(seiTransports, { rank: true }),
-    [mainnet.id]: fallback(ethTransports, { rank: true }),
-    [base.id]: fallback(baseTransports, { rank: true }),
-    [bsc.id]: fallback(bnbTransports, { rank: true }),
-    [pharos.id]: fallback(pharosTransports, { rank: true }),
+    // Proxied chains: Alchemy proxy primary (ordered), publics as failover.
+    // Non-proxied (XDC): `rank: true` health-ranks the public endpoints.
+    [sei.id]: chainTransport(sei.id, seiTransports, 'https://evm-rpc.sei-apis.com'),
+    [mainnet.id]: chainTransport(mainnet.id, ethTransports, 'https://ethereum-rpc.publicnode.com'),
+    [base.id]: chainTransport(base.id, baseTransports, 'https://mainnet.base.org'),
+    [bsc.id]: chainTransport(bsc.id, bnbTransports, 'https://bsc.publicnode.com'),
+    [pharos.id]: chainTransport(pharos.id, pharosTransports, 'https://rpc.pharos.xyz'),
     [xdc.id]: fallback(xdcTransports, { rank: true }),
   },
   wallets: [

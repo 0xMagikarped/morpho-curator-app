@@ -127,10 +127,11 @@ const LOG_WINDOW_CONFIG: Record<number, LogWindowConfig> = {
   // BSC public-RPC hard cap is 5000 per request. Default to 14 h of
   // history so the curator sees last-day proposals without paginating.
   56: { pageWindow: 5_000n, defaultScan: 16_000n, maxScan: 900_000n },
-  // Pharos public RPC (rpc.pharos.xyz) hard-caps `eth_getLogs` at 1000
-  // blocks per request ("The block range is too large"). 2 s blocks, so
-  // defaultScan ≈ 22 h of history.
-  1672: { pageWindow: 1_000n, defaultScan: 40_000n, maxScan: 4_000_000n },
+  // Pharos is proxied to Alchemy (PAYG), which allows a 10k-block getLogs
+  // range — 10× the free public RPC's 1000 cap, so ~10× fewer pages. (If the
+  // proxy ever falls back to the public rpc.pharos.xyz, which caps at 1000,
+  // getLogs over a 10k range will error — acceptable given Alchemy is primary.)
+  1672: { pageWindow: 10_000n, defaultScan: 200_000n, maxScan: 4_000_000n },
 };
 const FALLBACK_CONFIG: LogWindowConfig = {
   pageWindow: 50_000n,

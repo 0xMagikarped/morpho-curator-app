@@ -10,6 +10,7 @@ import { mainnet, base, bsc } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
 import { metaMorphoV2Abi } from '../contracts/metaMorphoV2Abi';
 import { getChainConfig } from '../../config/chains';
+import { isProxiedChain, isProxyOnlyChain, proxyRpcUrl } from '../../config/rpcProxy';
 import { env } from '../../config/env';
 import type {
   MarketParams,
@@ -84,7 +85,9 @@ const ENV_RPC_URLS: Record<number, string | undefined> = {
  * Override with a dedicated keyed endpoint (VITE_PHAROS_RPC_URL) for speed.
  */
 const RPC_MAX_CONCURRENCY: Record<number, number> = {
-  1672: 3, // Pharos
+  // Pharos no longer needs throttling — it's proxied to Alchemy (high
+  // concurrency, no per-second CU storm). Left here as the hook for any
+  // chain that must talk to a rate-limited public RPC directly.
 };
 
 interface Gate {
@@ -132,14 +135,27 @@ export function getPublicClient(chainId: number): PublicClient {
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
 
-  // Build transport with fallback across all configured RPCs
+  // Build transport with fallback across all configured RPCs. For proxied
+  // chains, the same-origin /api/rpc/<id> proxy (server-side Alchemy key) is
+  // primary; the public RPCs remain as browser-side fallback. The proxy gets
+  // the first public URL as its own server-side fallback (so it still works
+  // before ALCHEMY_API_KEY is configured).
   const envUrl = ENV_RPC_URLS[chainId];
-  const urls = envUrl ? [envUrl, ...chainConfig.rpcUrls] : chainConfig.rpcUrls;
-  const baseTransport = urls.length > 1
-    // `rank: true` — viem health-ranks transports and deprioritises a slow or
-    // 429-ing endpoint instead of always hammering the first one.
-    ? fallback(urls.map(url => http(url, { fetchOptions: { cache: 'no-store' } })), { rank: true })
-    : http(urls[0], { fetchOptions: { cache: 'no-store' } });
+  const publicUrls = envUrl ? [envUrl, ...chainConfig.rpcUrls] : chainConfig.rpcUrls;
+  const proxied = isProxiedChain(chainId);
+  const urls = proxied
+    ? isProxyOnlyChain(chainId)
+      ? [proxyRpcUrl(chainId, chainConfig.rpcUrls[0])] // proxy only — no public fallback
+      : [proxyRpcUrl(chainId, chainConfig.rpcUrls[0]), ...publicUrls]
+    : publicUrls;
+  const leaves = urls.map(url => http(url, { fetchOptions: { cache: 'no-store' } }));
+  const baseTransport = leaves.length === 1
+    ? leaves[0]
+    // Proxied: ordered (proxy first, publics as failover). Else `rank: true`
+    // health-ranks so a slow/429-ing public endpoint is deprioritised.
+    : proxied
+      ? fallback(leaves)
+      : fallback(leaves, { rank: true });
 
   // Throttle total concurrent requests on rate-limited chains.
   const max = RPC_MAX_CONCURRENCY[chainId];

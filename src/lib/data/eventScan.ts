@@ -12,7 +12,7 @@
  * (SetIsAllocator events).
  */
 import type { AbiEvent, Address, Log, PublicClient } from 'viem';
-import { getLogWindowConfig, isLogRangeLimited } from '../vault/proposals';
+import { getLogWindowConfig } from '../vault/proposals';
 
 /** Cache of resolved deployment blocks (immutable per contract). */
 const deploymentBlockCache = new Map<string, bigint>();
@@ -66,6 +66,16 @@ function isRateLimit(err: unknown): boolean {
   return /\b429\b|rate.?limit|too fast|too many request|cu limit|-32011/i.test(msg);
 }
 
+/** Block-range / result-size errors that mean "ask for a smaller range". Every
+ *  RPC phrases this differently — Alchemy: "up to a 10000 block range" /
+ *  "Log response size exceeded"; zan.top: "block range is too large". We split
+ *  and retry on these so a single scanner adapts to any endpoint's caps. */
+function isRangeError(err: unknown): boolean {
+  if (isRateLimit(err)) return false; // handled by backoff, not splitting
+  const msg = err instanceof Error ? err.message : String(err);
+  return /block range|range too|too large|up to a \d+ block|response size|query returned more|too many results|exceed/i.test(msg);
+}
+
 /**
  * `getLogs` for one window with exponential backoff on rate-limit errors.
  * Total concurrent requests are bounded globally by the per-chain transport
@@ -93,6 +103,36 @@ async function getLogsWithRetry(
   }
 }
 
+/** Minimum span we'll split a range down to before giving up on a range error. */
+const MIN_RANGE_SPAN = 100n;
+
+/**
+ * Fetch one block range, adaptively halving on range/result-size errors so the
+ * scan self-adapts to whatever the live endpoint allows (Alchemy ~10k, the
+ * public Pharos RPC 1k, etc.) — no per-chain window tuning required. Rate
+ * limits are absorbed by `getLogsWithRetry`'s backoff, not by splitting.
+ */
+async function scanRange(
+  client: PublicClient,
+  address: Address,
+  event: AbiEvent,
+  start: bigint,
+  end: bigint,
+): Promise<Log[]> {
+  try {
+    return await getLogsWithRetry(client, address, event, start, end);
+  } catch (err) {
+    const span = end - start;
+    if (span <= MIN_RANGE_SPAN || !isRangeError(err)) throw err;
+    const mid = start + span / 2n;
+    const [left, right] = await Promise.all([
+      scanRange(client, address, event, start, mid),
+      scanRange(client, address, event, mid + 1n, end),
+    ]);
+    return [...left, ...right];
+  }
+}
+
 async function getLogsPaginated(
   client: PublicClient,
   address: Address,
@@ -107,15 +147,14 @@ async function getLogsPaginated(
     ranges.push({ from: start, to: end });
   }
   const acc: Log[] = [];
-  // Batch size just bounds how many page-promises are pending at once — the
-  // REAL concurrency cap is the per-chain transport throttle in
-  // getPublicClient (rpcClient.ts), which gates total in-flight requests
-  // across all scans + reads so Pharos's per-second CU limit isn't tripped.
+  // Batch size bounds how many page-promises are pending at once. Real
+  // concurrency is also bounded by the per-chain transport throttle in
+  // getPublicClient (rpcClient.ts) where one is configured.
   const CONCURRENCY = 4;
   for (let i = 0; i < ranges.length; i += CONCURRENCY) {
     const batch = ranges.slice(i, i + CONCURRENCY);
     const pages = await Promise.all(
-      batch.map((r) => getLogsWithRetry(client, address, event, r.from, r.to)),
+      batch.map((r) => scanRange(client, address, event, r.from, r.to)),
     );
     for (const page of pages) acc.push(...page);
   }
@@ -123,9 +162,10 @@ async function getLogsPaginated(
 }
 
 /**
- * Scan a single event on a contract. Range-limited chains (e.g. Pharos) are
- * paged from `fromBlock` (default: the contract's deployment block) to
- * `latest`; everything else uses one `fromBlock → latest` request.
+ * Scan a single event across a contract's history. Always paginated from the
+ * contract's deployment block (binary-searched) with adaptive range-splitting,
+ * so it works through any endpoint's getLogs cap (Alchemy 10k, public 1k) and
+ * never walks pre-deployment blocks.
  *
  * Pass `fromBlock` to scan only a delta (incremental re-scan from a cached
  * last-scanned block). `latestOverride` lets the caller reuse a block number
@@ -139,12 +179,9 @@ export async function scanContractEvent(
   fromBlock?: bigint,
   latestOverride?: bigint,
 ): Promise<Log[]> {
-  if (!isLogRangeLimited(chainId)) {
-    return client.getLogs({ address, event, fromBlock: fromBlock ?? 0n, toBlock: 'latest' });
-  }
-  const { pageWindow } = getLogWindowConfig(chainId);
   const latest = latestOverride ?? (await client.getBlockNumber());
   const from = fromBlock ?? (await findDeploymentBlock(client, chainId, address, latest));
   if (from > latest) return [];
+  const { pageWindow } = getLogWindowConfig(chainId);
   return getLogsPaginated(client, address, event, from, latest, pageWindow);
 }
