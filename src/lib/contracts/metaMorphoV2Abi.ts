@@ -47,6 +47,17 @@ export const metaMorphoV2Abi = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // Morpho V2's actual owner transfer: single-step, owner-only, immediate.
+  // (The vault is NOT Ownable2Step — pendingOwner/transferOwnership/
+  // acceptOwnership above don't exist on-chain and revert; kept only so the
+  // legacy pendingOwner read can resolve-with-catch.)
+  {
+    inputs: [{ name: 'newOwner', type: 'address' }],
+    name: 'setOwner',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
   { inputs: [], name: 'curator', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'guardian', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
   { inputs: [], name: 'sentinel', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },

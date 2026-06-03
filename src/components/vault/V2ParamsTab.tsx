@@ -15,11 +15,10 @@
  */
 import { useState } from 'react';
 import type { Address } from 'viem';
-import { useReadContract, useAccount, useWaitForTransactionReceipt } from 'wagmi';
+import { useReadContract, useAccount } from 'wagmi';
 import { useVaultInfo, useVaultAllocators } from '../../lib/hooks/useVault';
 import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
-import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -178,34 +177,12 @@ export function V2ParamsTab({ chainId, vaultAddress }: V2ParamsTabProps) {
           <Badge variant="info">V2</Badge>
         </CardHeader>
 
-        {/* Ownable2Step on V2 — `transferOwnership` is owner-only and queues
-            a `pendingOwner`; the new owner finishes the transfer by calling
-            `acceptOwnership()` themselves. We surface both halves: Edit
-            (owner-only) to initiate, and an inline Accept (visible only
-            when the connected wallet IS the pendingOwner). */}
+        {/* Owner transfer on Morpho V2 is single-step: owner-only `setOwner`
+            applies immediately (no Ownable2Step pendingOwner/acceptOwnership). */}
         <Row
           label="Owner"
-          valueNode={
-            <div className="space-y-1">
-              <AddressDisplay address={vault.owner} chainId={chainId} />
-              {vault.pendingOwner && vault.pendingOwner !== ZERO && (
-                <div className="flex items-center gap-2 text-[10px] text-warning">
-                  <span>Pending:</span>
-                  <AddressDisplay address={vault.pendingOwner} chainId={chainId} />
-                  {connected && vault.pendingOwner.toLowerCase() === connected.toLowerCase() && (
-                    <AcceptOwnershipButton vaultAddress={vaultAddress} chainId={chainId} />
-                  )}
-                </div>
-              )}
-            </div>
-          }
-          onEdit={() =>
-            setEditing({
-              kind: 'transferOwnership',
-              current: vault.owner,
-              pending: vault.pendingOwner,
-            })
-          }
+          valueNode={<AddressDisplay address={vault.owner} chainId={chainId} />}
+          onEdit={() => setEditing({ kind: 'transferOwnership', current: vault.owner })}
           canEdit={isOwner}
         />
 
@@ -448,32 +425,3 @@ function Row({
   );
 }
 
-function AcceptOwnershipButton({
-  vaultAddress,
-  chainId,
-}: {
-  vaultAddress: Address;
-  chainId: number;
-}) {
-  const { writeContract, data: txHash, isPending } = useGuardedWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
-  const busy = isPending || isConfirming;
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      disabled={busy}
-      loading={busy}
-      onClick={() =>
-        writeContract({
-          address: vaultAddress,
-          abi: metaMorphoV2Abi,
-          functionName: 'acceptOwnership',
-          chainId,
-        })
-      }
-    >
-      Accept
-    </Button>
-  );
-}
