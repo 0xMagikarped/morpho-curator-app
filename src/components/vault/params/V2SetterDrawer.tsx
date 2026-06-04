@@ -57,7 +57,7 @@ function aprPctToWadPerSecond(pct: number): bigint {
  * input + the encoded target calldata once committed.
  */
 export type V2SetterIntent =
-  | { kind: 'transferOwnership'; current: Address; pending?: Address }
+  | { kind: 'transferOwnership'; current: Address }
   | { kind: 'setCurator'; current: Address }
   | { kind: 'setPerformanceFee'; currentWad: bigint }
   | { kind: 'setPerformanceFeeRecipient'; current: Address }
@@ -191,7 +191,8 @@ export function V2SetterDrawer({
       case 'transferOwnership':
         if (!isAddress(addressInput)) return undefined;
         if (addressInput.toLowerCase() === intent.current.toLowerCase()) return undefined;
-        return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'transferOwnership', args: [addressInput] });
+        // Morpho V2 owner transfer is single-step `setOwner` (not Ownable2Step).
+        return encodeFunctionData({ abi: metaMorphoV2Abi, functionName: 'setOwner', args: [addressInput] });
       case 'setCurator':
         if (!isAddress(addressInput)) return undefined;
         if (addressInput.toLowerCase() === intent.current.toLowerCase()) return undefined;
@@ -278,10 +279,8 @@ export function V2SetterDrawer({
     // we used to build `calldata`. The V2 vault self-checks executableAt.
     switch (intent.kind) {
       case 'transferOwnership':
-        // Ownable2Step — only initiates the transfer; the new owner must
-        // call `acceptOwnership()` to finish (surfaced inline on the
-        // current-value row when applicable).
-        return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'transferOwnership', args: [addressInput as Address], chainId });
+        // Single-step `setOwner` — applies immediately (V2 isn't Ownable2Step).
+        return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setOwner', args: [addressInput as Address], chainId });
       case 'setCurator':
         return writeContract({ address: vaultAddress, abi: metaMorphoV2Abi, functionName: 'setCurator', args: [addressInput as Address], chainId });
       case 'setPerformanceFee':
@@ -401,20 +400,11 @@ function CurrentValueRow({ intent }: { intent: V2SetterIntent }) {
   switch (intent.kind) {
     case 'transferOwnership':
       return (
-        <div className="text-xs space-y-1">
-          <div>
-            <span className="text-text-tertiary">Current owner: </span>
-            <span className="font-mono text-text-primary">
-              {intent.current === ZERO_ADDR ? 'Not set' : intent.current}
-            </span>
-          </div>
-          {intent.pending && intent.pending !== ZERO_ADDR && (
-            <div>
-              <span className="text-text-tertiary">Pending owner: </span>
-              <span className="font-mono text-warning">{intent.pending}</span>{' '}
-              <span className="text-[10px] text-text-tertiary">(awaiting acceptOwnership)</span>
-            </div>
-          )}
+        <div className="text-xs">
+          <span className="text-text-tertiary">Current owner: </span>
+          <span className="font-mono text-text-primary">
+            {intent.current === ZERO_ADDR ? 'Not set' : intent.current}
+          </span>
         </div>
       );
     case 'setCurator':
