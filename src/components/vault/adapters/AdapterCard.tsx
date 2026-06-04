@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useReadContracts } from 'wagmi';
 import { Card, CardHeader, CardTitle } from '../../ui/Card';
 import { Badge } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
@@ -9,7 +10,8 @@ import { UtilizationBar } from '../../risk/UtilizationBar';
 import { formatTokenAmount, formatPercent, formatWadPercent, formatCapDisplay } from '../../../lib/utils/format';
 import { useAdapterMarketPositions, type V2AdapterFull } from '../../../lib/hooks/useV2Adapters';
 import { useV2VaultCapEntries } from '../../../hooks/useV2VaultCapEntries';
-import type { AdapterMarketPosition, MarketId } from '../../../types';
+import { morphoBlueAbi } from '../../../lib/contracts/abis';
+import type { AdapterMarketPosition, MarketId, MarketState } from '../../../types';
 import type { Address } from 'viem';
 
 interface AdapterCardProps {
@@ -60,7 +62,17 @@ export function AdapterCard({
   // (PR 23) so the Markets breakdown lists every market the adapter is
   // configured for, not just those with a non-zero allocation.
   const { data: capEntries } = useV2VaultCapEntries(chainId, vaultAddress);
-  const mergedPositions = useMergedPositions(adapter.address, positions, capEntries?.marketCaps);
+  const baseMergedPositions = useMergedPositions(adapter.address, positions, capEntries?.marketCaps);
+  // Cap-only entries arrive with marketState=null, which made the Util
+  // column read 0% even when the underlying market was at 90% — the
+  // bar should reflect MARKET utilization (borrow/supply) regardless of
+  // whether the vault has supplied into it. Fetch the missing states
+  // straight from Morpho Blue and splice them back in.
+  const mergedPositions = useCapOnlyMarketStates(
+    chainId,
+    adapter.morphoBlue,
+    baseMergedPositions,
+  );
 
   const typeBadge = adapter.type === 'vault-v1'
     ? <Badge variant="info">V1 Vault Adapter</Badge>
@@ -276,6 +288,61 @@ function useMergedPositions(
     }
     return Array.from(merged.values());
   }, [adapterAddress, positions, capEntries]);
+}
+
+/**
+ * Backfill `marketState` on cap-only positions by reading
+ * `morphoBlue.market(id)` for every missing id. The merge is by
+ * marketId so the row order stays stable; nothing is touched when
+ * every position already has a state.
+ */
+function useCapOnlyMarketStates(
+  chainId: number,
+  morphoBlue: Address | null,
+  positions: AdapterMarketPosition[] | undefined,
+): AdapterMarketPosition[] | undefined {
+  const missingIds = useMemo(
+    () => (positions ?? []).filter((p) => !p.marketState).map((p) => p.marketId),
+    [positions],
+  );
+  const { data: states } = useReadContracts({
+    contracts: missingIds.map((id) => ({
+      address: morphoBlue ?? undefined,
+      abi: morphoBlueAbi,
+      functionName: 'market',
+      args: [id],
+      chainId,
+    })),
+    query: {
+      enabled: !!morphoBlue && missingIds.length > 0,
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+    },
+  });
+  return useMemo(() => {
+    if (!positions) return positions;
+    if (!states || missingIds.length === 0) return positions;
+    const stateById = new Map<string, MarketState>();
+    states.forEach((res, i) => {
+      if (res.status !== 'success' || !res.result) return;
+      // Morpho Blue market(id) tuple → MarketState shape we already use
+      // elsewhere (rpcClient.fetchMarketState).
+      const r = res.result as readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+      stateById.set(missingIds[i].toLowerCase(), {
+        totalSupplyAssets: r[0],
+        totalSupplyShares: r[1],
+        totalBorrowAssets: r[2],
+        totalBorrowShares: r[3],
+        lastUpdate: r[4],
+        fee: r[5],
+      });
+    });
+    return positions.map((p) => {
+      if (p.marketState) return p;
+      const s = stateById.get(p.marketId.toLowerCase());
+      return s ? { ...p, marketState: s } : p;
+    });
+  }, [positions, states, missingIds]);
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
