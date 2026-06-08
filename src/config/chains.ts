@@ -369,6 +369,58 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   },
 
   // ============================================================
+  // Avalanche C-Chain (Chain ID 43114) — Morpho Blue + Vault V2
+  // Addresses from Morpho docs; USDC/WAVAX verified on-chain (June 2026).
+  // Morpho GraphQL API does NOT index Avalanche ("unsupported chainId") →
+  // RPC-only, served fast via the Alchemy proxy (avax-mainnet).
+  // ============================================================
+  43114: {
+    chainId: 43114,
+    name: 'Avalanche',
+    protocol: 'morpho',
+    defaultVaultFlavor: 'metaMorphoV1',
+    rpcUrls: ['https://api.avax.network/ext/bc/C/rpc'],
+    blockExplorer: 'https://snowtrace.io',
+    morphoBlue: '0x895383274303AA19fe978AFB4Ac55C7f094f982C' as Address,
+    deployed: true,
+    vaultFactories: {
+      v2: '0xf7b1d9e43BAeA3705f2B303693766ACbcfec6A55' as Address,
+    },
+    periphery: {
+      adaptiveCurveIrm: '0xb6ac9477D574EE2a7BF32d2475b303fb70968AA4' as Address,
+      oracleV2Factory: '0xF0c1299D44b3803243d7c1eEC2042e9484Db13f2' as Address,
+      v2AdapterRegistry: '0x66dC122CF454576684Ad78A2800a8Eb052b2E9a6' as Address,
+      morphoMarketV1AdapterV2Factory: '0x9633D22Bb8F42f6f70DbbBe34c11EB9209769b8b' as Address,
+    },
+    apiSupported: false,
+    blockTime: 2_000,
+    finality: 'probabilistic',
+    gasConfig: {
+      blockGasLimit: 30_000_000,
+      sstoreCost: 20_000,
+    },
+    nativeToken: {
+      symbol: 'AVAX',
+      decimals: 18,
+      wrapped: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7' as Address,
+    },
+    stablecoins: [
+      {
+        symbol: 'USDC',
+        address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E' as Address,
+        decimals: 6,
+      },
+    ],
+    oracleProviders: ['chainlink-push'],
+    deploymentBlock: 0,
+    verified: true,
+    scanner: {
+      batchSize: 2_000,
+      pollIntervalMs: 2_000,
+    },
+  },
+
+  // ============================================================
   // XDC Network (Chain ID 50) — Morpho Vault V2 only
   // ============================================================
   // XDC has the Morpho Vault V2 stack deployed but NO MetaMorpho V1

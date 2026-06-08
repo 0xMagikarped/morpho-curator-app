@@ -8,7 +8,7 @@
  * Keep this set in sync with ALCHEMY_SLUGS in `api/_upstream.js`. XDC (50) is
  * omitted because Alchemy doesn't serve it — it keeps its public RPCs.
  */
-export const PROXIED_CHAINS = new Set<number>([1, 8453, 56, 1329, 1672]);
+export const PROXIED_CHAINS = new Set<number>([1, 8453, 56, 1329, 1672, 43114]);
 
 export function isProxiedChain(chainId: number): boolean {
   return PROXIED_CHAINS.has(chainId);

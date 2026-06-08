@@ -9,7 +9,7 @@ import {
   type Hash,
   type EIP1193Provider,
 } from 'viem';
-import { mainnet, base, bsc, xdc } from 'viem/chains';
+import { mainnet, base, bsc, xdc, avalanche } from 'viem/chains';
 import type { Chain } from 'viem';
 import { CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
@@ -48,6 +48,7 @@ const VIEM_CHAINS: Record<number, Chain> = {
   56: bsc,
   1672: pharos,
   50: xdc,
+  43114: avalanche,
 };
 
 async function waitForReceipt(

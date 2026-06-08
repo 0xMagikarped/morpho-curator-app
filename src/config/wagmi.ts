@@ -1,5 +1,5 @@
 import { http, fallback } from 'wagmi';
-import { mainnet, base, bsc, xdc } from 'wagmi/chains';
+import { mainnet, base, bsc, xdc, avalanche } from 'wagmi/chains';
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
   rabbyWallet,
@@ -135,11 +135,16 @@ const xdcTransports = [
   http('https://erpc.xdcrpc.com'),
   http('https://rpc.xdc.network'),
 ];
+const avalancheTransports = [
+  ...(env.avalancheRpcUrl ? [http(env.avalancheRpcUrl)] : []),
+  http('https://api.avax.network/ext/bc/C/rpc'),
+  http('https://avalanche-c-chain-rpc.publicnode.com'),
+];
 
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: env.walletConnectProjectId,
-  chains: [sei, mainnet, base, bsc, pharos, xdc],
+  chains: [sei, mainnet, base, bsc, pharos, xdc, avalanche],
   transports: {
     // Proxied chains: Alchemy proxy primary (ordered), publics as failover.
     // Non-proxied (XDC): `rank: true` health-ranks the public endpoints.
@@ -149,6 +154,7 @@ export const config = getDefaultConfig({
     [bsc.id]: chainTransport(bsc.id, bnbTransports, 'https://bsc.publicnode.com'),
     [pharos.id]: chainTransport(pharos.id, pharosTransports, 'https://rpc.pharos.xyz'),
     [xdc.id]: fallback(xdcTransports, { rank: true }),
+    [avalanche.id]: chainTransport(avalanche.id, avalancheTransports, 'https://api.avax.network/ext/bc/C/rpc'),
   },
   wallets: [
     {

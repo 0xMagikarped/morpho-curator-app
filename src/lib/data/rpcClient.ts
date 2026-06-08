@@ -6,7 +6,7 @@
 // solely to keep `useVaultFullData` populated while other consumers
 // migrate — it is NOT authoritative.
 import { createPublicClient, createTransport, http, fallback, type Address, type PublicClient, type Chain, type Transport, defineChain } from 'viem';
-import { mainnet, base, bsc } from 'viem/chains';
+import { mainnet, base, bsc, avalanche } from 'viem/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, metaMorphoFactoryAbi, erc20Abi, oracleAbi } from '../contracts/abis';
 import { metaMorphoV2Abi } from '../contracts/metaMorphoV2Abi';
 import { getChainConfig } from '../../config/chains';
@@ -57,6 +57,7 @@ const VIEM_CHAINS: Record<number, Chain> = {
   1329: sei,
   56: bsc,
   1672: pharos,
+  43114: avalanche,
 };
 
 /**
@@ -72,6 +73,7 @@ const ENV_RPC_URLS: Record<number, string | undefined> = {
   1329: env.seiRpcUrl || undefined,
   56: env.bnbRpcUrl || undefined,
   1672: env.pharosRpcUrl || undefined,
+  43114: env.avalancheRpcUrl || undefined,
 };
 
 /**

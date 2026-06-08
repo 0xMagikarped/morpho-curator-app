@@ -40,6 +40,7 @@ export const env = {
   bnbRpcUrl: sanitizeRpcUrl('VITE_BNB_RPC_URL', import.meta.env.VITE_BNB_RPC_URL ?? ''),
   pharosRpcUrl: sanitizeRpcUrl('VITE_PHAROS_RPC_URL', import.meta.env.VITE_PHAROS_RPC_URL ?? ''),
   xdcRpcUrl: sanitizeRpcUrl('VITE_XDC_RPC_URL', import.meta.env.VITE_XDC_RPC_URL ?? ''),
+  avalancheRpcUrl: sanitizeRpcUrl('VITE_AVALANCHE_RPC_URL', import.meta.env.VITE_AVALANCHE_RPC_URL ?? ''),
 } as const;
 
 if (!env.walletConnectProjectId) {
