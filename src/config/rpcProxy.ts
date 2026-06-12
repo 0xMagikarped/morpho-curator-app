@@ -33,6 +33,12 @@ export function isProxyOnlyChain(chainId: number): boolean {
  * `ALCHEMY_API_KEY` isn't configured yet (graceful degradation).
  */
 export function proxyRpcUrl(chainId: number, fallbackPublicUrl?: string): string {
-  const base = `/api/rpc/${chainId}`;
+  // Absolute, same-origin URL. WalletConnect's rpcMap (and some JSON-RPC HTTP
+  // clients) reject relative URLs — a relative entry there can break the
+  // session once a wallet approves it. Resolving against the current origin
+  // keeps it same-origin (no key exposure, no CORS) while being a valid
+  // absolute URL. Falls back to a relative path in non-browser contexts.
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const base = `${origin}/api/rpc/${chainId}`;
   return fallbackPublicUrl ? `${base}?fallback=${encodeURIComponent(fallbackPublicUrl)}` : base;
 }
