@@ -144,6 +144,16 @@ const avalancheTransports = [
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: env.walletConnectProjectId,
+  walletConnectParameters: {
+    // Don't treat existing WalletConnect sessions as stale just because our
+    // chain list changed (e.g. when we add a chain like Avalanche). The
+    // default (true) invalidates every prior session on a chain-set change
+    // and forces a disconnect+repair mid-connect — which desyncs with
+    // single-chain wallets like a Sei Safe and leaves the dApp stuck on the
+    // QR while the wallet thinks it's connected. All our chains are requested
+    // as OPTIONAL namespaces, so a SEI-only Safe can still approve.
+    isNewChainsStale: false,
+  },
   chains: [sei, mainnet, base, bsc, pharos, xdc, avalanche],
   transports: {
     // Proxied chains: Alchemy proxy primary (ordered), publics as failover.
