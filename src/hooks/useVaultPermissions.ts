@@ -154,25 +154,35 @@ export function useVaultPermissions(
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const isV2 = vault?.version === 'v2';
 
-  // V2 has no enumerable allocator list — check the connected wallet directly.
-  // Always called (Rules of Hooks); enabled only for a connected V2 vault.
-  const { data: isAllocatorV2 } = useReadContract({
+  // `isAllocator` is a per-address mapping on BOTH V1 and V2 MetaMorpho (not an
+  // enumerable list), so the role snapshot never carries it. Read it on-chain
+  // for the connected wallet. Enabled for any loaded MetaMorpho vault; on a
+  // Moolah vault the call reverts and resolves undefined (harmless — Moolah
+  // permissions come from timelock roles via computePermissions).
+  const { data: connectedIsAllocator } = useReadContract({
     address: vaultAddress,
     abi: metaMorphoV2Abi,
     functionName: 'isAllocator',
     args: address ? [address] : undefined,
     chainId,
-    query: { enabled: Boolean(isV2 && address && vaultAddress) },
+    query: { enabled: Boolean(address && vaultAddress && vault) },
   });
 
   return useMemo(() => {
     if (!address) return EMPTY;
     if (isV2 && vault) {
-      return derivePermissionsV2(vault as VaultInfoV2, address, Boolean(isAllocatorV2));
+      return derivePermissionsV2(vault as VaultInfoV2, address, Boolean(connectedIsAllocator));
     }
     if (!snapshot || isLoading) return EMPTY;
-    return computePermissions(snapshot, address);
-  }, [snapshot, address, isLoading, isV2, vault, isAllocatorV2]);
+    const base = computePermissions(snapshot, address);
+    // V1 MetaMorpho: snapshot.allocators is always empty (no enumeration), so a
+    // real allocator would be wrongly denied allocator-gated actions in the UI
+    // (e.g. updating the supply/withdraw queue). OR in the on-chain read.
+    if (base.flavor === 'metaMorphoV1' && connectedIsAllocator) {
+      return { ...base, isAllocator: true };
+    }
+    return base;
+  }, [snapshot, address, isLoading, isV2, vault, connectedIsAllocator]);
 }
 
 /**
