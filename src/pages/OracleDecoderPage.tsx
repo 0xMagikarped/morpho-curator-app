@@ -102,9 +102,11 @@ function OracleResults({ oracle }: { oracle: DecodedOracle }) {
             </p>
           </div>
           <div>
-            <p className="text-[10px] text-text-tertiary uppercase font-mono">Price (&times;10&#8315;&sup3;&#8310;)</p>
+            <p className="text-[10px] text-text-tertiary uppercase font-mono">Price (collateral &rarr; loan)</p>
             <p className="text-lg font-bold text-accent-primary">
-              {oracle.priceFloat.toFixed(6)}
+              {oracle.priceFloat > 0
+                ? oracle.priceFloat.toLocaleString('en-US', { maximumSignificantDigits: 8 })
+                : '0'}
             </p>
           </div>
           <div>

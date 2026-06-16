@@ -58,7 +58,7 @@ export interface DecodedOracle {
   quoteVaultInfo: DecodedVault | null;
   // Computed
   price: bigint;
-  priceFloat: number; // price / 1e36 for display
+  priceFloat: number; // human-readable price: 1 collateral ≈ priceFloat loan tokens
   classification: string; // 'Pure Chainlink' | 'Chainlink + ERC-4626' | 'ERC-4626 Only' | 'Unknown'
 }
 
@@ -260,7 +260,20 @@ export async function decodeOracle(
 
   // Step 4: Classify and compute display price
   const classification = classifyOracle(baseFeed1, baseFeed2, quoteFeed1, quoteFeed2, baseVault, quoteVault);
-  const priceFloat = Number(price) / 1e36;
+  // Human-readable price = (base-side floats) / (quote-side floats), where each
+  // Chainlink feed contributes answer/10^decimals and each ERC-4626 vault
+  // contributes assetsPerShare/conversionSample; a zero-address feed/vault is a
+  // factor of 1. This is decimals-correct for ANY loan/collateral pair —
+  // unlike `price()/1e36`, which is only right when loan and collateral share
+  // the same decimals (Morpho's price() is scaled by 36 + loanDec − collatDec,
+  // e.g. 24 for a USDC(6)/WPROS(18) market, so /1e36 under-scales to ~0).
+  const feedFloat = (f: DecodedFeed | null): number =>
+    f ? Number(f.latestAnswer) / 10 ** f.decimals : 1;
+  const vaultFloat = (v: DecodedVault | null): number =>
+    v && v.conversionSample > 0n ? Number(v.assetsPerShare) / Number(v.conversionSample) : 1;
+  const baseFloat = feedFloat(baseFeed1Info) * feedFloat(baseFeed2Info) * vaultFloat(baseVaultInfo);
+  const quoteFloat = feedFloat(quoteFeed1Info) * feedFloat(quoteFeed2Info) * vaultFloat(quoteVaultInfo);
+  const priceFloat = quoteFloat > 0 ? baseFloat / quoteFloat : 0;
 
   return {
     address: oracleAddress,
