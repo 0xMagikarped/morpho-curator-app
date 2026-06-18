@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { AddressDisplay } from '../ui/AddressDisplay';
 import { VaultOracleDashboard } from '../oracle/VaultOracleDashboard';
 import { RiskAlertBanner } from '../risk/RiskAlertBanner';
 import { SharePriceChart } from '../risk/SharePriceChart';
@@ -148,7 +149,13 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <InfoItem label="Name" value={vault.name} />
           <InfoItem label="Symbol" value={vault.symbol} />
-          <InfoItem label="Asset" value={vault.assetInfo.symbol} />
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Asset</span>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-sm font-mono text-text-primary">{vault.assetInfo.symbol}</span>
+              <AddressDisplay address={vault.asset} chainId={chainId} className="text-[11px]" />
+            </div>
+          </div>
           <InfoItem label="Decimals" value={vault.assetInfo.decimals.toString()} />
           <InfoItem label="Performance Fee" value={formatWadPercent(vault.fee)} />
           {vault.version === 'v2' && vault.managementFee > 0n && (
@@ -167,11 +174,12 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
               )}
             </div>
           </div>
-          <InfoItem
-            label="Vault Address"
-            value={truncateAddress(vaultAddress)}
-            href={`${chainConfig?.blockExplorer}/address/${vaultAddress}`}
-          />
+          <div>
+            <span className="text-[10px] text-text-tertiary uppercase">Vault Address</span>
+            <div className="mt-0.5 text-sm">
+              <AddressDisplay address={vaultAddress} chainId={chainId} />
+            </div>
+          </div>
         </div>
       </Card>
 
