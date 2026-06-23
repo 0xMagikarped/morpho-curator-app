@@ -333,6 +333,9 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       bundler3: '0x3c90c09F8c5d927a117F681fB924952DbbD99120' as Address,
       v2AdapterRegistry: '0xbe858d729548eB49BbFA05Acd3674ca8cdaAdD4b' as Address,
       morphoMarketV1AdapterV2Factory: '0xe510e1fcC429943cA3455A7bfBD79f0307Cd8403' as Address,
+      // MorphoChainlinkOracleV2Factory — verified on-chain (has code +
+      // isMorphoChainlinkOracleV2 interface), 2026-06. Enables the oracle deployer.
+      oracleV2Factory: '0xb8118256d8Aa950ec0B26a0b8Be7C6c1a858f6a3' as Address,
     },
     apiSupported: false,
     blockTime: 2_000,
