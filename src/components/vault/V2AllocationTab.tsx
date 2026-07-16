@@ -539,6 +539,35 @@ function ReallocateDialog({
 
   const isBusy = isPending || isConfirming;
 
+  // Current idle = available minus the sum of current market allocations.
+  const currentIdle = totalAvailable - marketRows.reduce(
+    (s, r) => s + Number(formatUnits(r.allocation, data.assetDecimals)), 0,
+  );
+
+  const setTarget = (marketId: string, raw: bigint) => {
+    setTargets((t) => ({ ...t, [marketId]: Number(formatUnits(raw, data.assetDecimals)).toString() }));
+  };
+
+  // Set a market's target so the market reaches ~90% utilization. The vault is
+  // treated as the marginal supplier: target total supply = borrow / 0.9, and
+  // the vault absorbs the delta. Clamped to [0, cap] and to what liquidity
+  // allows on a withdrawal. Pre-fills the input — the curator still confirms.
+  const canSet90 = (row: AllocationRow) =>
+    (row.totalBorrowAssets ?? 0n) > 0n && (row.totalSupplyAssets ?? 0n) > 0n;
+  const setTo90UR = (row: AllocationRow) => {
+    const supply = row.totalSupplyAssets ?? 0n;
+    const borrow = row.totalBorrowAssets ?? 0n;
+    if (borrow <= 0n || supply <= 0n) return;
+    const targetTotalSupply = (borrow * 100n) / 90n; // borrow / 0.9
+    let target = row.allocation + (targetTotalSupply - supply);
+    // can't withdraw more than the market's available liquidity
+    const minTarget = row.allocation > (row.liquidity ?? 0n) ? row.allocation - (row.liquidity ?? 0n) : 0n;
+    if (target < minTarget) target = minTarget;
+    if (target < 0n) target = 0n;
+    if (row.effectiveAbsCap != null && target > row.effectiveAbsCap) target = row.effectiveAbsCap;
+    setTarget(row.marketId!, target);
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -586,6 +615,23 @@ function ReallocateDialog({
 
         {/* Per-market inputs */}
         <div className="space-y-2">
+          {/* Idle row — the un-allocated remainder. Lower a market (or use
+              "→ Idle") to move funds here; it updates live. */}
+          <div className="flex items-center justify-between gap-3 p-3 bg-bg-hover/30 border border-border-subtle">
+            <div className="min-w-0">
+              <span className="text-text-primary font-medium text-xs">Idle</span>
+              <div className="text-[10px] text-text-tertiary mt-0.5">
+                Current: {currentIdle.toLocaleString()} {data.assetSymbol}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-32 text-right text-xs font-mono ${newIdle < 0 ? 'text-danger' : 'text-accent-primary'}`}>
+                {newIdle.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+              </span>
+              <span className="text-xs text-text-tertiary w-10">{data.assetSymbol}</span>
+            </div>
+          </div>
+
           {marketRows.map((row) => {
             const currentStr = formatTokenAmount(row.allocation, data.assetDecimals);
             return (
@@ -602,6 +648,24 @@ function ReallocateDialog({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {canSet90(row) && (
+                    <button
+                      type="button"
+                      onClick={() => setTo90UR(row)}
+                      title="Set target so this market reaches ~90% utilization"
+                      className="text-[10px] font-mono px-2 py-1 border border-border-subtle text-text-secondary hover:border-border-focus hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
+                    >
+                      90% UR
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setTarget(row.marketId!, 0n)}
+                    title="Move this market's funds to Idle (set target to 0)"
+                    className="text-[10px] font-mono px-2 py-1 border border-border-subtle text-text-secondary hover:border-border-focus hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
+                  >
+                    &rarr; Idle
+                  </button>
                   <input
                     type="number"
                     value={targets[row.marketId!] || '0'}

@@ -44,6 +44,8 @@ export interface AllocationRow {
   // Metrics
   share?: number;        // adapter supply / market total supply * 100
   liquidity?: bigint;    // market totalSupply - totalBorrow
+  totalSupplyAssets?: bigint; // market-wide supply (for utilization math)
+  totalBorrowAssets?: bigint; // market-wide borrow (for utilization math)
   percentAllocated: number;
   allocation: bigint;
 }
@@ -341,6 +343,8 @@ export function useV2AllocationData(
         effectiveRelCap: caps?.relativeCap,
         share,
         liquidity,
+        totalSupplyAssets: pos.marketState?.totalSupplyAssets,
+        totalBorrowAssets: pos.marketState?.totalBorrowAssets,
         percentAllocated,
         allocation: pos.supplyAssets,
       });
