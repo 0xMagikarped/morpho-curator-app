@@ -1,8 +1,10 @@
 /**
  * Hooks for allocate/deallocate on V2 vaults via market adapters.
  *
- * allocate(adapter, data, amount) — data = abi.encode(MarketParams)
- * deallocate(adapter, data, totalAllocated) — third arg is the NEW total, not amount to remove
+ * allocate(adapter, data, assets) — data = abi.encode(MarketParams)
+ * deallocate(adapter, data, assets) — third arg is the AMOUNT to pull back to
+ *   idle, symmetric with allocate (verified against the canonical VaultV2 ABI
+ *   in @morpho-org/blue-sdk-viem, where the param is named `assets`).
  */
 import { useState, useCallback } from 'react';
 import { usePublicClient } from 'wagmi';
@@ -55,12 +57,12 @@ export function useAllocateV2(vaultAddress: Address, chainId: number) {
 
   /**
    * Deallocate from a market adapter.
-   * @param totalAllocated - The NEW total allocation target (not amount to remove).
-   *   To fully withdraw, pass 0n. To partially withdraw, pass the desired remaining amount.
+   * @param assets - The AMOUNT of assets to pull back to idle (not the
+   *   resulting total). To fully withdraw, pass the current allocation.
    */
   const deallocate = useCallback(async (
     adapterAddress: Address,
-    totalAllocated: bigint,
+    assets: bigint,
     marketParams: MarketParams,
   ) => {
     if (!publicClient) return;
@@ -75,7 +77,7 @@ export function useAllocateV2(vaultAddress: Address, chainId: number) {
         address: vaultAddress,
         abi: metaMorphoV2Abi,
         functionName: 'deallocate',
-        args: [adapterAddress, data, totalAllocated],
+        args: [adapterAddress, data, assets],
         chainId,
       });
 

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { formatUnits, parseUnits, encodeFunctionData, encodeAbiParameters, type Address } from 'viem';
+import { useState, useMemo, useEffect } from 'react';
+import { formatUnits, encodeFunctionData, encodeAbiParameters, type Address } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,7 +13,7 @@ import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useV2AllocationData, type AllocationRow, type V2AllocationData } from '../../lib/hooks/useV2Allocation';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
-import { formatTokenAmount, truncateAddress } from '../../lib/utils/format';
+import { formatTokenAmount, parseTokenAmount, truncateAddress } from '../../lib/utils/format';
 import { isUnlimited } from '../../lib/v2/capComputation';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
@@ -439,94 +439,124 @@ function ReallocateDialog({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { writeContract, data: hash, isPending, error: txError } = useGuardedWriteContract();
+  const {
+    writeContract,
+    data: hash,
+    isPending,
+    error: txError,
+    isSimulating,
+    simulateError,
+    walletError,
+  } = useGuardedWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   const marketRows = data.rows.filter((r): r is AllocationRow & { type: 'market' } => r.type === 'market');
 
+  const dec = data.assetDecimals;
+
+  // Targets are held as decimal strings, seeded from the EXACT on-chain
+  // allocation (`formatUnits`, no float round-trip) so an untouched row
+  // parses back to the identical bigint and produces no call.
   const [targets, setTargets] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const row of marketRows) {
-      const num = Number(formatUnits(row.allocation, data.assetDecimals));
-      init[row.marketId!] = num.toString();
+      init[row.marketId!] = formatUnits(row.allocation, dec);
     }
     return init;
   });
 
-  // Compute totals
-  const totalTarget = useMemo(() => {
-    return Object.values(targets).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
-  }, [targets]);
+  const targetRawOf = useMemo(() => {
+    const map = new Map<string, bigint>();
+    for (const row of marketRows) {
+      map.set(row.marketId!, parseTokenAmount(targets[row.marketId!] ?? '', dec));
+    }
+    return map;
+  }, [marketRows, targets, dec]);
 
-  const totalAvailable = Number(formatUnits(data.totalAssets, data.assetDecimals));
-  const newIdle = totalAvailable - totalTarget;
-  const isValid = newIdle >= -0.001; // small tolerance for floating point
+  // Totals in raw units — the float sums were only ever safe for display.
+  const totalTargetRaw = useMemo(
+    () => [...targetRawOf.values()].reduce((s, v) => s + v, 0n),
+    [targetRawOf],
+  );
+  const newIdleRaw = data.totalAssets - totalTargetRaw;
 
-  // Check if anything changed
-  const hasChanges = useMemo(() => {
-    return marketRows.some((row) => {
-      const current = Number(formatUnits(row.allocation, data.assetDecimals));
-      const target = parseFloat(targets[row.marketId!]) || 0;
-      return Math.abs(current - target) > 0.001;
-    });
-  }, [marketRows, targets, data.assetDecimals]);
+  const totalAvailable = Number(formatUnits(data.totalAssets, dec));
+  const totalTarget = Number(formatUnits(totalTargetRaw, dec));
+  const newIdle = Number(formatUnits(newIdleRaw < 0n ? -newIdleRaw : newIdleRaw, dec)) * (newIdleRaw < 0n ? -1 : 1);
 
-  // On success, invalidate and close
-  if (isSuccess) {
+  // Per-row deltas: negative = withdraw from the market, positive = supply.
+  const deltas = useMemo(
+    () => marketRows.map((row) => ({ row, delta: (targetRawOf.get(row.marketId!) ?? 0n) - row.allocation })),
+    [marketRows, targetRawOf],
+  );
+
+  const hasChanges = deltas.some((d) => d.delta !== 0n);
+
+  // Blocking conditions — each of these would make the on-chain preflight
+  // revert, so surface them here rather than letting the tx die silently.
+  const errors: string[] = [];
+  if (newIdleRaw < 0n) {
+    errors.push(
+      `Allocation exceeds available funds by ${formatTokenAmount(-newIdleRaw, dec)} ${data.assetSymbol}.`,
+    );
+  }
+  for (const { row, delta } of deltas) {
+    const label = `${row.collateralSymbol}/${row.loanSymbol}`;
+    if (!row.params) {
+      if (delta !== 0n) errors.push(`${label}: market params unavailable — cannot build the transaction.`);
+      continue;
+    }
+    if (delta < 0n && row.liquidity != null && -delta > row.liquidity) {
+      errors.push(
+        `${label}: withdrawal of ${formatTokenAmount(-delta, dec)} ${data.assetSymbol} exceeds market liquidity (${formatTokenAmount(row.liquidity, dec)}).`,
+      );
+    }
+    if (delta > 0n && row.effectiveAbsCap != null && !isUnlimited(row.effectiveAbsCap)) {
+      const target = targetRawOf.get(row.marketId!) ?? 0n;
+      if (target > row.effectiveAbsCap) {
+        errors.push(
+          `${label}: target exceeds the effective absolute cap (${formatTokenAmount(row.effectiveAbsCap, dec)} ${data.assetSymbol}).`,
+        );
+      }
+    }
+  }
+  const isValid = errors.length === 0;
+
+  // On success, invalidate and close. Must be an effect — doing this during
+  // render fired setState-in-render and could close the dialog mid-commit.
+  useEffect(() => {
+    if (!isSuccess) return;
     queryClient.invalidateQueries({ queryKey: vaultKeys.detail(chainId, vaultAddress) });
     onClose();
-  }
+  }, [isSuccess, queryClient, chainId, vaultAddress, onClose]);
 
   const handleSubmit = () => {
     if (!isValid || !hasChanges) return;
 
-    // Build allocations: withdrawals first, then supplies
-    // V2 reallocate goes through the vault's allocate/deallocate on the adapter
-    // But the spec says the adapter has a reallocate function directly
-    // For V2, reallocation is done via vault.allocate() and vault.deallocate() calls
-    // We'll use multicall to batch them
+    // V2 reallocation = vault.deallocate() to pull assets back to idle, then
+    // vault.allocate() to push idle into markets, batched through the vault's
+    // multicall (which preserves msg.sender, so the allocator role holds).
+    //
+    // BOTH calls take an AMOUNT of assets as the third arg (`assets` in the
+    // canonical VaultV2 ABI) — NOT the resulting total allocation. Passing the
+    // target total to deallocate under-withdrew, so the paired allocate ran out
+    // of idle and the whole multicall reverted in preflight.
+    const withdrawCalls: `0x${string}`[] = [];
+    const supplyCalls: `0x${string}`[] = [];
 
-    const calls: `0x${string}`[] = [];
-    const withdrawals: { row: AllocationRow; targetRaw: bigint }[] = [];
-    const supplies: { row: AllocationRow; targetRaw: bigint }[] = [];
-
-    for (const row of marketRows) {
-      if (!row.params) continue;
-      const targetNum = parseFloat(targets[row.marketId!]) || 0;
-      const targetRaw = parseUnits(targetNum.toFixed(data.assetDecimals), data.assetDecimals);
-      const current = row.allocation;
-
-      if (targetRaw < current) {
-        withdrawals.push({ row, targetRaw });
-      } else if (targetRaw > current) {
-        supplies.push({ row, targetRaw });
+    for (const { row, delta } of deltas) {
+      if (!row.params || delta === 0n) continue;
+      const marketData = encodeMarketParams(row.params);
+      if (delta < 0n) {
+        withdrawCalls.push(encodeDeallocate(data.adapterAddress, marketData, -delta));
+      } else {
+        supplyCalls.push(encodeAllocate(data.adapterAddress, marketData, delta));
       }
     }
 
-    // For V2 vaults: deallocate from markets, then allocate to markets
-    // Each goes through vault.deallocate(adapter, data, totalAllocated) and vault.allocate(adapter, data, amount)
-    // The `data` for market adapter encodes which market to target
-    // This is a simplified version using the allocate/deallocate pattern
-
-    for (const { row, targetRaw } of withdrawals) {
-      if (!row.params) continue;
-      const marketData = encodeMarketParams(row.params);
-      calls.push(encodeDeallocate(data.adapterAddress, marketData, targetRaw));
-    }
-
-    for (const { row, targetRaw } of supplies) {
-      if (!row.params) continue;
-      const amount = targetRaw - row.allocation;
-      const marketData = encodeMarketParams(row.params);
-      calls.push(encodeAllocate(data.adapterAddress, marketData, amount));
-    }
-
+    // Withdrawals first so their proceeds fund the supplies.
+    const calls = [...withdrawCalls, ...supplyCalls];
     if (calls.length === 0) return;
-
-    if (calls.length === 1) {
-      // Single call — decode and send directly
-      // For simplicity, use multicall even for single
-    }
 
     writeContract({
       address: vaultAddress,
@@ -537,15 +567,15 @@ function ReallocateDialog({
     });
   };
 
-  const isBusy = isPending || isConfirming;
+  const isBusy = isPending || isConfirming || isSimulating;
 
   // Current idle = available minus the sum of current market allocations.
   const currentIdle = totalAvailable - marketRows.reduce(
-    (s, r) => s + Number(formatUnits(r.allocation, data.assetDecimals)), 0,
+    (s, r) => s + Number(formatUnits(r.allocation, dec)), 0,
   );
 
   const setTarget = (marketId: string, raw: bigint) => {
-    setTargets((t) => ({ ...t, [marketId]: Number(formatUnits(raw, data.assetDecimals)).toString() }));
+    setTargets((t) => ({ ...t, [marketId]: formatUnits(raw, dec) }));
   };
 
   // Set a market's target so the market reaches ~90% utilization. The vault is
@@ -607,9 +637,9 @@ function ReallocateDialog({
           </div>
         </div>
 
-        {newIdle < -0.001 && (
-          <div className="text-xs text-danger bg-danger/10 border border-danger/20 p-2">
-            Allocation exceeds available funds by {Math.abs(newIdle).toLocaleString()} {data.assetSymbol}.
+        {errors.length > 0 && (
+          <div className="text-xs text-danger bg-danger/10 border border-danger/20 p-2 space-y-1">
+            {errors.map((e) => <p key={e}>{e}</p>)}
           </div>
         )}
 
@@ -690,10 +720,31 @@ function ReallocateDialog({
             disabled={!isValid || !hasChanges || isBusy}
             loading={isBusy}
           >
-            {isPending ? 'Confirm...' : isConfirming ? 'Confirming...' : 'Confirm Reallocation'}
+            {isSimulating
+              ? 'Simulating...'
+              : isPending
+                ? 'Confirm...'
+                : isConfirming
+                  ? 'Confirming...'
+                  : 'Confirm Reallocation'}
           </Button>
         </div>
 
+        {/* The write is fail-closed behind a simulateContract preflight — if
+            that reverts no wallet popup ever opens, so the decoded revert has
+            to be shown here or the button just looks dead. */}
+        {walletError && (
+          <p className="text-[10px] text-danger">{walletError}</p>
+        )}
+        {simulateError && (
+          <div className="text-[10px] text-danger bg-danger/10 border border-danger/20 p-2 max-h-28 overflow-y-auto">
+            <p className="font-medium">Preflight reverted — transaction not sent.</p>
+            <p className="font-mono mt-0.5 break-all">{simulateError.message}</p>
+            {simulateError.shortMessage && simulateError.shortMessage !== simulateError.message && (
+              <p className="mt-0.5 break-all">{simulateError.shortMessage}</p>
+            )}
+          </div>
+        )}
         {txError && (
           <p className="text-[10px] text-danger max-h-20 overflow-y-auto">{(txError as Error).message}</p>
         )}

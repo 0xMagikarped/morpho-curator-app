@@ -259,7 +259,9 @@ export const metaMorphoV2Abi = [
     inputs: [
       { name: 'adapter', type: 'address' },
       { name: 'data', type: 'bytes' },
-      { name: 'totalAllocated', type: 'uint256' },
+      // Canonical VaultV2 ABI names this `assets`: the AMOUNT to pull back to
+      // idle, symmetric with `allocate` — NOT the resulting total allocation.
+      { name: 'assets', type: 'uint256' },
     ],
     name: 'deallocate',
     outputs: [],
