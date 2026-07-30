@@ -17,6 +17,7 @@ import { useAppStore } from '../store/appStore';
 import { useDashboardVaults, useDashboardPendingActions } from '../lib/hooks/useDashboard';
 import { getSupportedChainIds, getChainConfig, isChainDeployed, SEI_KNOWN_VAULTS } from '../config/chains';
 import { formatUsd } from '../lib/utils/format';
+import { fetchVaultPreview } from '../lib/data/rpcClient';
 import type { RiskAlert } from '../lib/risk/riskTypes';
 
 export function DashboardPage() {
@@ -29,6 +30,8 @@ export function DashboardPage() {
   const { data: pendingActionsList } = useDashboardPendingActions();
   const [showAddVault, setShowAddVault] = useState(false);
   const [newVaultAddress, setNewVaultAddress] = useState('');
+  const [addingVault, setAddingVault] = useState(false);
+  const [addVaultError, setAddVaultError] = useState<string | null>(null);
   const [newVaultChainId, setNewVaultChainId] = useState(
     () => getSupportedChainIds().find(isChainDeployed) ?? getSupportedChainIds()[0],
   );
@@ -115,17 +118,41 @@ export function DashboardPage() {
   // Placeholder activity events (real implementation would fetch from indexer)
   const activityEvents: ActivityEvent[] = [];
 
-  const handleAddVault = () => {
-    if (!isAddress(newVaultAddress)) return;
-    const vault = {
-      address: newVaultAddress,
-      chainId: newVaultChainId,
-      name: `Vault ${newVaultAddress.slice(0, 8)}...`,
-      version: 'v1' as const,
-    };
-    addTrackedVault(vault);
-    setNewVaultAddress('');
-    setShowAddVault(false);
+  // Probe the address on-chain before tracking it. `isAddress` only checks
+  // the string shape, so a token address (or an EOA, or the right vault on
+  // the wrong chain) used to be tracked silently and then fail forever on the
+  // vault page. The probe also gives us the real name and version instead of
+  // the placeholder + hardcoded 'v1' we used to store.
+  const handleAddVault = async () => {
+    setAddVaultError(null);
+    if (!isAddress(newVaultAddress)) {
+      setAddVaultError('Not a valid address.');
+      return;
+    }
+    const already = trackedVaults.some(
+      (v) => v.address.toLowerCase() === newVaultAddress.toLowerCase() && v.chainId === newVaultChainId,
+    );
+    if (already) {
+      setAddVaultError('That vault is already tracked.');
+      return;
+    }
+
+    setAddingVault(true);
+    try {
+      const preview = await fetchVaultPreview(newVaultChainId, newVaultAddress);
+      addTrackedVault({
+        address: newVaultAddress,
+        chainId: newVaultChainId,
+        name: preview.name,
+        version: preview.version,
+      });
+      setNewVaultAddress('');
+      setShowAddVault(false);
+    } catch (err) {
+      setAddVaultError(err instanceof Error ? err.message : 'Could not verify that address.');
+    } finally {
+      setAddingVault(false);
+    }
   };
 
   const handleAddKnownVault = (key: string) => {
@@ -240,13 +267,17 @@ export function DashboardPage() {
                 type="text"
                 placeholder="0x..."
                 value={newVaultAddress}
-                onChange={(e) => setNewVaultAddress(e.target.value)}
+                onChange={(e) => { setNewVaultAddress(e.target.value); setAddVaultError(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleAddVault(); }}
                 className="flex-1 bg-bg-hover border border-border-subtle px-2 py-1.5 text-xs text-text-primary font-mono placeholder-text-tertiary min-w-0"
               />
-              <Button size="sm" onClick={handleAddVault}>
-                Add
+              <Button size="sm" onClick={() => void handleAddVault()} disabled={addingVault} loading={addingVault}>
+                {addingVault ? 'Checking' : 'Add'}
               </Button>
             </div>
+            {addVaultError && (
+              <p className="text-[10px] text-danger break-all">{addVaultError}</p>
+            )}
             <div>
               <p className="text-[10px] text-text-tertiary mb-1">Quick add:</p>
               <div className="flex flex-wrap gap-1">

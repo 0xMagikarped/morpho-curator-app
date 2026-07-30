@@ -356,21 +356,50 @@ async function safeRead<T>(
 }
 
 /**
- * Lightweight vault preview — just name + version. Used for the "Add Vault" dialog.
+ * Lightweight vault preview — name + symbol + version + asset. Used to
+ * validate the "Add Vault" input before anything is tracked.
+ *
+ * `name()` alone is NOT a vault check: every ERC-20 answers it, so pasting a
+ * token address (easy to do — the Overview tab offers a copy button right
+ * next to the asset) used to be tracked happily and then fail forever on the
+ * vault page. `asset()` is the real discriminator: ERC-4626-only, and it must
+ * return a non-zero address.
  */
 export async function fetchVaultPreview(
   chainId: number,
   vaultAddress: Address,
-): Promise<{ name: string; version: VaultVersion }> {
+): Promise<{ name: string; symbol: string; version: VaultVersion; asset: Address }> {
   const client = getPublicClient(chainId);
-  const version = await detectVaultVersion(client, chainId, vaultAddress);
-  const name = await safeRead<string>(client, {
-    address: vaultAddress,
-    abi: [{ inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' }],
-    functionName: 'name',
-  });
+
+  const code = await client.getCode({ address: vaultAddress }).catch(() => undefined);
+  if (!code || code === '0x') {
+    throw new Error(
+      `No contract at ${vaultAddress} on ${getChainConfig(chainId)?.name ?? `chain ${chainId}`}.`,
+    );
+  }
+
+  const minimalAbi = [
+    { inputs: [], name: 'name', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+    { inputs: [], name: 'symbol', outputs: [{ type: 'string' }], stateMutability: 'view', type: 'function' },
+    { inputs: [], name: 'asset', outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
+  ] as const;
+
+  const [name, symbol, asset] = await Promise.all([
+    safeRead<string>(client, { address: vaultAddress, abi: minimalAbi, functionName: 'name' }),
+    safeRead<string>(client, { address: vaultAddress, abi: minimalAbi, functionName: 'symbol' }),
+    safeRead<Address>(client, { address: vaultAddress, abi: minimalAbi, functionName: 'asset' }),
+  ]);
+
+  if (!asset || asset === '0x0000000000000000000000000000000000000000') {
+    throw new Error(
+      `${vaultAddress} is not a vault — asset() did not return a token address.` +
+        (name ? ` It looks like the token "${name}".` : ''),
+    );
+  }
   if (!name) throw new Error('Could not read vault name — is this a valid vault address?');
-  return { name, version };
+
+  const version = await detectVaultVersion(client, chainId, vaultAddress);
+  return { name, symbol: symbol ?? '', version, asset };
 }
 
 export async function fetchVaultBasicInfo(chainId: number, vaultAddress: Address) {
@@ -542,8 +571,13 @@ async function fetchV1VaultInfo(client: PublicClient, chainId: number, vaultAddr
   if (name === null || name === undefined) {
     throw new Error(`Contract at ${vaultAddress} is not a MetaMorpho vault (name() failed)`);
   }
+  // `name()` answering while `asset()` doesn't means this is some other
+  // contract — almost always the ERC-20 asset pasted in place of the vault.
+  // Blaming the RPC here sent curators chasing a non-existent node problem.
   if (!asset || asset === ZERO) {
-    throw new Error(`Contract at ${vaultAddress} returned zero asset address — RPC may be unreliable`);
+    throw new Error(
+      `Contract at ${vaultAddress} is not a vault — asset() returned nothing. It reports the name "${name}", so this is likely a token address rather than a vault.`,
+    );
   }
 
   return {
@@ -612,8 +646,12 @@ async function fetchV2VaultInfo(client: PublicClient, chainId: number, vaultAddr
   if (name === null || name === undefined) {
     throw new Error(`Contract at ${vaultAddress} is not a Morpho V2 vault (name() failed)`);
   }
+  // See fetchV1VaultInfo — name() without asset() means "not a vault", not
+  // "flaky RPC".
   if (!asset || asset === ZERO) {
-    throw new Error(`Contract at ${vaultAddress} returned zero asset address — RPC may be unreliable`);
+    throw new Error(
+      `Contract at ${vaultAddress} is not a vault — asset() returned nothing. It reports the name "${name}", so this is likely a token address rather than a vault.`,
+    );
   }
 
   return {

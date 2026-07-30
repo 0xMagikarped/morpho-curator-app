@@ -136,9 +136,28 @@ export function VaultPage() {
         <p className="text-danger text-sm">Failed to load vault</p>
         <p className="text-text-tertiary text-xs font-mono">{vaultAddress}</p>
         <p className="text-text-tertiary text-xs">{error instanceof Error ? error.message : 'RPC call failed — the vault may not exist on this chain, or the RPC endpoint is unavailable.'}</p>
-        <Button variant="ghost" className="mt-4" onClick={() => navigate('/')}>
-          Back to Dashboard
-        </Button>
+        {/* A bad entry (wrong chain, or a token address pasted as a vault)
+            otherwise stays pinned in the sidebar with no way to remove it —
+            the untrack button lives further down the page, which never
+            renders when the load fails. */}
+        <div className="flex items-center justify-center gap-2 mt-4">
+          {trackedVaults.some(
+            (v) => v.address.toLowerCase() === vaultAddress.toLowerCase() && v.chainId === chainId,
+          ) && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                removeTrackedVault(vaultAddress, chainId);
+                navigate('/');
+              }}
+            >
+              Untrack this vault
+            </Button>
+          )}
+          <Button variant="ghost" onClick={() => navigate('/')}>
+            Back to Dashboard
+          </Button>
+        </div>
       </div>
     );
   }
