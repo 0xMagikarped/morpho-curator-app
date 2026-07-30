@@ -25,6 +25,8 @@ import {
   type MarketCapEntry,
 } from '../../hooks/useV2VaultCapEntries';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
+import { useV2SelectorTimelocks } from '../../lib/hooks/useV2SelectorTimelock';
+import { describeV2Timelock } from '../../lib/utils/duration';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -48,6 +50,8 @@ type EditingCap =
   | { kind: 'collateral'; entry: CollateralCapEntry }
   | { kind: 'market'; entry: MarketCapEntry };
 
+const CAP_SIGS = ['increaseAbsoluteCap(bytes,uint256)', 'increaseRelativeCap(bytes,uint256)'] as const;
+
 export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
   const { data: vault } = useVaultInfo(chainId, vaultAddress);
   const overview = useV2AdapterOverview(chainId, vaultAddress, vault?.totalAssets);
@@ -60,8 +64,13 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
   const decimals = vault?.assetInfo.decimals ?? 18;
   const assetSymbol = vault?.assetInfo.symbol ?? '???';
   const canSetCaps = permissions.canCurate || permissions.isAdmin;
-  const timelockSeconds = vault?.timelock ?? 0n;
   const totalAssets = vault?.totalAssets ?? 0n;
+
+  // V2 has no vault-level timelock (`vault.timelock` is hardcoded 0n for V2),
+  // so read the two selectors that actually govern cap increases.
+  const { bySignature: capTimelocks } = useV2SelectorTimelocks(chainId, vaultAddress, CAP_SIGS);
+  const absCapTimelock = capTimelocks[CAP_SIGS[0]];
+  const relCapTimelock = capTimelocks[CAP_SIGS[1]];
 
   if (overview.isLoading) {
     return (
@@ -132,9 +141,11 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
 
   return (
     <div className="space-y-4">
-      {/* Summary strip */}
+      {/* Summary strip. The two cap timelocks are read per-selector — V2 has
+          no vault-level timelock, so they belong here rather than being
+          buried behind an Edit drawer. */}
       <Card>
-        <div className="grid grid-cols-4 gap-3 p-3">
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3 p-3">
           <SummaryCell label="Adapters" value={String(adapterRows.length)} />
           <SummaryCell label="Collaterals w/ Caps" value={String(collateralEntries.length)} />
           <SummaryCell label="Markets w/ Caps" value={String(marketEntries.length)} />
@@ -145,6 +156,8 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
               decimals,
             )} ${assetSymbol}`}
           />
+          <SummaryCell label="Abs. Cap Timelock" value={describeV2Timelock(absCapTimelock)} />
+          <SummaryCell label="Rel. Cap Timelock" value={describeV2Timelock(relCapTimelock)} />
         </div>
       </Card>
 
@@ -298,7 +311,6 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
           currentRel={drawerProps.currentRel}
           vaultAddress={vaultAddress}
           chainId={chainId}
-          timelockSeconds={timelockSeconds}
           decimals={decimals}
           assetSymbol={assetSymbol}
         />
@@ -311,7 +323,6 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
           onClose={() => setAdding(null)}
           vaultAddress={vaultAddress}
           chainId={chainId}
-          timelockSeconds={timelockSeconds}
           decimals={decimals}
           assetSymbol={assetSymbol}
         />
@@ -322,7 +333,6 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
           onClose={() => setAdding(null)}
           vaultAddress={vaultAddress}
           chainId={chainId}
-          timelockSeconds={timelockSeconds}
           decimals={decimals}
           assetSymbol={assetSymbol}
         />

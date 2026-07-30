@@ -4,6 +4,9 @@ import { isAddress, encodeFunctionData } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { useV2TimelockedOp } from '../../../lib/hooks/useV2TimelockedOp';
+import { useV2CalldataTimelock } from '../../../lib/hooks/useV2SelectorTimelock';
+import { describeV2Timelock } from '../../../lib/utils/duration';
+import { TimelockCountdown } from '../TimelockCountdown';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { AddressDisplay } from '../../ui/AddressDisplay';
@@ -16,7 +19,11 @@ interface AddAdapterDrawerProps {
   chainId: number;
   vaultAddress: Address;
   vaultAsset: Address;
-  timelockSeconds: bigint;
+  /**
+   * @deprecated Ignored on V2 — the vault has no single timelock value. The
+   * real per-selector duration is read on-chain inside this drawer.
+   */
+  timelockSeconds?: bigint;
 }
 
 export function AddAdapterDrawer({
@@ -25,7 +32,6 @@ export function AddAdapterDrawer({
   chainId,
   vaultAddress,
   vaultAsset,
-  timelockSeconds,
 }: AddAdapterDrawerProps) {
   const [adapterInput, setAdapterInput] = useState('');
   const [showPreview, setShowPreview] = useState(false);
@@ -94,7 +100,9 @@ export function AddAdapterDrawer({
     onClose();
   };
 
-  const timelockDays = Number(timelockSeconds) / 86400;
+  // `timelockSeconds` (vault-level) is always 0n on V2 — read the real
+  // duration for the selector this drawer actually submits.
+  const selectorTimelock = useV2CalldataTimelock(chainId, vaultAddress, submitCalldata);
   const canSubmit = preview && preview.contractExists && !preview.isAlreadyEnabled && preview.assetMatch !== false;
 
   return (
@@ -142,10 +150,8 @@ export function AddAdapterDrawer({
             just the local just-submitted-this-tab case). */}
         {timelockState.step === 'pending' && (
           <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary">
-            <strong>Submitted to timelock.</strong> Executable at{' '}
-            <span className="font-mono">
-              {new Date(Number(timelockState.executableAt) * 1000).toUTCString()}
-            </span>.
+            <strong>Timelock running.</strong>{' '}
+            <TimelockCountdown executableAt={timelockState.executableAt} />
           </div>
         )}
         {timelockState.step === 'executable' && (
@@ -309,7 +315,7 @@ export function AddAdapterDrawer({
 
                 {/* Timelock notice */}
                 <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
-                  This action requires a timelock of {timelockDays.toFixed(1)} days.
+                  This action is timelocked ({describeV2Timelock(selectorTimelock)}).
                 </div>
 
                 {/* Decoded write / preflight-revert error (PR 8) */}

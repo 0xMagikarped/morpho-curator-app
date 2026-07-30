@@ -29,7 +29,11 @@ interface AddMarketCapDrawerProps {
   onClose: () => void;
   vaultAddress: Address;
   chainId: number;
-  timelockSeconds: bigint;
+  /**
+   * @deprecated Ignored on V2 — CapEditDrawer reads the real per-selector
+   * timelock on-chain.
+   */
+  timelockSeconds?: bigint;
   decimals: number;
   assetSymbol: string;
 }
@@ -39,7 +43,6 @@ export function AddMarketCapDrawer({
   onClose,
   vaultAddress,
   chainId,
-  timelockSeconds,
   decimals,
   assetSymbol,
 }: AddMarketCapDrawerProps) {
@@ -84,7 +87,6 @@ export function AddMarketCapDrawer({
         currentRel={0n}
         vaultAddress={vaultAddress}
         chainId={chainId}
-        timelockSeconds={timelockSeconds}
         decimals={decimals}
         assetSymbol={assetSymbol}
       />

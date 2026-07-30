@@ -64,6 +64,20 @@ export function formatDurationSeconds(secs: bigint): string {
  * `parseDurationSeconds` still accepts every unit shape — only the
  * display + the edit-mode input pre-fill are unified to days.
  */
+/**
+ * Display a Vault V2 per-selector timelock duration.
+ *
+ * V2 has no vault-level timelock, so the value is read per selector and may
+ * still be in flight — `undefined` must read as "loading", never as "0". The
+ * old code formatted the hardcoded `vault.timelock = 0n` and rendered
+ * "0.0d" on every V2 surface, which made a running timelock invisible.
+ */
+export function describeV2Timelock(secs: bigint | undefined): string {
+  if (secs === undefined) return 'loading…';
+  if (secs === 0n) return 'no delay';
+  return formatDurationSeconds(secs);
+}
+
 export function formatDurationDays(secs: bigint): string {
   // PR 35 — zero still wears the "d" suffix so the column reads as a
   // single consistent unit ("0d", "1d", "7d"). Previously zero rendered

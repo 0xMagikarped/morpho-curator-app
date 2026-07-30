@@ -24,6 +24,8 @@ import { useWaitForTransactionReceipt } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { useV2TimelockedOp } from '../../../lib/hooks/useV2TimelockedOp';
+import { useV2CalldataTimelock } from '../../../lib/hooks/useV2SelectorTimelock';
+import { describeV2Timelock } from '../../../lib/utils/duration';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
@@ -77,7 +79,11 @@ interface V2SetterDrawerProps {
   intent: V2SetterIntent;
   vaultAddress: Address;
   chainId: number;
-  timelockSeconds: bigint;
+  /**
+   * @deprecated Ignored on V2 — the vault has no single timelock value. The
+   * real per-selector duration is read on-chain inside this drawer.
+   */
+  timelockSeconds?: bigint;
 }
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
@@ -112,7 +118,6 @@ export function V2SetterDrawer({
   intent,
   vaultAddress,
   chainId,
-  timelockSeconds,
 }: V2SetterDrawerProps) {
   // Per-intent input state. Kept local to this drawer instance so closing
   // and re-opening resets.
@@ -309,7 +314,8 @@ export function V2SetterDrawer({
     }
   };
 
-  const timelockDays = Number(timelockSeconds) / 86400;
+  // Vault-level `timelockSeconds` is always 0n on V2 — read the selector's.
+  const selectorTimelock = useV2CalldataTimelock(chainId, vaultAddress, calldata);
   const title = labelForIntent(intent);
 
   if (executed) {
@@ -389,7 +395,7 @@ export function V2SetterDrawer({
         <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
           {direct
             ? 'Owner-only setter — applied in a single transaction (no timelock queue).'
-            : `Timelocked change (${timelockDays.toFixed(1)}d). Submit queues the change; Execute applies it once the timelock has elapsed. On a 0-timelock vault both can be sent back-to-back.`}
+            : `Timelocked change (${describeV2Timelock(selectorTimelock)}). Submit queues the change; Execute applies it once the timelock has elapsed. On a 0-timelock vault both can be sent back-to-back.`}
         </div>
       </div>
     </Drawer>

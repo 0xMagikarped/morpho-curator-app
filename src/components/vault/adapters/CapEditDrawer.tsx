@@ -32,10 +32,24 @@ import {
   combineTimelockSteps,
   type TimelockOpState,
 } from '../../../lib/hooks/useV2TimelockedOp';
+import { useV2SelectorTimelocks } from '../../../lib/hooks/useV2SelectorTimelock';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
+import { TimelockCountdown } from '../TimelockCountdown';
 import { parseTokenAmount, formatWadPercent, formatCapDisplay } from '../../../lib/utils/format';
+import { formatDurationSeconds } from '../../../lib/utils/duration';
 import { metaMorphoV2Abi } from '../../../lib/contracts/metaMorphoV2Abi';
+
+const ABS_SIG = 'increaseAbsoluteCap(bytes,uint256)';
+const REL_SIG = 'increaseRelativeCap(bytes,uint256)';
+const CAP_SIGS = [ABS_SIG, REL_SIG] as const;
+
+/** "2d" / "unknown" — never the bogus "0.0d" the vault-level field produced. */
+function describeTimelock(secs: bigint | undefined): string {
+  if (secs === undefined) return 'loading…';
+  if (secs === 0n) return 'no delay';
+  return formatDurationSeconds(secs);
+}
 
 export interface CapEditDrawerProps {
   open: boolean;
@@ -50,7 +64,12 @@ export interface CapEditDrawerProps {
   currentRel: bigint;
   vaultAddress: Address;
   chainId: number;
-  timelockSeconds: bigint;
+  /**
+   * @deprecated Ignored on V2. Vault V2 has no single timelock — the real
+   * per-selector durations are read on-chain inside this drawer. The prop is
+   * kept so the existing call sites still typecheck.
+   */
+  timelockSeconds?: bigint;
   decimals: number;
   assetSymbol: string;
 }
@@ -64,7 +83,6 @@ export function CapEditDrawer({
   currentRel,
   vaultAddress,
   chainId,
-  timelockSeconds,
   decimals,
   assetSymbol,
 }: CapEditDrawerProps) {
@@ -129,9 +147,15 @@ export function CapEditDrawer({
     return combineTimelockSteps(active);
   }, [isAbsIncrease, isRelIncrease, absTimelock, relTimelock]);
 
+  // Real per-selector durations. The vault-level `timelockSeconds` prop is
+  // always 0n on V2 (fetchV2VaultInfo has no single value to report), which
+  // is why every increase used to advertise "timelocked (0.0d)".
+  const { bySignature: capTimelocks } = useV2SelectorTimelocks(chainId, vaultAddress, CAP_SIGS);
+  const absTimelockSecs = capTimelocks[ABS_SIG];
+  const relTimelockSecs = capTimelocks[REL_SIG];
+
   if (!idData) return null;
 
-  const timelockDays = Number(timelockSeconds) / 86400;
   const busy = isPending || isConfirming;
 
   // ------- batched submit (increases) -------------------------------------
@@ -266,7 +290,7 @@ export function CapEditDrawer({
           {parsedAbsCap > 0n && (
             <p className="text-[10px] text-text-tertiary">
               {isAbsIncrease
-                ? `Increase = timelocked (${timelockDays.toFixed(1)}d)`
+                ? `Increase = timelocked (${describeTimelock(absTimelockSecs)})`
                 : 'Decrease = immediate'}
             </p>
           )}
@@ -297,7 +321,7 @@ export function CapEditDrawer({
           {parsedRelWad > 0n && (
             <p className="text-[10px] text-text-tertiary">
               {isRelIncrease
-                ? `Increase = timelocked (${timelockDays.toFixed(1)}d)`
+                ? `Increase = timelocked (${describeTimelock(relTimelockSecs)})`
                 : 'Decrease = immediate'}
             </p>
           )}
@@ -307,12 +331,9 @@ export function CapEditDrawer({
 
         {hasAnyIncrease && combinedIncrease.step === 'pending' && (
           <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary">
-            <strong>Submitted to timelock.</strong>{' '}
-            {batchSize > 1 ? `Both cap changes` : `Cap change`} executable at{' '}
-            <span className="font-mono">
-              {new Date(Number(combinedIncrease.executableAt) * 1000).toUTCString()}
-            </span>
-            .
+            <strong>Timelock running.</strong>{' '}
+            {batchSize > 1 ? 'Both cap changes' : 'Cap change'} submitted —{' '}
+            <TimelockCountdown executableAt={combinedIncrease.executableAt} />
           </div>
         )}
         {hasAnyIncrease && combinedIncrease.step === 'executable' && (
@@ -348,7 +369,8 @@ export function CapEditDrawer({
         </div>
 
         <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
-          Increases are timelocked ({timelockDays.toFixed(1)}d). Decreases apply immediately.
+          Increases are timelocked — absolute {describeTimelock(absTimelockSecs)}, relative{' '}
+          {describeTimelock(relTimelockSecs)}. Decreases apply immediately.
           {batchSize > 1 ? ' Submit and execute are batched into one tx each via vault.multicall.' : ''}
         </div>
       </div>

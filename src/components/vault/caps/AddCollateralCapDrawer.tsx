@@ -24,7 +24,11 @@ interface AddCollateralCapDrawerProps {
   onClose: () => void;
   vaultAddress: Address;
   chainId: number;
-  timelockSeconds: bigint;
+  /**
+   * @deprecated Ignored on V2 — CapEditDrawer reads the real per-selector
+   * timelock on-chain.
+   */
+  timelockSeconds?: bigint;
   decimals: number;
   assetSymbol: string;
 }
@@ -34,7 +38,6 @@ export function AddCollateralCapDrawer({
   onClose,
   vaultAddress,
   chainId,
-  timelockSeconds,
   decimals,
   assetSymbol,
 }: AddCollateralCapDrawerProps) {
@@ -71,7 +74,6 @@ export function AddCollateralCapDrawer({
         currentRel={0n}
         vaultAddress={vaultAddress}
         chainId={chainId}
-        timelockSeconds={timelockSeconds}
         decimals={decimals}
         assetSymbol={assetSymbol}
       />

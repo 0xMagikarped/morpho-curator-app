@@ -4,6 +4,9 @@ import { encodeFunctionData } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
 import { useGuardedWriteContract } from '../../../hooks/useGuardedWriteContract';
 import { useV2TimelockedOp } from '../../../lib/hooks/useV2TimelockedOp';
+import { useV2CalldataTimelock } from '../../../lib/hooks/useV2SelectorTimelock';
+import { describeV2Timelock } from '../../../lib/utils/duration';
+import { TimelockCountdown } from '../TimelockCountdown';
 import { Drawer } from '../../ui/Drawer';
 import { Button } from '../../ui/Button';
 import { formatTokenAmount } from '../../../lib/utils/format';
@@ -16,7 +19,11 @@ interface RemoveAdapterDrawerProps {
   adapter: V2AdapterFull | null;
   vaultAddress: Address;
   chainId: number;
-  timelockSeconds: bigint;
+  /**
+   * @deprecated Ignored on V2 — the vault has no single timelock value. The
+   * real per-selector duration is read on-chain inside this drawer.
+   */
+  timelockSeconds?: bigint;
   decimals: number;
   assetSymbol: string;
 }
@@ -27,7 +34,6 @@ export function RemoveAdapterDrawer({
   adapter,
   vaultAddress,
   chainId,
-  timelockSeconds,
   decimals,
   assetSymbol,
 }: RemoveAdapterDrawerProps) {
@@ -48,11 +54,13 @@ export function RemoveAdapterDrawer({
     calldata: submitCalldata,
     enabled: open,
   });
+  // Vault-level `timelockSeconds` is always 0n on V2 — read the selector's.
+  // Must stay above the `!adapter` early return (rules of hooks).
+  const selectorTimelock = useV2CalldataTimelock(chainId, vaultAddress, submitCalldata);
 
   if (!adapter) return null;
 
   const hasAllocation = adapter.realAssets > 0n;
-  const timelockDays = Number(timelockSeconds) / 86400;
   const canAct = !hasAllocation;
 
   const handleSubmit = () => {
@@ -118,10 +126,8 @@ export function RemoveAdapterDrawer({
         {/* Timelock state banners (PR 10) */}
         {timelockState.step === 'pending' && (
           <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary">
-            <strong>Submitted to timelock.</strong> Executable at{' '}
-            <span className="font-mono">
-              {new Date(Number(timelockState.executableAt) * 1000).toUTCString()}
-            </span>.
+            <strong>Timelock running.</strong>{' '}
+            <TimelockCountdown executableAt={timelockState.executableAt} />
           </div>
         )}
         {timelockState.step === 'executable' && (
@@ -153,7 +159,7 @@ export function RemoveAdapterDrawer({
         </div>
 
         <div className="bg-bg-hover px-3 py-2 text-xs text-text-secondary">
-          This action requires a timelock of {timelockDays.toFixed(1)} days.
+          This action is timelocked ({describeV2Timelock(selectorTimelock)}).
         </div>
 
         {/* Decoded write / preflight-revert error (PR 8 pattern) */}
