@@ -27,6 +27,7 @@ import {
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useV2SelectorTimelocks } from '../../lib/hooks/useV2SelectorTimelock';
 import { describeV2Timelock } from '../../lib/utils/duration';
+import { V2PendingTimelockPanel } from './V2PendingTimelockPanel';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -141,6 +142,16 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* Queued cap changes surface here — a submit() used to leave the
+          tables looking untouched with no sign a timelock was running. */}
+      <V2PendingTimelockPanel
+        chainId={chainId}
+        vaultAddress={vaultAddress}
+        assetDecimals={decimals}
+        assetSymbol={assetSymbol}
+        isV2
+      />
+
       {/* Summary strip. The two cap timelocks are read per-selector — V2 has
           no vault-level timelock, so they belong here rather than being
           buried behind an Edit drawer. */}

@@ -13,6 +13,7 @@ import { SharePriceChart } from '../risk/SharePriceChart';
 import { UsdcMigrationBanner } from '../migration/UsdcMigrationBanner';
 import { RegistryAlertBanner } from './RegistryAlertBanner';
 import { PendingCapsBanner } from './PendingCapsBanner';
+import { V2PendingTimelockPanel } from './V2PendingTimelockPanel';
 import { OwnerActionsPanel } from './owner/OwnerActionsPanel';
 import { useVaultPendingState } from './owner/useVaultPendingState';
 import { useVaultInfo, useVaultRole, useVaultMarketsFromApi, useVaultAllocators } from '../../lib/hooks/useVault';
@@ -132,6 +133,16 @@ export function OverviewTab({ chainId, vaultAddress }: OverviewTabProps) {
         assetSymbol={vault.assetInfo.symbol}
         assetDecimals={vault.assetInfo.decimals}
         isV1={vault.version === 'v1'}
+      />
+
+      {/* V2 timelock queue — the V2 counterpart. Renders nothing when the
+          queue is empty. */}
+      <V2PendingTimelockPanel
+        chainId={chainId}
+        vaultAddress={vaultAddress}
+        assetDecimals={vault.assetInfo.decimals}
+        assetSymbol={vault.assetInfo.symbol}
+        isV2={vault.version === 'v2'}
       />
 
       {/* Risk Alerts */}

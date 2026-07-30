@@ -302,10 +302,23 @@ export const metaMorphoV2Abi = [
 
   // === Sentinel actions ===
   {
-    inputs: [{ name: 'actionHash', type: 'bytes32' }],
+    // Canonical VaultV2 is `revoke(bytes data)` — the SAME calldata that was
+    // submitted, not a hash of it. The previous `bytes32 actionHash` fragment
+    // hashes to a different selector, so any revoke would have hit the
+    // fallback and reverted. Verified against @morpho-org/blue-sdk-viem.
+    inputs: [{ name: 'data', type: 'bytes' }],
     name: 'revoke',
     outputs: [],
     stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    // Unix timestamp at which submitted `data` becomes executable. 0 = not
+    // queued (never submitted, or already executed/revoked).
+    inputs: [{ name: 'data', type: 'bytes' }],
+    name: 'executableAt',
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
     type: 'function',
   },
 

@@ -31,6 +31,8 @@ import { encodeFunctionData, toFunctionSelector } from 'viem';
 import { useReadContracts, useWaitForTransactionReceipt } from 'wagmi';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
+import { useVaultInfo } from '../../lib/hooks/useVault';
+import { V2PendingTimelockPanel } from './V2PendingTimelockPanel';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -88,6 +90,9 @@ interface RowState {
 
 export function V2TimelocksTab({ chainId, vaultAddress }: V2TimelocksTabProps) {
   const permissions = useVaultPermissions(chainId, vaultAddress);
+  const { data: vault } = useVaultInfo(chainId, vaultAddress);
+  const assetDecimals = vault?.assetInfo.decimals ?? 18;
+  const assetSymbol = vault?.assetInfo.symbol ?? '';
   const canEdit = permissions.canCurate || permissions.canManage || permissions.isAdmin;
 
   // Pre-compute every selector once.
@@ -210,6 +215,16 @@ export function V2TimelocksTab({ chainId, vaultAddress }: V2TimelocksTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* What is currently IN the timelock, above the durations table. */}
+      <V2PendingTimelockPanel
+        chainId={chainId}
+        vaultAddress={vaultAddress}
+        assetDecimals={assetDecimals}
+        assetSymbol={assetSymbol}
+        isV2
+        alwaysShow
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>V2 Timelocks</CardTitle>
