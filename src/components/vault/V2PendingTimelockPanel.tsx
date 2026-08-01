@@ -12,7 +12,7 @@
  * `executableAt`). Revoke cancels a queued action and is available at any
  * point to the curator / owner / sentinel.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { decodeFunctionData, type Address } from 'viem';
 import { useWaitForTransactionReceipt } from 'wagmi';
@@ -56,9 +56,25 @@ export function V2PendingTimelockPanel({
     isV2,
   );
 
-  const { writeContract, data: txHash, isPending, error, simulateError, isSimulating } =
-    useGuardedWriteContract();
+  const {
+    writeContract,
+    data: txHash,
+    isPending,
+    error,
+    simulateError,
+    isSimulating,
+    walletError,
+    isConnected,
+  } = useGuardedWriteContract();
+  // Which row fired the current write. Without this, `isPending` is shared
+  // and one click disables EVERY row — including forever if the wallet
+  // request is left hanging (a Safe proposal never auto-resolves).
+  const [activeData, setActiveData] = useState<`0x${string}` | null>(null);
   const { isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+
+  useEffect(() => {
+    if (!isPending && !isSimulating) setActiveData((d) => (isSuccess ? null : d));
+  }, [isPending, isSimulating, isSuccess]);
 
   useEffect(() => {
     if (!isSuccess) return;
@@ -78,9 +94,19 @@ export function V2PendingTimelockPanel({
   const canAct = permissions.canCurate || permissions.canManage || permissions.isAdmin;
   const busy = isPending || isSimulating;
 
+  /** Why a row's Execute is blocked — shown to the user, not just inferred. */
+  const blockedReason = (ready: boolean, decodable: boolean): string | null => {
+    if (!isConnected) return 'Connect your wallet to execute.';
+    if (!canAct) return 'Only the vault owner or curator can execute a queued action.';
+    if (!decodable) return 'Calldata could not be decoded — execute from the originating drawer.';
+    if (!ready) return 'The timelock has not elapsed yet.';
+    return null;
+  };
+
   // Execute = re-send the queued calldata itself. The vault checks
   // `executableAt` internally, so no separate `execute(bytes)` exists.
   const execute = (action: PendingV2Action) => {
+    setActiveData(action.data);
     try {
       const decoded = decodeFunctionData({ abi: metaMorphoV2Abi, data: action.data });
       writeContract({
@@ -96,6 +122,7 @@ export function V2PendingTimelockPanel({
   };
 
   const revoke = (action: PendingV2Action) => {
+    setActiveData(action.data);
     writeContract({
       address: vaultAddress,
       abi: metaMorphoV2Abi,
@@ -124,9 +151,21 @@ export function V2PendingTimelockPanel({
         countdown starting is not the change landing.
       </p>
 
-      {(simulateError || error) && (
+      {/* walletError is set when the guard short-circuits before the wallet
+          is ever asked (e.g. not connected). Omitting it here made the click
+          look like it did nothing at all. */}
+      {(simulateError || error || walletError) && (
         <div role="alert" className="bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger mb-3">
-          {simulateError?.message ?? (error instanceof Error ? error.message : 'Transaction failed.')}
+          {walletError ??
+            simulateError?.message ??
+            (error instanceof Error ? error.message : 'Transaction failed.')}
+        </div>
+      )}
+
+      {actions.length > 0 && !canAct && isConnected && (
+        <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary mb-3">
+          Connected wallet is not the owner or curator of this vault — Execute and Revoke
+          are read-only for you.
         </div>
       )}
 
@@ -134,6 +173,8 @@ export function V2PendingTimelockPanel({
         {actions.map((a) => {
           const ready = a.executableAt <= nowSec;
           const decodable = a.functionName !== 'unknown';
+          const blocked = blockedReason(ready, decodable);
+          const rowBusy = busy && activeData === a.data;
           return (
             <div
               key={a.data}
@@ -155,28 +196,25 @@ export function V2PendingTimelockPanel({
                 <p className="text-[10px] text-text-tertiary mt-0.5">
                   <TimelockCountdown executableAt={a.executableAt} />
                 </p>
+                {blocked && (
+                  <p className="text-[10px] text-warning mt-0.5">{blocked}</p>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  disabled={!canAct || !ready || !decodable || busy}
-                  loading={busy}
+                  disabled={!!blocked || rowBusy}
+                  loading={rowBusy}
                   onClick={() => execute(a)}
-                  title={
-                    !decodable
-                      ? 'Calldata could not be decoded — execute from the originating drawer'
-                      : ready
-                        ? 'Apply this change now'
-                        : 'Timelock has not elapsed yet'
-                  }
+                  title={blocked ?? 'Apply this change now'}
                 >
                   Execute
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={!canAct || busy}
+                  disabled={!canAct || !isConnected || rowBusy}
                   onClick={() => revoke(a)}
                   title="Cancel this queued action"
                 >
