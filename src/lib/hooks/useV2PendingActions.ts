@@ -295,41 +295,55 @@ async function resolveDeployment(
 }
 
 /**
- * One-shot deep scan of `[deployment … cachedFromBlock)`, run in the
- * background behind the fast foreground scan. Returns whether it actually
- * widened the covered range (i.e. whether the foreground query should refetch).
+ * How far back one backfill step reaches. On Pharos (10k getLogs pages) this
+ * is ~50 pages ≈ 25s — small enough that a failure costs one step rather than
+ * the whole walk, and that each completed step visibly moves the covered
+ * range in the UI.
+ *
+ * Doing the whole gap in a single call was the first attempt and it does not
+ * survive contact with a real RPC: 557 pages over ~4.5 minutes, all-or-
+ * nothing. One rate-limit burst the retry budget can't absorb rejects the
+ * entire scan, and `retry: 1` then parks the query in an error state with
+ * nothing fetched and nothing shown.
+ */
+const BACKFILL_STEP_BLOCKS = 500_000n;
+
+/**
+ * Widen the covered range one step toward the vault's deployment block.
+ *
+ * Resumable by construction: the covered range lives in the persisted cursor,
+ * so a step that fails (or a reload mid-walk) resumes from the last committed
+ * floor instead of starting over. The caller re-invokes until `done`.
  */
 export async function backfillSubmitHistory(
   chainId: number,
   vaultAddress: Address,
-): Promise<{ extended: boolean }> {
+): Promise<{ extended: boolean; done: boolean }> {
   const client = getPublicClient(chainId) as PublicClient;
   const cache = readSubmitCache(chainId, vaultAddress);
-  // The foreground query always writes the cache before this runs (it is
-  // gated on that query's success), so a missing cache means nothing to widen.
-  if (!cache) return { extended: false };
+  // The foreground query always writes the cursor before this runs (it is
+  // gated on that query's success), so a missing cursor means storage is
+  // unavailable — there is nothing to widen and nothing to resume from.
+  if (!cache) return { extended: false, done: true };
 
   const latest = await client.getBlockNumber();
   const deployment = await resolveDeployment(client, chainId, vaultAddress, latest, cache);
   const coveredFrom = BigInt(cache.fromBlock);
-  if (coveredFrom <= deployment) return { extended: false };
+  if (coveredFrom <= deployment) return { extended: false, done: true };
 
-  const logs = await scanContractEvent(
-    client,
-    chainId,
-    vaultAddress,
-    SUBMIT_EVENT,
-    deployment,
-    coveredFrom - 1n,
-  );
+  const stepFloor = coveredFrom > BACKFILL_STEP_BLOCKS ? coveredFrom - BACKFILL_STEP_BLOCKS : 0n;
+  const from = stepFloor > deployment ? stepFloor : deployment;
+  const to = coveredFrom - 1n;
+
+  const logs = await scanContractEvent(client, chainId, vaultAddress, SUBMIT_EVENT, from, to);
 
   updateSubmitCache(chainId, vaultAddress, {
     deployment,
-    fromBlock: deployment,
+    fromBlock: from,
     toBlock: BigInt(cache.toBlock),
     add: toCachedSubmits(logs),
   });
-  return { extended: true };
+  return { extended: true, done: from <= deployment };
 }
 
 export async function fetchPendingActions(
@@ -477,16 +491,26 @@ export function useV2PendingActions(
     refetchInterval: 60_000,
   });
 
-  // Deep scan back to the vault's deployment, once, behind the fast paint.
-  // Gated on the foreground query having written its cursor, so the two never
-  // race to establish the initial covered range.
+  // Walk back toward the deployment block behind the fast paint, one step per
+  // query. Keying on the current covered floor is what drives the walk: each
+  // completed step widens the cursor, the foreground refetch reports the new
+  // floor, that remounts this query under a fresh key, and the next step runs.
+  // The loop ends when the foreground reports `isFullHistory` and
+  // `needsBackfill` goes false — no counter, no recursion, and a reload mid-walk
+  // simply resumes from the committed floor.
   const needsBackfill = query.isSuccess && query.data?.isFullHistory === false;
+  const floor = query.data?.fromBlock?.toString() ?? '';
   const backfill = useQuery({
-    queryKey: [...baseKey, 'backfill'],
+    queryKey: [...baseKey, 'backfill', floor],
     queryFn: () => backfillSubmitHistory(chainId!, vaultAddress!),
     enabled: ready && needsBackfill,
     staleTime: Infinity,
-    gcTime: Infinity,
+    // Deliberately NOT Infinity: these are per-floor keys, so retaining them
+    // would leak a query per step into the persisted cache, each one pinned
+    // un-refetchable by `staleTime: Infinity`. Dropping them on unmount also
+    // means a step that failed is retried on the next mount rather than
+    // leaving the walk permanently parked.
+    gcTime: 0,
     retry: 1,
   });
 
@@ -503,7 +527,18 @@ export function useV2PendingActions(
 
   return {
     ...query,
-    /** True while the deployment→window backfill is still running. */
+    /** True while a history-widening step is in flight. */
     isBackfilling: backfill.isFetching,
+    /**
+     * Set when the walk stalled short of the deployment block. Without this a
+     * failed scan is indistinguishable from a genuinely empty queue — which is
+     * the worse of the two to get wrong.
+     */
+    backfillError:
+      needsBackfill && backfill.isError
+        ? backfill.error instanceof Error
+          ? backfill.error.message
+          : 'History scan failed.'
+        : null,
   };
 }

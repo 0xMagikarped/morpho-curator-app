@@ -87,33 +87,93 @@ describe('fetchPendingActions — first paint', () => {
   });
 });
 
-describe('backfillSubmitHistory — deployment → window', () => {
+describe('backfillSubmitHistory — stepped walk toward deployment', () => {
+  it('widens by one bounded step, not the whole gap at once', async () => {
+    await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
+    const windowFloor = LATEST - 200_000n;
+
+    const step = await backfillSubmitHistory(CHAIN, VAULT);
+    expect(step).toEqual({ extended: true, done: false });
+
+    // A single 5.5M-block scan is what made this all-or-nothing and fragile;
+    // each step must stay bounded so a failure costs one step, not the walk.
+    const [, , , , from, to] = scanSpy.mock.calls[1];
+    expect(to).toBe(windowFloor - 1n);
+    expect(from).toBe(windowFloor - 500_000n);
+    expect(from).toBeGreaterThan(DEPLOYMENT);
+  });
+
+  it('resumes from the committed floor and reports done at deployment', async () => {
+    await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
+
+    // Walk it out. Each step needs the foreground to re-commit the floor,
+    // exactly as the hook drives it.
+    let steps = 0;
+    for (;;) {
+      const { done } = await backfillSubmitHistory(CHAIN, VAULT);
+      steps++;
+      const seen = await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
+      if (done) {
+        expect(seen.isFullHistory).toBe(true);
+        break;
+      }
+      expect(seen.isFullHistory).toBe(false);
+      if (steps > 30) throw new Error('walk did not converge');
+    }
+    // ceil((14_162_000 - 200_000 - 8_405_011) / 500_000)
+    expect(steps).toBe(12);
+
+    // The final step lands exactly on the deployment block, never below it.
+    // (The foreground re-runs issue no scan here — the cursor is already at
+    // head, so `scanFrom > latest` short-circuits them.)
+    const [, , , , lastFrom] = scanSpy.mock.calls.at(-1)!;
+    expect(lastFrom).toBe(DEPLOYMENT);
+  });
+
   it('recovers a submit 5.5M blocks deep that the window missed', async () => {
     await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
 
-    scanSpy.mockResolvedValueOnce([submitLog(OLD_CALLDATA, '0xe90956cf', OLD_SUBMIT_BLOCK)]);
-    const { extended } = await backfillSubmitHistory(CHAIN, VAULT);
-    expect(extended).toBe(true);
+    for (;;) {
+      // Serve the deep entry from whichever step covers its block.
+      scanSpy.mockImplementationOnce((_c, _ch, _a, _e, from: bigint, to: bigint) =>
+        Promise.resolve(
+          from <= OLD_SUBMIT_BLOCK && OLD_SUBMIT_BLOCK <= to
+            ? [submitLog(OLD_CALLDATA, '0xe90956cf', OLD_SUBMIT_BLOCK)]
+            : [],
+        ),
+      );
+      const { done } = await backfillSubmitHistory(CHAIN, VAULT);
+      readContractSpy.mockResolvedValue(1_780_045_797n);
+      scanSpy.mockResolvedValueOnce([]);
+      const result = await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
+      if (!done) continue;
 
-    // Scanned exactly the gap below the foreground window, from deployment.
-    const [, , , , from, to] = scanSpy.mock.calls[1];
-    expect(from).toBe(DEPLOYMENT);
-    expect(to).toBe(LATEST - 200_000n - 1n);
+      expect(result.isFullHistory).toBe(true);
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0]).toMatchObject({
+        data: OLD_CALLDATA,
+        functionName: 'setCurator',
+        label: 'Set curator',
+        executableAt: 1_780_045_797n,
+      });
+      break;
+    }
+  });
 
-    // Re-running the foreground query now surfaces the recovered entry, and
-    // the coverage claim widens to the vault's full history.
-    readContractSpy.mockResolvedValue(1_780_045_797n);
-    scanSpy.mockResolvedValueOnce([]);
-    const result = await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
+  it('a failed step leaves the committed floor intact so the next resumes there', async () => {
+    await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
+    await backfillSubmitHistory(CHAIN, VAULT); // commits one step
+    const floorAfterOne = (await fetchPendingActions(CHAIN, VAULT, 6, 'USDC')).fromBlock;
 
-    expect(result.isFullHistory).toBe(true);
-    expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]).toMatchObject({
-      data: OLD_CALLDATA,
-      functionName: 'setCurator',
-      label: 'Set curator',
-      executableAt: 1_780_045_797n,
-    });
+    scanSpy.mockRejectedValueOnce(new Error('cu limit exceeded'));
+    await expect(backfillSubmitHistory(CHAIN, VAULT)).rejects.toThrow('cu limit');
+
+    // Coverage must not have narrowed or advanced past the failure.
+    expect((await fetchPendingActions(CHAIN, VAULT, 6, 'USDC')).fromBlock).toBe(floorAfterOne);
+    await backfillSubmitHistory(CHAIN, VAULT);
+    const [, , , , from, to] = scanSpy.mock.calls[scanSpy.mock.calls.length - 1];
+    expect(to).toBe(floorAfterOne - 1n);
+    expect(from).toBe(floorAfterOne - 500_000n);
   });
 
   it('is a no-op once coverage already reaches deployment', async () => {
@@ -121,7 +181,7 @@ describe('backfillSubmitHistory — deployment → window', () => {
     await fetchPendingActions(CHAIN, VAULT, 6, 'USDC');
     scanSpy.mockClear();
 
-    expect(await backfillSubmitHistory(CHAIN, VAULT)).toEqual({ extended: false });
+    expect(await backfillSubmitHistory(CHAIN, VAULT)).toEqual({ extended: false, done: true });
     expect(scanSpy).not.toHaveBeenCalled();
   });
 });

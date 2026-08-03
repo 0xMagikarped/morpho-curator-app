@@ -48,7 +48,7 @@ export function V2PendingTimelockPanel({
 }: Props) {
   const queryClient = useQueryClient();
   const permissions = useVaultPermissions(chainId, vaultAddress);
-  const { data: result, isLoading, isBackfilling } = useV2PendingActions(
+  const { data: result, isLoading, isBackfilling, backfillError } = useV2PendingActions(
     chainId,
     vaultAddress,
     assetDecimals,
@@ -145,8 +145,10 @@ export function V2PendingTimelockPanel({
           // "Empty" before the history scan lands would be a claim we can't
           // back — this vault's oldest live entry is 5.5M blocks deep.
           <Badge variant="info">Scanning…</Badge>
-        ) : (
+        ) : result?.isFullHistory ? (
           <Badge variant="success">Empty</Badge>
+        ) : (
+          <Badge variant="warning">Partial</Badge>
         )}
       </CardHeader>
 
@@ -230,7 +232,11 @@ export function V2PendingTimelockPanel({
         })}
         {actions.length === 0 && (
           <p className="text-xs text-text-tertiary py-2">
-            {isBackfilling ? 'Scanning vault history…' : 'Nothing queued.'}
+            {isBackfilling
+              ? 'Scanning vault history…'
+              : result.isFullHistory
+                ? 'Nothing queued.'
+                : 'Nothing queued in the range scanned so far.'}
           </p>
         )}
       </div>
@@ -239,9 +245,16 @@ export function V2PendingTimelockPanel({
         {result.isFullHistory
           ? 'Covers the vault’s full history.'
           : isBackfilling
-            ? `Scanning earlier history — blocks ${result.fromBlock.toLocaleString()}–${result.toBlock.toLocaleString()} shown so far. Older queued actions will appear when the scan finishes.`
+            ? `Scanning earlier history — blocks ${result.fromBlock.toLocaleString()}–${result.toBlock.toLocaleString()} covered so far. Older queued actions will appear as the scan walks back.`
             : `Covers blocks ${result.fromBlock.toLocaleString()}–${result.toBlock.toLocaleString()} — an action queued before that window is not listed.`}
       </p>
+
+      {backfillError && (
+        <p role="alert" className="text-[10px] text-warning mt-1">
+          History scan stalled ({backfillError}). Reload to resume from block{' '}
+          <span className="font-mono">{result.fromBlock.toLocaleString()}</span>.
+        </p>
+      )}
     </Card>
   );
 }
