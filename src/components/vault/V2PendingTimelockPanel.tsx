@@ -9,13 +9,25 @@
  *
  * Each row ticks down live and, once matured, offers Execute — which
  * re-sends the exact submitted calldata (the vault self-checks
- * `executableAt`). Revoke cancels a queued action and is available at any
- * point to the curator / owner / sentinel.
+ * `executableAt`).
+ *
+ * Execute and Revoke are gated DIFFERENTLY, and conflating them is a bug this
+ * panel shipped: it required owner/curator for both.
+ *
+ *   Execute — permissionless. `submit()` is the gated step; the `timelocked`
+ *     modifier on the target function only checks that `executableAt` is set
+ *     and matured, then clears it. Anyone may push a matured action through.
+ *   Revoke  — restricted to owner / curator / sentinel.
+ *
+ * Verified against RockawayX USDC on Pharos (0x047cd0a9…02e5): `eth_call` of
+ * both queued `increaseAbsoluteCap` payloads from a role-less address returns
+ * success, while `revoke(bytes)` from the same address reverts `Unauthorized()`
+ * (0x82b42900) and succeeds from the curator.
  */
 import { useEffect, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { decodeFunctionData, type Address } from 'viem';
-import { useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
@@ -26,6 +38,7 @@ import { Card, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { TimelockCountdown } from './TimelockCountdown';
+import { executeBlockedReason } from '../../lib/vault/timelockGates';
 
 interface Props {
   chainId: number;
@@ -48,6 +61,15 @@ export function V2PendingTimelockPanel({
 }: Props) {
   const queryClient = useQueryClient();
   const permissions = useVaultPermissions(chainId, vaultAddress);
+  const { address: connectedAddress } = useAccount();
+  const { data: isSentinel } = useReadContract({
+    address: vaultAddress,
+    abi: metaMorphoV2Abi,
+    functionName: 'isSentinel',
+    args: connectedAddress ? [connectedAddress] : undefined,
+    chainId,
+    query: { enabled: isV2 && !!connectedAddress, staleTime: 5 * 60_000 },
+  });
   const { data: result, isLoading, isBackfilling, backfillError } = useV2PendingActions(
     chainId,
     vaultAddress,
@@ -91,17 +113,13 @@ export function V2PendingTimelockPanel({
   if (!isV2 || isLoading || !result) return null;
   if (actions.length === 0 && !alwaysShow) return null;
 
-  const canAct = permissions.canCurate || permissions.canManage || permissions.isAdmin;
+  // Revoke only. `permissions` covers owner + curator; V2 sentinels are a
+  // per-address mapping with no enumeration, so the connected wallet is
+  // checked directly — a sentinel is precisely the role that turns up wanting
+  // to kill a queued action, and it was seeing a disabled button.
+  const canRevoke =
+    permissions.canCurate || permissions.canManage || permissions.isAdmin || isSentinel === true;
   const busy = isPending || isSimulating;
-
-  /** Why a row's Execute is blocked — shown to the user, not just inferred. */
-  const blockedReason = (ready: boolean, decodable: boolean): string | null => {
-    if (!isConnected) return 'Connect your wallet to execute.';
-    if (!canAct) return 'Only the vault owner or curator can execute a queued action.';
-    if (!decodable) return 'Calldata could not be decoded — execute from the originating drawer.';
-    if (!ready) return 'The timelock has not elapsed yet.';
-    return null;
-  };
 
   // Execute = re-send the queued calldata itself. The vault checks
   // `executableAt` internally, so no separate `execute(bytes)` exists.
@@ -168,10 +186,10 @@ export function V2PendingTimelockPanel({
         </div>
       )}
 
-      {actions.length > 0 && !canAct && isConnected && (
+      {actions.length > 0 && !canRevoke && isConnected && (
         <div className="bg-warning/10 border border-warning/20 px-3 py-2 text-xs text-text-primary mb-3">
-          Connected wallet is not the owner or curator of this vault — Execute and Revoke
-          are read-only for you.
+          Connected wallet is not the owner, curator or a sentinel of this vault — Revoke is
+          read-only for you. Executing a matured action is permissionless and stays available.
         </div>
       )}
 
@@ -179,7 +197,7 @@ export function V2PendingTimelockPanel({
         {actions.map((a) => {
           const ready = a.executableAt <= nowSec;
           const decodable = a.functionName !== 'unknown';
-          const blocked = blockedReason(ready, decodable);
+          const blocked = executeBlockedReason({ isConnected, decodable, matured: ready });
           const rowBusy = busy && activeData === a.data;
           return (
             <div
@@ -220,9 +238,15 @@ export function V2PendingTimelockPanel({
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={!canAct || !isConnected || rowBusy}
+                  disabled={!canRevoke || !isConnected || rowBusy}
                   onClick={() => revoke(a)}
-                  title="Cancel this queued action"
+                  title={
+                    !isConnected
+                      ? 'Connect your wallet to revoke.'
+                      : !canRevoke
+                        ? 'Only the vault owner, curator or a sentinel can revoke a queued action.'
+                        : 'Cancel this queued action'
+                  }
                 >
                   Revoke
                 </Button>
