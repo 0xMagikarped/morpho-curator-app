@@ -19,6 +19,8 @@ import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
 import { SetLiquidityDrawer } from './adapters/SetLiquidityDrawer';
 import { useLiquidityTargetMarket } from '../../hooks/useLiquidityTargetMarket';
+import { useReallocationRates } from '../../lib/hooks/useReallocationRates';
+import { blendedApyPercent } from '../../lib/market/reallocationRates';
 import type { MarketParams } from '../../types';
 
 interface V2AllocationTabProps {
@@ -427,6 +429,46 @@ function AllocationRowComponent({
 // Reallocate Dialog
 // ============================================================
 
+/**
+ * `1.37% → 1.36%` with the arrow coloured by direction. `unit` is appended to
+ * both sides so the pair reads as one quantity rather than two numbers.
+ */
+function RateDelta({
+  from,
+  to,
+  digits = 2,
+  higherIsBetter = true,
+}: {
+  from: number;
+  to: number | null;
+  digits?: number;
+  higherIsBetter?: boolean;
+}) {
+  const fmt = (v: number) => `${v.toFixed(digits)}%`;
+  if (to === null) {
+    return (
+      <span className="font-mono text-text-tertiary">
+        {fmt(from)} <span aria-hidden>→</span> —
+      </span>
+    );
+  }
+  // Below the display precision the arrow would point at a change the user
+  // can't see. Treat that as unchanged rather than colouring noise.
+  const epsilon = Math.pow(10, -digits) / 2;
+  const diff = to - from;
+  const tone =
+    Math.abs(diff) < epsilon
+      ? 'text-text-tertiary'
+      : diff > 0 === higherIsBetter
+        ? 'text-accent-primary'
+        : 'text-warning';
+  return (
+    <span className="font-mono text-text-tertiary">
+      {fmt(from)} <span aria-hidden>→</span> <span className={tone}>{fmt(to)}</span>
+    </span>
+  );
+}
+
 function ReallocateDialog({
   data,
   vaultAddress,
@@ -491,6 +533,57 @@ function ReallocateDialog({
   );
 
   const hasChanges = deltas.some((d) => d.delta !== 0n);
+
+  // What the proposed allocation does to each market's rate. Reallocating
+  // moves the vault's supply, which moves utilization, which moves the IRM —
+  // the consequence the curator is actually deciding on.
+  const rateInputs = useMemo(
+    () =>
+      deltas
+        .filter((d): d is typeof d & { row: AllocationRow & { params: MarketParams } } => !!d.row.params)
+        .map(({ row, delta }) => ({
+          marketId: row.marketId!,
+          params: row.params,
+          delta,
+          targetAssets: targetRawOf.get(row.marketId!) ?? 0n,
+        })),
+    [deltas, targetRawOf],
+  );
+  const { byMarket: rates, isProjecting, isError: ratesError } = useReallocationRates(
+    chainId,
+    rateInputs,
+  );
+
+  // Vault-level APY before and after. Idle earns nothing and is included in
+  // the divisor, so moving funds to Idle correctly drags the number down.
+  const blendedNow = useMemo(
+    () =>
+      blendedApyPercent(
+        marketRows.map((row) => ({
+          assets: row.allocation,
+          apyPercent: rates.get(row.marketId!)?.currentSupplyApyPct ?? 0,
+        })),
+        data.totalAssets,
+      ),
+    [marketRows, rates, data.totalAssets],
+  );
+  const blendedNext = useMemo(() => {
+    const positions = marketRows.map((row) => {
+      const p = rates.get(row.marketId!);
+      return {
+        assets: targetRawOf.get(row.marketId!) ?? 0n,
+        apyPercent: p?.nextSupplyApyPct ?? null,
+      };
+    });
+    // One unprojectable market makes the total meaningless, not approximate.
+    if (positions.some((p) => p.apyPercent === null)) return null;
+    return blendedApyPercent(
+      positions.map((p) => ({ assets: p.assets, apyPercent: p.apyPercent as number })),
+      data.totalAssets,
+    );
+  }, [marketRows, rates, targetRawOf, data.totalAssets]);
+
+  const haveRates = rates.size > 0;
 
   // Blocking conditions — each of these would make the on-chain preflight
   // revert, so surface them here rather than letting the tx die silently.
@@ -637,6 +730,27 @@ function ReallocateDialog({
           </div>
         </div>
 
+        {/* Vault-level consequence of the proposed allocation. */}
+        {(haveRates || isProjecting) && (
+          <div className="flex items-baseline justify-between gap-3 p-3 bg-bg-hover/50 border border-border-subtle text-xs">
+            <div>
+              <span className="text-text-tertiary">Blended vault APY: </span>
+              {haveRates ? (
+                <RateDelta from={blendedNow} to={blendedNext} />
+              ) : (
+                <span className="font-mono text-text-tertiary">…</span>
+              )}
+            </div>
+            <span className="text-[10px] text-text-tertiary text-right">
+              {isProjecting
+                ? 'Projecting…'
+                : ratesError
+                  ? 'Rate projection unavailable.'
+                  : 'Supply-side, across total assets (idle earns 0%). Before the performance fee.'}
+            </span>
+          </div>
+        )}
+
         {errors.length > 0 && (
           <div className="text-xs text-danger bg-danger/10 border border-danger/20 p-2 space-y-1">
             {errors.map((e) => <p key={e}>{e}</p>)}
@@ -664,6 +778,7 @@ function ReallocateDialog({
 
           {marketRows.map((row) => {
             const currentStr = formatTokenAmount(row.allocation, data.assetDecimals);
+            const proj = rates.get(row.marketId!);
             return (
               <div key={row.marketId} className="flex items-center gap-3 p-3 bg-bg-hover/30 border border-border-subtle">
                 <div className="flex-1 min-w-0">
@@ -676,6 +791,43 @@ function ReallocateDialog({
                   <div className="text-[10px] text-text-tertiary mt-0.5">
                     Current: {currentStr} {data.assetSymbol}
                   </div>
+                  {proj && (
+                    <div className="text-[10px] mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                      {proj.exceedsLiquidity ? (
+                        <span className="text-danger">
+                          Withdrawal exceeds market liquidity — no rate to project.
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-text-tertiary">
+                            UR{' '}
+                            <RateDelta
+                              from={proj.currentUtilizationPct}
+                              to={proj.nextUtilizationPct}
+                              higherIsBetter
+                            />
+                          </span>
+                          <span className="text-text-tertiary">
+                            Supply APY{' '}
+                            <RateDelta
+                              from={proj.currentSupplyApyPct}
+                              to={proj.nextSupplyApyPct}
+                              digits={2}
+                            />
+                          </span>
+                          <span className="text-text-tertiary">
+                            Borrow APY{' '}
+                            <RateDelta
+                              from={proj.currentBorrowApyPct}
+                              to={proj.nextBorrowApyPct}
+                              digits={2}
+                              higherIsBetter={false}
+                            />
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {canSet90(row) && (
