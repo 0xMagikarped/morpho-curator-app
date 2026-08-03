@@ -48,7 +48,7 @@ export function V2PendingTimelockPanel({
 }: Props) {
   const queryClient = useQueryClient();
   const permissions = useVaultPermissions(chainId, vaultAddress);
-  const { data: result, isLoading } = useV2PendingActions(
+  const { data: result, isLoading, isBackfilling } = useV2PendingActions(
     chainId,
     vaultAddress,
     assetDecimals,
@@ -141,6 +141,10 @@ export function V2PendingTimelockPanel({
         <CardTitle>Timelock Queue</CardTitle>
         {actions.length > 0 ? (
           <Badge variant="warning">{actions.length} pending</Badge>
+        ) : isBackfilling ? (
+          // "Empty" before the history scan lands would be a claim we can't
+          // back — this vault's oldest live entry is 5.5M blocks deep.
+          <Badge variant="info">Scanning…</Badge>
         ) : (
           <Badge variant="success">Empty</Badge>
         )}
@@ -225,14 +229,18 @@ export function V2PendingTimelockPanel({
           );
         })}
         {actions.length === 0 && (
-          <p className="text-xs text-text-tertiary py-2">Nothing queued.</p>
+          <p className="text-xs text-text-tertiary py-2">
+            {isBackfilling ? 'Scanning vault history…' : 'Nothing queued.'}
+          </p>
         )}
       </div>
 
       <p className="text-[10px] text-text-tertiary mt-3">
         {result.isFullHistory
           ? 'Covers the vault’s full history.'
-          : `Covers blocks ${result.fromBlock.toLocaleString()}–${result.toBlock.toLocaleString()} — an action queued before that window is not listed.`}
+          : isBackfilling
+            ? `Scanning earlier history — blocks ${result.fromBlock.toLocaleString()}–${result.toBlock.toLocaleString()} shown so far. Older queued actions will appear when the scan finishes.`
+            : `Covers blocks ${result.fromBlock.toLocaleString()}–${result.toBlock.toLocaleString()} — an action queued before that window is not listed.`}
       </p>
     </Card>
   );

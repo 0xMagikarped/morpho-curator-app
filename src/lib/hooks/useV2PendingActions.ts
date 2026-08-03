@@ -16,8 +16,24 @@
  *   2. Re-read `executableAt(data)` for each. Executing or revoking clears
  *      the slot to 0, so a non-zero value is the authoritative "still
  *      queued" signal — the event log alone would show stale entries.
+ *
+ * Step 1 must cover the vault's ENTIRE history. A queued action never
+ * expires: RockawayX USDC on Pharos has live entries submitted at blocks
+ * 8.67M and 10.75M against a head of 14.16M. The previous
+ * `latest - defaultScan` bound (200k blocks ≈ 2 days at Pharos's ~0.9s
+ * blocks) sat above every one of them, so the tab showed "Empty" while five
+ * actions were queued on-chain.
+ *
+ * A full scan is 576 paginated getLogs pages there (~2 min), far too slow to
+ * block a tab that also mounts on Overview and Caps. So the scan is split:
+ *   - the foreground query scans the recent window (or, once a cursor is
+ *     cached, only the delta since it) and paints immediately;
+ *   - a background query backfills deployment → that window once, persisting
+ *     the recovered calldatas to localStorage.
+ * After the first backfill every later visit is a one-page delta scan.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   decodeAbiParameters,
   decodeFunctionData,
@@ -70,6 +86,10 @@ const LABELS: Record<string, string> = {
   removeAdapter: 'Remove adapter',
   setAdapterRegistry: 'Set adapter registry',
   setIsAllocator: 'Set allocator',
+  setIsSentinel: 'Set sentinel',
+  setCurator: 'Set curator',
+  setName: 'Set name',
+  setSymbol: 'Set symbol',
   setPerformanceFee: 'Set performance fee',
   setPerformanceFeeRecipient: 'Set performance fee recipient',
   setManagementFee: 'Set management fee',
@@ -159,7 +179,160 @@ function formatUnitsCompact(v: bigint, decimals: number): string {
   return (neg ? '-' : '') + out;
 }
 
-async function fetchPendingActions(
+// ---------------------------------------------------------------------------
+// Persisted submit cursor
+//
+// The expensive half of this hook is recovering *which* calldatas were ever
+// submitted; whether each is still queued is one (multicalled) read. So the
+// calldatas and the block range they were recovered from are cached in
+// localStorage, and later loads only scan the delta.
+// ---------------------------------------------------------------------------
+
+const CACHE_VERSION = 1;
+
+interface CachedSubmit {
+  data: `0x${string}`;
+  selector: `0x${string}`;
+  /** Decimal string — JSON can't hold a bigint. */
+  block: string | null;
+}
+
+interface SubmitCache {
+  v: number;
+  /** Vault deployment block; caching it skips ~24 archive `eth_getCode` calls. */
+  deployment: string;
+  /** Oldest block covered by `submits`. */
+  fromBlock: string;
+  /** Newest block covered by `submits`. */
+  toBlock: string;
+  submits: CachedSubmit[];
+}
+
+function submitCacheKey(chainId: number, vault: string): string {
+  return `morpho.v2submits.${chainId}.${vault.toLowerCase()}`;
+}
+
+function readSubmitCache(chainId: number, vault: string): SubmitCache | null {
+  try {
+    const raw = localStorage.getItem(submitCacheKey(chainId, vault));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SubmitCache;
+    // A version bump invalidates rather than migrates — the cache is a
+    // recoverable derivative of chain state, never a source of truth.
+    return parsed?.v === CACHE_VERSION && Array.isArray(parsed.submits) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read-modify-write against whatever is in storage *now*, so the foreground
+ * delta scan and the background backfill can land in either order without
+ * either one narrowing the other's coverage: entries union, `fromBlock`
+ * takes the min, `toBlock` the max.
+ *
+ * `drop` removes calldatas the caller has just verified are no longer queued
+ * (`executableAt == 0` — executed or revoked). That is safe: a later
+ * re-submit of the same bytes emits a fresh `Submit` inside the delta.
+ */
+function updateSubmitCache(
+  chainId: number,
+  vault: string,
+  update: {
+    deployment: bigint;
+    fromBlock: bigint;
+    toBlock: bigint;
+    add: CachedSubmit[];
+    drop?: Set<string>;
+  },
+): void {
+  try {
+    const current = readSubmitCache(chainId, vault);
+    const merged = new Map<`0x${string}`, CachedSubmit>();
+    for (const s of current?.submits ?? []) merged.set(s.data, s);
+    for (const s of update.add) merged.set(s.data, s);
+    for (const d of update.drop ?? []) merged.delete(d as `0x${string}`);
+
+    const prevFrom = current ? BigInt(current.fromBlock) : update.fromBlock;
+    const prevTo = current ? BigInt(current.toBlock) : update.toBlock;
+    const next: SubmitCache = {
+      v: CACHE_VERSION,
+      deployment: update.deployment.toString(),
+      fromBlock: (prevFrom < update.fromBlock ? prevFrom : update.fromBlock).toString(),
+      toBlock: (prevTo > update.toBlock ? prevTo : update.toBlock).toString(),
+      submits: [...merged.values()],
+    };
+    localStorage.setItem(submitCacheKey(chainId, vault), JSON.stringify(next));
+  } catch {
+    // Quota / disabled storage — non-fatal, we just re-scan next time.
+  }
+}
+
+function toCachedSubmits(logs: readonly unknown[]): CachedSubmit[] {
+  const out: CachedSubmit[] = [];
+  for (const log of logs) {
+    const args = (log as { args?: { selector?: `0x${string}`; data?: `0x${string}` } }).args;
+    if (!args?.data || !args.selector) continue;
+    const blockNumber = (log as { blockNumber?: bigint }).blockNumber;
+    out.push({
+      data: args.data,
+      selector: args.selector,
+      block: blockNumber !== undefined ? blockNumber.toString() : null,
+    });
+  }
+  return out;
+}
+
+async function resolveDeployment(
+  client: PublicClient,
+  chainId: number,
+  vaultAddress: Address,
+  latest: bigint,
+  cache: SubmitCache | null,
+): Promise<bigint> {
+  if (cache?.deployment) return BigInt(cache.deployment);
+  return findDeploymentBlock(client, chainId, vaultAddress, latest);
+}
+
+/**
+ * One-shot deep scan of `[deployment … cachedFromBlock)`, run in the
+ * background behind the fast foreground scan. Returns whether it actually
+ * widened the covered range (i.e. whether the foreground query should refetch).
+ */
+export async function backfillSubmitHistory(
+  chainId: number,
+  vaultAddress: Address,
+): Promise<{ extended: boolean }> {
+  const client = getPublicClient(chainId) as PublicClient;
+  const cache = readSubmitCache(chainId, vaultAddress);
+  // The foreground query always writes the cache before this runs (it is
+  // gated on that query's success), so a missing cache means nothing to widen.
+  if (!cache) return { extended: false };
+
+  const latest = await client.getBlockNumber();
+  const deployment = await resolveDeployment(client, chainId, vaultAddress, latest, cache);
+  const coveredFrom = BigInt(cache.fromBlock);
+  if (coveredFrom <= deployment) return { extended: false };
+
+  const logs = await scanContractEvent(
+    client,
+    chainId,
+    vaultAddress,
+    SUBMIT_EVENT,
+    deployment,
+    coveredFrom - 1n,
+  );
+
+  updateSubmitCache(chainId, vaultAddress, {
+    deployment,
+    fromBlock: deployment,
+    toBlock: BigInt(cache.toBlock),
+    add: toCachedSubmits(logs),
+  });
+  return { extended: true };
+}
+
+export async function fetchPendingActions(
   chainId: number,
   vaultAddress: Address,
   assetDecimals: number,
@@ -167,40 +340,46 @@ async function fetchPendingActions(
 ): Promise<PendingActionsResult> {
   const client = getPublicClient(chainId) as PublicClient;
 
-  // A full-history scan is far too expensive here: this vault sits 5.3M
-  // blocks past its deployment, which is ~537 pages at Pharos's 10k window
-  // — per event, on every mount. Bound the scan to the chain's standard
-  // recent-history depth and report the covered window so the limit is
-  // visible in the UI rather than silently truncating the queue.
   const latest = await client.getBlockNumber();
-  const { defaultScan } = getLogWindowConfig(chainId);
-  const deployment = await findDeploymentBlock(client, chainId, vaultAddress, latest);
-  const floor = latest > defaultScan ? latest - defaultScan : 0n;
-  const fromBlock = floor > deployment ? floor : deployment;
+  const cache = readSubmitCache(chainId, vaultAddress);
+  const deployment = await resolveDeployment(client, chainId, vaultAddress, latest, cache);
 
-  const logs = await scanContractEvent(
-    client,
-    chainId,
-    vaultAddress,
-    SUBMIT_EVENT,
-    fromBlock,
-    latest,
-  );
+  // With a cursor, scan only what arrived since it. Without one, take the
+  // chain's standard recent depth so the first paint is fast — the backfill
+  // query walks back to `deployment` right behind us.
+  const { defaultScan } = getLogWindowConfig(chainId);
+  let fromBlock: bigint;
+  let scanFrom: bigint;
+  if (cache) {
+    fromBlock = BigInt(cache.fromBlock);
+    scanFrom = BigInt(cache.toBlock) + 1n;
+  } else {
+    const floor = latest > defaultScan ? latest - defaultScan : 0n;
+    fromBlock = floor > deployment ? floor : deployment;
+    scanFrom = fromBlock;
+  }
+
+  const logs =
+    scanFrom <= latest
+      ? await scanContractEvent(client, chainId, vaultAddress, SUBMIT_EVENT, scanFrom, latest)
+      : [];
 
   // Dedupe by calldata — re-submitting the same action overwrites the slot.
   const byData = new Map<`0x${string}`, { selector: `0x${string}`; blockNumber: bigint | null }>();
-  for (const log of logs) {
-    const args = (log as { args?: { selector?: `0x${string}`; data?: `0x${string}` } }).args;
-    if (!args?.data || !args.selector) continue;
-    byData.set(args.data, {
-      selector: args.selector,
-      blockNumber: (log as { blockNumber?: bigint }).blockNumber ?? null,
-    });
+  for (const s of cache?.submits ?? []) {
+    byData.set(s.data, { selector: s.selector, blockNumber: s.block === null ? null : BigInt(s.block) });
+  }
+  for (const s of toCachedSubmits(logs)) {
+    byData.set(s.data, { selector: s.selector, blockNumber: s.block === null ? null : BigInt(s.block) });
   }
   const window = { fromBlock, toBlock: latest, isFullHistory: fromBlock <= deployment };
-  if (byData.size === 0) return { actions: [], ...window };
+  if (byData.size === 0) {
+    updateSubmitCache(chainId, vaultAddress, { deployment, fromBlock, toBlock: latest, add: [] });
+    return { actions: [], ...window };
+  }
 
   // `executableAt` is the source of truth: executing or revoking zeroes it.
+  // These fan out through the client's multicall batching — one round-trip.
   const entries = [...byData.entries()];
   const liveExecutableAt = await Promise.all(
     entries.map(([data]) =>
@@ -214,6 +393,20 @@ async function fetchPendingActions(
         .catch(() => 0n) as Promise<bigint>,
     ),
   );
+
+  // Settled entries stay out of the cache so it tracks the live queue rather
+  // than growing with every action the vault has ever executed.
+  const settled = new Set<string>();
+  entries.forEach(([data], i) => {
+    if (liveExecutableAt[i] === 0n) settled.add(data);
+  });
+  updateSubmitCache(chainId, vaultAddress, {
+    deployment,
+    fromBlock,
+    toBlock: latest,
+    add: toCachedSubmits(logs),
+    drop: settled,
+  });
 
   const pending: PendingV2Action[] = [];
   await Promise.all(
@@ -268,12 +461,49 @@ export function useV2PendingActions(
   assetSymbol: string,
   enabled = true,
 ) {
-  return useQuery<PendingActionsResult>({
-    queryKey: [...vaultKeys.adapters(chainId ?? 0, vaultAddress!), 'pending-timelock-actions'],
+  const queryClient = useQueryClient();
+  const baseKey = [
+    ...vaultKeys.adapters(chainId ?? 0, vaultAddress ?? '0x'),
+    'pending-timelock-actions',
+  ] as const;
+  const ready = enabled && !!chainId && !!vaultAddress;
+
+  const query = useQuery<PendingActionsResult>({
+    queryKey: baseKey,
     queryFn: () => fetchPendingActions(chainId!, vaultAddress!, assetDecimals, assetSymbol),
-    enabled: enabled && !!chainId && !!vaultAddress,
+    enabled: ready,
     staleTime: 30_000,
     // Advance pending → executable without a manual refresh.
     refetchInterval: 60_000,
   });
+
+  // Deep scan back to the vault's deployment, once, behind the fast paint.
+  // Gated on the foreground query having written its cursor, so the two never
+  // race to establish the initial covered range.
+  const needsBackfill = query.isSuccess && query.data?.isFullHistory === false;
+  const backfill = useQuery({
+    queryKey: [...baseKey, 'backfill'],
+    queryFn: () => backfillSubmitHistory(chainId!, vaultAddress!),
+    enabled: ready && needsBackfill,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 1,
+  });
+
+  const extended = backfill.data?.extended === true;
+  useEffect(() => {
+    // Pull the newly recovered history into the rendered queue immediately
+    // rather than waiting out the 60s refetch interval. `exact` matters:
+    // `baseKey` is a prefix of the backfill's own key, so a prefix
+    // invalidation would bounce the backfill straight back into flight.
+    if (extended) queryClient.invalidateQueries({ queryKey: baseKey, exact: true });
+    // `baseKey` is rebuilt each render; its identity is captured by the deps below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extended, queryClient, chainId, vaultAddress]);
+
+  return {
+    ...query,
+    /** True while the deployment→window backfill is still running. */
+    isBackfilling: backfill.isFetching,
+  };
 }

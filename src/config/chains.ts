@@ -338,7 +338,11 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
       oracleV2Factory: '0xb8118256d8Aa950ec0B26a0b8Be7C6c1a858f6a3' as Address,
     },
     apiSupported: false,
-    blockTime: 2_000,
+    // Measured on-chain (2026-08): ~860ms over the last 100k blocks, ~920ms
+    // over the last 1M. The 2000ms placeholder halved every
+    // seconds→blocks lookback derived from it, which is exactly how a
+    // timelocked action ends up outside a scan window and invisible.
+    blockTime: 900,
     finality: 'probabilistic',
     gasConfig: {
       blockGasLimit: 30_000_000,
