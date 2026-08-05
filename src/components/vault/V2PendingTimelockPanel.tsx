@@ -32,6 +32,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useGuardedWriteContract } from '../../hooks/useGuardedWriteContract';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
 import { useV2PendingActions, type PendingV2Action } from '../../lib/hooks/useV2PendingActions';
+import { useQueuedActionPreflight } from '../../lib/hooks/useQueuedActionPreflight';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
 import { Card, CardHeader, CardTitle } from '../ui/Card';
@@ -88,6 +89,15 @@ export function V2PendingTimelockPanel({
     walletError,
     isConnected,
   } = useGuardedWriteContract();
+
+  const { byData: preflight, isChecking } = useQueuedActionPreflight(
+    chainId,
+    vaultAddress,
+    result?.actions ?? [],
+    connectedAddress,
+    isV2,
+  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   // Which row fired the current write. Without this, `isPending` is shared
   // and one click disables EVERY row — including forever if the wallet
   // request is left hanging (a Safe proposal never auto-resolves).
@@ -100,6 +110,9 @@ export function V2PendingTimelockPanel({
 
   useEffect(() => {
     if (!isSuccess) return;
+    // Executed rows leave the queue; carrying their ticks over would re-select
+    // whatever slid into their place.
+    setSelected(new Set());
     queryClient.invalidateQueries({ queryKey: vaultKeys.detail(chainId, vaultAddress) });
     queryClient.invalidateQueries({ queryKey: vaultKeys.adapters(chainId, vaultAddress) });
   }, [isSuccess, queryClient, chainId, vaultAddress]);
@@ -152,6 +165,46 @@ export function V2PendingTimelockPanel({
 
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
 
+  // ---- batch execute -----------------------------------------------------
+  // `multicall` delegatecalls each payload into the vault, so `msg.data` inside
+  // each inner call is that payload — which is exactly what `executableAt` is
+  // keyed on. The timelock therefore still checks out per action.
+  const BATCH = '0xbatch' as const;
+  const isBatchable = (a: PendingV2Action) =>
+    a.executableAt <= nowSec &&
+    a.functionName !== 'unknown' &&
+    preflight[a.data]?.status !== 'reverts';
+  const batchable = actions.filter(isBatchable);
+  const selectedActions = batchable.filter((a) => selected.has(a.data));
+  const batchBusy = busy && activeData === BATCH;
+
+  const toggle = (data: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(data)) next.delete(data);
+      else next.add(data);
+      return next;
+    });
+
+  const executeBatch = () => {
+    if (selectedActions.length === 0) return;
+    setActiveData(BATCH);
+    // A single selection doesn't need the multicall wrapper — send it direct,
+    // which is cheaper and gives a cleaner revert if it does fail.
+    if (selectedActions.length === 1) {
+      setActiveData(selectedActions[0].data);
+      execute(selectedActions[0]);
+      return;
+    }
+    writeContract({
+      address: vaultAddress,
+      abi: metaMorphoV2Abi,
+      functionName: 'multicall',
+      args: [selectedActions.map((a) => a.data)],
+      chainId,
+    });
+  };
+
   return (
     <Card className="border-warning/30">
       <CardHeader>
@@ -193,25 +246,105 @@ export function V2PendingTimelockPanel({
         </div>
       )}
 
+      {/* Batch bar — only worth showing once more than one action could go in
+          the same transaction. */}
+      {batchable.length > 1 && (
+        <div className="flex flex-wrap items-center gap-3 px-3 py-2 mb-3 bg-bg-hover/50 border border-border-subtle text-xs">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={selectedActions.length === batchable.length}
+              // Indeterminate isn't expressible in JSX props; the ref sets it.
+              ref={(el) => {
+                if (el) el.indeterminate = selectedActions.length > 0 && selectedActions.length < batchable.length;
+              }}
+              onChange={(e) =>
+                setSelected(e.target.checked ? new Set(batchable.map((a) => a.data)) : new Set())
+              }
+              className="accent-accent-primary"
+              aria-label="Select all executable actions"
+            />
+            <span className="text-text-secondary">
+              Select all executable ({batchable.length})
+            </span>
+          </label>
+          <span className="text-text-tertiary text-[10px]">
+            {selectedActions.length === 0
+              ? 'Executes in one transaction.'
+              : `${selectedActions.length} selected — one transaction, one signature.`}
+          </span>
+          <div className="ml-auto">
+            <Button
+              size="sm"
+              disabled={selectedActions.length === 0 || !isConnected || batchBusy}
+              loading={batchBusy}
+              onClick={executeBatch}
+              title={
+                !isConnected
+                  ? 'Connect your wallet to execute.'
+                  : selectedActions.length === 0
+                    ? 'Select at least one action.'
+                    : `Execute ${selectedActions.length} action${selectedActions.length !== 1 ? 's' : ''} in one transaction`
+              }
+            >
+              {selectedActions.length > 1
+                ? `Execute ${selectedActions.length} (1 tx)`
+                : 'Execute selected'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-2">
         {actions.map((a) => {
           const ready = a.executableAt <= nowSec;
           const decodable = a.functionName !== 'unknown';
-          const blocked = executeBlockedReason({ isConnected, decodable, matured: ready });
+          const pre = preflight[a.data];
+          const wouldRevert = pre?.status === 'reverts';
+          const blocked =
+            executeBlockedReason({ isConnected, decodable, matured: ready }) ??
+            (wouldRevert
+              ? `Would revert on-chain: ${pre.reason}. Revoke it instead.`
+              : null);
           const rowBusy = busy && activeData === a.data;
+          const selectable = isBatchable(a);
           return (
             <div
               key={a.data}
               className="flex flex-wrap items-center justify-between gap-3 p-3 bg-bg-hover/30 border border-border-subtle"
             >
+              {batchable.length > 1 && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(a.data)}
+                  disabled={!selectable}
+                  onChange={() => toggle(a.data)}
+                  className="accent-accent-primary shrink-0 disabled:opacity-30"
+                  title={
+                    selectable
+                      ? 'Include in the batch'
+                      : wouldRevert
+                        ? 'Would revert — cannot be batched'
+                        : 'Not executable yet'
+                  }
+                  aria-label={`Include "${a.label}" in the batch`}
+                />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-text-primary font-medium">{a.label}</span>
                   {a.value && <span className="font-mono text-text-secondary">→ {a.value}</span>}
                   {ready ? (
-                    <Badge variant="success">Ready</Badge>
+                    wouldRevert ? (
+                      <Badge variant="danger">Would revert</Badge>
+                    ) : (
+                      <Badge variant="success">Ready</Badge>
+                    )
                   ) : (
                     <Badge variant="warning">Waiting</Badge>
+                  )}
+                  {ready && isChecking && !pre && (
+                    <span className="text-[10px] text-text-tertiary">checking…</span>
                   )}
                 </div>
                 {a.target && (
