@@ -153,7 +153,7 @@ const INCREASE_REL_EVENT = parseAbiItem(
   'event IncreaseRelativeCap(bytes32 indexed id, bytes idData, uint256 newRelativeCap)',
 );
 
-async function fetchVaultCapEntries(
+export async function fetchVaultCapEntries(
   chainId: number,
   vaultAddress: Address,
 ): Promise<VaultCapEntries> {

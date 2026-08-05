@@ -5,11 +5,32 @@
  * 1. Try V2 GraphQL API (blue-api.morpho.org) for indexed vaults → caps field
  * 2. Fallback: query Morpho API for all markets with the vault's loan token,
  *    then check caps on-chain via RPC multicall.
+ * 3. Last resort: decode the vault's own cap events. The only path that needs
+ *    no API at all, and therefore the only one that works on Pharos / XDC.
  */
 import type { Address } from 'viem';
-import { getPublicClient } from './rpcClient';
+import { getPublicClient, fetchTokenInfo } from './rpcClient';
 import { marketRiskId, readCap } from '../v2/capComputation';
+import { fetchVaultCapEntries } from '../../hooks/useV2VaultCapEntries';
+import { getChainConfig } from '../../config/chains';
 import type { MarketParams, MarketState, TokenInfo, AdapterMarketPosition, MarketId } from '../../types';
+
+const morphoMarketStateAbi = [
+  {
+    name: 'market',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'bytes32' }],
+    outputs: [
+      { name: 'totalSupplyAssets', type: 'uint128' },
+      { name: 'totalSupplyShares', type: 'uint128' },
+      { name: 'totalBorrowAssets', type: 'uint128' },
+      { name: 'totalBorrowShares', type: 'uint128' },
+      { name: 'lastUpdate', type: 'uint128' },
+      { name: 'fee', type: 'uint128' },
+    ],
+  },
+] as const;
 
 // ============================================================
 // V2 GraphQL API (blue-api.morpho.org)
@@ -306,8 +327,90 @@ async function discoverCappedMarketsViaRpc(
 // ============================================================
 
 /**
+ * Discover capped markets from the vault's own cap events.
+ *
+ * Both other paths lean on the Morpho API: the V2 endpoint for indexed vaults,
+ * and `discoverCappedMarketsViaRpc` for its *candidate list* — it asks the API
+ * "which markets exist for this loan token" and only then checks caps on-chain.
+ * On a chain the API doesn't index (`apiSupported: false` — Pharos, XDC) that
+ * candidate list is empty, so discovery returns nothing and the Allocation tab
+ * shows only markets that already hold a position.
+ *
+ * That is a trap, not a cosmetic gap: a freshly capped market has no position,
+ * so it never appears, so you cannot allocate to it, so it never gets one.
+ * RockawayX USDC on Pharos hit exactly this — syzUSD
+ * (0x54dF79D8…8934) had its full cap set executed on-chain at blocks
+ * 14,328,123–14,328,202, including the market-level `this/marketParams` entry
+ * for adapter 0xBa3b2605 @ 91.5% LLTV, and the tab still listed only wsrUSD
+ * and WPROS.
+ *
+ * The vault's `IncreaseAbsoluteCap` / `IncreaseRelativeCap` events are the
+ * authoritative, API-independent record of what it is allowed to allocate to,
+ * and `fetchVaultCapEntries` already decodes them for the Caps tab.
+ */
+async function discoverCappedMarketsViaCapEvents(
+  chainId: number,
+  vaultAddress: Address,
+  adapterAddress: Address,
+  loanTokenAddress: Address,
+): Promise<DiscoveredMarket[]> {
+  const entries = await fetchVaultCapEntries(chainId, vaultAddress);
+  const client = getPublicClient(chainId);
+
+  const relevant = entries.marketCaps.filter(
+    (m) =>
+      m.adapter.toLowerCase() === adapterAddress.toLowerCase() &&
+      m.params.loanToken.toLowerCase() === loanTokenAddress.toLowerCase() &&
+      (m.absoluteCap > 0n || m.relativeCap > 0n),
+  );
+  if (relevant.length === 0) return [];
+
+  const loanToken = await fetchTokenInfo(chainId, loanTokenAddress).catch(() => null);
+  const morpho = getChainConfig(chainId)?.morphoBlue;
+
+  return Promise.all(
+    relevant.map(async (m): Promise<DiscoveredMarket> => {
+      let marketState: MarketState | null = null;
+      if (morpho) {
+        try {
+          const r = (await client.readContract({
+            address: morpho,
+            abi: morphoMarketStateAbi,
+            functionName: 'market',
+            args: [m.marketId],
+          })) as readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+          marketState = {
+            totalSupplyAssets: r[0],
+            totalSupplyShares: r[1],
+            totalBorrowAssets: r[2],
+            totalBorrowShares: r[3],
+            lastUpdate: r[4],
+            fee: r[5],
+          };
+        } catch {
+          // Leave null — the row still renders, just without utilization.
+        }
+      }
+      return {
+        marketId: m.marketId,
+        params: m.params,
+        loanToken,
+        collateralToken: m.collateralToken,
+        marketState,
+        apiAbsoluteCap: m.absoluteCap,
+        apiRelativeCap: m.relativeCap,
+        apiAllocation: m.allocation,
+      };
+    }),
+  );
+}
+
+/**
  * Discover all markets with caps set for a V2 vault adapter.
- * Tries V2 API first, falls back to market scan + on-chain cap check.
+ *
+ * Order is cheapest-first: the V2 API knows everything in one request where it
+ * indexes the vault; the loan-token scan is a fallback that still needs the
+ * API; the cap-event scan needs no API at all but pays a log scan.
  */
 export async function discoverAllCappedMarkets(
   chainId: number,
@@ -322,7 +425,26 @@ export async function discoverAllCappedMarkets(
   }
 
   // Fallback: discover via Morpho API + RPC cap checks
-  return discoverCappedMarketsViaRpc(chainId, vaultAddress, adapterAddress, loanTokenAddress);
+  const rpcMarkets = await discoverCappedMarketsViaRpc(
+    chainId,
+    vaultAddress,
+    adapterAddress,
+    loanTokenAddress,
+  );
+  if (rpcMarkets.length > 0) return rpcMarkets;
+
+  // Last resort, and the only path that works on an unindexed chain: read the
+  // vault's own cap events.
+  try {
+    return await discoverCappedMarketsViaCapEvents(
+      chainId,
+      vaultAddress,
+      adapterAddress,
+      loanTokenAddress,
+    );
+  } catch {
+    return [];
+  }
 }
 
 /**
