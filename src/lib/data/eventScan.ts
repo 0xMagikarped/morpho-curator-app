@@ -59,6 +59,42 @@ export async function findDeploymentBlock(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Global ceiling on concurrent `getLogs` requests across EVERY scan in the
+ * app, not per scan.
+ *
+ * Per-scan bounds don't bound anything useful: a vault page runs the cap-event
+ * scan (two events), the timelock `Submit` scan, the allocator scan, and each
+ * of their background backfill steps — all at once, each splitting ranges into
+ * concurrent halves on a range error. Measured on the Pharos vault page, that
+ * came to 728 `getLogs` in the first 60 seconds, peaking at 81 in flight, and
+ * it starved everything else: the `eth_call` reads the tabs actually block on
+ * averaged 1.9s and peaked at 9s, against a browser connection pool the scans
+ * had already filled.
+ *
+ * Scans are background work — they backfill history nobody is staring at — so
+ * they yield. Reads are foreground. Capping the scans at a handful of sockets
+ * leaves the rest of the pool for reads, which is the difference between a tab
+ * that paints in seconds and one that looks hung.
+ */
+const MAX_CONCURRENT_SCAN_REQUESTS = 4;
+
+const scanGate = { active: 0, waiters: [] as Array<() => void> };
+
+async function acquireScanSlot(): Promise<void> {
+  if (scanGate.active < MAX_CONCURRENT_SCAN_REQUESTS) {
+    scanGate.active++;
+    return;
+  }
+  return new Promise((resolve) => scanGate.waiters.push(resolve));
+}
+
+function releaseScanSlot(): void {
+  const next = scanGate.waiters.shift();
+  if (next) next(); // hand the slot off directly (active unchanged)
+  else scanGate.active--;
+}
+
 /** Rate-limit / "too fast" responses we should back off and retry on (e.g.
  *  Pharos's zan.top RPC returns 429 / code -32011 "cu limit exceeded"). */
 function isRateLimit(err: unknown): boolean {
@@ -78,9 +114,10 @@ function isRangeError(err: unknown): boolean {
 
 /**
  * `getLogs` for one window with exponential backoff on rate-limit errors.
- * Total concurrent requests are bounded globally by the per-chain transport
- * throttle in `getPublicClient` (rpcClient.ts), so the backoff here is just a
- * safety net for any 429 that still slips through.
+ *
+ * The slot is held only for the duration of one network call — never across
+ * the recursive range-split in `scanRange` — so a scan that splits can't
+ * deadlock against its own children.
  */
 async function getLogsWithRetry(
   client: PublicClient,
@@ -92,14 +129,21 @@ async function getLogsWithRetry(
 ): Promise<Log[]> {
   let delay = 400;
   for (let attempt = 0; ; attempt++) {
+    let err: unknown;
+    await acquireScanSlot();
     try {
       return await client.getLogs({ address, event, fromBlock, toBlock });
-    } catch (err) {
-      if (attempt >= retries || !isRateLimit(err)) throw err;
-      // jitter so concurrent workers don't retry in lockstep
-      await sleep(delay + Math.floor((attempt * 137) % 250));
-      delay = Math.min(delay * 2, 5000);
+    } catch (e) {
+      err = e;
+    } finally {
+      // Released before the backoff sleep — holding a slot while deliberately
+      // idle would just shrink the ceiling for everyone else.
+      releaseScanSlot();
     }
+    if (attempt >= retries || !isRateLimit(err)) throw err;
+    // jitter so concurrent workers don't retry in lockstep
+    await sleep(delay + Math.floor((attempt * 137) % 250));
+    delay = Math.min(delay * 2, 5000);
   }
 }
 

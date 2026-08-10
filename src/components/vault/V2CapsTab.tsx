@@ -152,6 +152,32 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
         isV2
       />
 
+      {/* The cap tables are built from the vault's `Increase*Cap` events, and
+          that scan walks back to the deployment block one bounded step at a
+          time (a full pass is ~57s on Pharos). Until it lands, an absent row
+          means "not scanned yet", not "no cap set" — and silently implying the
+          latter is how a curator concludes a market they configured is gone. */}
+      {(entries.isBackfilling || entries.data?.isFullHistory === false) && (
+        <div className="flex items-center justify-between gap-3 border border-border-subtle bg-bg-hover/40 px-3 py-2">
+          {entries.isBackfilling ? (
+            <span className="text-[10px] text-text-tertiary">
+              Scanning cap history toward the vault deployment block — more entries may appear.
+            </span>
+          ) : (
+            <span className="text-[10px] text-text-tertiary">
+              Cap history is partial — entries set before block{' '}
+              <span className="font-mono">{entries.data?.fromBlock?.toString()}</span> are not shown
+              yet.
+            </span>
+          )}
+          {entries.backfillError && (
+            <span className="text-[10px] text-warning truncate max-w-[40%]" title={entries.backfillError}>
+              {entries.backfillError}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Summary strip. The two cap timelocks are read per-selector — V2 has
           no vault-level timelock, so they belong here rather than being
           buried behind an Edit drawer. */}

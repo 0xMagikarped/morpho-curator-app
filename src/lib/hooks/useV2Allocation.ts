@@ -3,7 +3,7 @@
  * Discovers ALL markets with caps (not just active positions) via API + RPC fallback.
  */
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 import { getPublicClient, fetchMarketState } from '../data/rpcClient';
 import { useAdapterMarketPositions, type V2AdapterFull } from './useV2Adapters';
@@ -196,6 +196,14 @@ function useMarketCaps(
     enabled: !!chainId && !!vaultAddress && !!adapterAddress && !!positions && positions.length > 0,
     staleTime: 30_000,
     refetchInterval: 60_000,
+    // The key carries `positions.length`, so every market the cap-event scan
+    // discovers re-keys this query. Without a placeholder that lands as a
+    // fresh pending query, `isLoading` flips back to true, and the tab throws
+    // away a painted table for the shimmer — repeatedly, for as long as the
+    // backfill keeps finding markets. Carrying the previous caps over means
+    // the new row appears with the others rather than replacing them all with
+    // a skeleton.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -290,7 +298,17 @@ export function useV2AllocationData(
   // Prefer API caps, fall back to RPC caps
   const capMap = apiCapMap ?? rpcCapMap;
 
-  const isLoading = posLoading || discLoading || (!apiCapMap && capsLoading);
+  // Only the adapter's own positions gate the first paint. Discovery is
+  // additive — it contributes markets that are capped but hold no position —
+  // and on an unindexed chain it is a paginated cap-event log scan that takes
+  // ~1 minute. Blocking on it left the whole tab shimmering for the entire
+  // scan, which read as "loading forever". Rows now appear as each source
+  // lands; `isDiscovering` lets the tab say so rather than imply the list is
+  // already complete.
+  const isLoading = posLoading || (!apiCapMap && capsLoading);
+  const isDiscovering =
+    discLoading || eventEntries.isLoading || eventEntries.isBackfilling || eventDiscovered.isLoading;
+  const isFullCapHistory = eventEntries.data?.isFullHistory ?? false;
 
   // Build allocation data
   const data: V2AllocationData | null = (() => {
@@ -361,5 +379,12 @@ export function useV2AllocationData(
     };
   })();
 
-  return { data, isLoading };
+  return {
+    data,
+    isLoading,
+    /** A discovery source is still running — more market rows may appear. */
+    isDiscovering,
+    /** The cap-event scan has reached the vault's deployment block. */
+    isFullCapHistory,
+  };
 }

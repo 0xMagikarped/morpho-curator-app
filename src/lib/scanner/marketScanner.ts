@@ -5,8 +5,10 @@ import {
   keccak256,
   encodeAbiParameters,
   type Address,
+  type PublicClient,
 } from 'viem';
 import { getPublicClient } from '../data/rpcClient';
+import { scanContractEvent } from '../data/eventScan';
 import { getChainConfig, SEI_KNOWN_VAULTS, BNB_KNOWN_VAULTS } from '../../config/chains';
 import { morphoBlueAbi, metaMorphoV1Abi, erc20Abi } from '../contracts/abis';
 import {
@@ -193,55 +195,56 @@ function getEventClient(chainId: number) {
   return getPublicClient(chainId);
 }
 
-/**
- * Scan a block range for CreateMarket events with adaptive binary-split retry.
- */
-async function scanRangeWithRetry(
-  client: ReturnType<typeof getEventClient>,
-  morphoBlue: Address,
-  chainId: number,
-  start: number,
-  end: number,
-  minBatchSize: number,
-): Promise<DiscoveredMarket[]> {
-  try {
-    const logs = await client.getLogs({
-      address: morphoBlue,
-      event: createMarketEvent,
-      fromBlock: BigInt(start),
-      toBlock: BigInt(end),
-    });
+type CreateMarketLog = {
+  args: {
+    id?: `0x${string}`;
+    marketParams?: {
+      loanToken: Address;
+      collateralToken: Address;
+      oracle: Address;
+      irm: Address;
+      lltv: bigint;
+    };
+  };
+  blockNumber: bigint;
+};
 
-    const markets: DiscoveredMarket[] = [];
-    for (const log of logs) {
-      if (!log.args.id || !log.args.marketParams) continue;
-      markets.push({
-        id: log.args.id,
-        loanToken: log.args.marketParams.loanToken as Address,
-        collateralToken: log.args.marketParams.collateralToken as Address,
-        oracle: log.args.marketParams.oracle as Address,
-        irm: log.args.marketParams.irm as Address,
-        lltv: log.args.marketParams.lltv,
-        discoveredAtBlock: Number(log.blockNumber),
-        chainId,
-      });
-    }
-    return markets;
-  } catch {
-    const rangeSize = end - start;
-    if (rangeSize <= minBatchSize) return [];
-    const mid = start + Math.floor(rangeSize / 2);
-    const [left, right] = await Promise.all([
-      scanRangeWithRetry(client, morphoBlue, chainId, start, mid, minBatchSize),
-      scanRangeWithRetry(client, morphoBlue, chainId, mid + 1, end, minBatchSize),
-    ]);
-    return [...left, ...right];
+function toDiscoveredMarkets(logs: readonly unknown[], chainId: number): DiscoveredMarket[] {
+  const markets: DiscoveredMarket[] = [];
+  for (const raw of logs) {
+    const log = raw as CreateMarketLog;
+    if (!log.args?.id || !log.args.marketParams) continue;
+    markets.push({
+      id: log.args.id,
+      loanToken: log.args.marketParams.loanToken,
+      collateralToken: log.args.marketParams.collateralToken,
+      oracle: log.args.marketParams.oracle,
+      irm: log.args.marketParams.irm,
+      lltv: log.args.marketParams.lltv,
+      discoveredAtBlock: Number(log.blockNumber),
+      chainId,
+    });
   }
+  return markets;
 }
 
 /**
  * Scan CreateMarket events via RPC getLogs.
  * Works on Ethereum/Base but NOT on SEI (2K block limit).
+ *
+ * The window is split up-front into `pageWindow`-sized pages by
+ * `scanContractEvent` rather than optimistically asking for 500k blocks and
+ * halving on failure. Optimistic-then-split is pure waste against an endpoint
+ * whose limit is already known: Alchemy caps `getLogs` at 10k blocks, so every
+ * 500k range failed and split six times before landing — 63 requests that
+ * could not possibly succeed for every 64 that could.
+ *
+ * Measured on the Pharos vault page, this scan alone was 509 of the 674
+ * `getLogs` issued in the first minute, none of them bounded by anything. It
+ * filled the browser's connection pool and starved the `eth_call` reads the
+ * tabs block on (p90 6.7s), which is what made the Allocation tab look hung.
+ * Going through `scanContractEvent` also puts it behind the shared scan gate,
+ * so background history work can no longer crowd out foreground reads.
  */
 export async function scanCreateMarketEvents(
   chainId: number,
@@ -252,17 +255,23 @@ export async function scanCreateMarketEvents(
   const chainConfig = getChainConfig(chainId);
   if (!chainConfig) throw new Error(`Unsupported chain: ${chainId}`);
 
-  const client = getEventClient(chainId);
+  const client = getEventClient(chainId) as PublicClient;
+  // Outer batching is only for progress granularity now — the pages inside it
+  // are sized by the chain's log-window config.
   const batchSize = 500_000;
-  const minBatchSize = chainConfig.scanner.batchSize;
   const markets: DiscoveredMarket[] = [];
 
   for (let start = fromBlock; start <= toBlock; start += batchSize) {
     const end = Math.min(start + batchSize - 1, toBlock);
-    const batch = await scanRangeWithRetry(
-      client, chainConfig.morphoBlue, chainId, start, end, minBatchSize,
-    );
-    markets.push(...batch);
+    const logs = await scanContractEvent(
+      client,
+      chainId,
+      chainConfig.morphoBlue,
+      createMarketEvent,
+      BigInt(start),
+      BigInt(end),
+    ).catch(() => [] as unknown[]);
+    markets.push(...toDiscoveredMarkets(logs, chainId));
 
     onProgress?.({
       fromBlock, toBlock, currentBlock: end,
