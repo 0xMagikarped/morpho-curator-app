@@ -7,6 +7,7 @@ const chainColors: Record<number, { dot: string; bg: string; text: string; label
   8453: { dot: 'bg-chain-base', bg: 'bg-chain-base/10', text: 'text-chain-base', label: 'BASE' },
   56: { dot: 'bg-chain-bnb', bg: 'bg-chain-bnb/10', text: 'text-chain-bnb', label: 'BNB' },
   1672: { dot: 'bg-chain-pharos', bg: 'bg-chain-pharos/10', text: 'text-chain-pharos', label: 'PHAROS' },
+  4114: { dot: 'bg-chain-citrea', bg: 'bg-chain-citrea/10', text: 'text-chain-citrea', label: 'CITREA' },
   50: { dot: 'bg-chain-xdc', bg: 'bg-chain-xdc/10', text: 'text-chain-xdc', label: 'XDC' },
   43114: { dot: 'bg-chain-avalanche', bg: 'bg-chain-avalanche/10', text: 'text-chain-avalanche', label: 'AVAX' },
 };

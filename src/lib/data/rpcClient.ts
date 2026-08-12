@@ -51,12 +51,35 @@ const pharos = defineChain({
   testnet: false,
 });
 
+/**
+ * Citrea (Bitcoin ZK rollup, chainId 4114).
+ *
+ * NO `multicall3` entry, unlike every other chain here — and that is
+ * deliberate, not an omission. The canonical 0xcA11bde0… address holds no code
+ * on Citrea. Eight third-party contracts named "Multicall3" do exist, and all
+ * of them answer `aggregate3` correctly, but none is byte-identical to the
+ * canonical deployment (verified by comparing keccak of the runtime bytecode
+ * against Ethereum's; Multicall3 has no immutables, so a genuine canonical
+ * deployment would match exactly). Pointing every read in a curator tool at an
+ * unverifiable aggregator means trusting it not to fabricate allocation and
+ * cap data. Without the entry, viem falls back to individual `eth_call`s —
+ * verified working — which costs requests but cannot lie to us.
+ */
+const citrea = defineChain({
+  id: 4114,
+  name: 'Citrea',
+  nativeCurrency: { name: 'Citrea Bitcoin', symbol: 'cBTC', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.mainnet.citrea.xyz'] } },
+  testnet: false,
+});
+
 const VIEM_CHAINS: Record<number, Chain> = {
   1: mainnet,
   8453: base,
   1329: sei,
   56: bsc,
   1672: pharos,
+  4114: citrea,
   43114: avalanche,
 };
 
@@ -73,6 +96,7 @@ const ENV_RPC_URLS: Record<number, string | undefined> = {
   1329: env.seiRpcUrl || undefined,
   56: env.bnbRpcUrl || undefined,
   1672: env.pharosRpcUrl || undefined,
+  4114: env.citreaRpcUrl || undefined,
   43114: env.avalancheRpcUrl || undefined,
 };
 

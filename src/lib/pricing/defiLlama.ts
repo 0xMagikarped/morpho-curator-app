@@ -3,6 +3,9 @@ const CHAIN_NAME_MAP: Record<number, string> = {
   56: 'bsc',
   1329: 'sei',
   1672: 'pharos',
+  // Verified against coins.llama.fi: ctUSD and WCBTC both resolve under the
+  // `citrea` prefix with 0.99 confidence.
+  4114: 'citrea',
   8453: 'base',
   43114: 'avax',
 };
