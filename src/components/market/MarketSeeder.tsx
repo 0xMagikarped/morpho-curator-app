@@ -20,7 +20,7 @@ import { getPublicClient } from '../../lib/data/rpcClient';
 import { erc20Abi } from '../../lib/contracts/abis';
 import { oracleIntrospectionAbi } from '../../lib/contracts/abis';
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
-import { sei, pharos } from '../../config/wagmi';
+import { sei, pharos, citrea } from '../../config/wagmi';
 import { computeSeedAmounts, buildSeedSteps, type MarketParamsTuple } from '../../lib/market/seedCalculation';
 import type { TransactionStep } from '../../lib/vault/createVault';
 import type { MarketFormData } from './MarketForm';
@@ -47,6 +47,7 @@ const VIEM_CHAINS: Record<number, Chain> = {
   1329: sei,
   56: bsc,
   1672: pharos,
+  4114: citrea,
   50: xdc,
   43114: avalanche,
 };

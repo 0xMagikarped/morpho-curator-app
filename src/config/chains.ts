@@ -376,6 +376,81 @@ export const CHAIN_CONFIGS: Record<number, ChainConfig> = {
   },
 
   // ============================================================
+  // Citrea (Chain ID 4114) — Bitcoin ZK rollup, Morpho Blue + Vault V2
+  //
+  // Every address below verified on-chain via the Alchemy `citrea-mainnet`
+  // endpoint (2026-08): Morpho Blue has 15.5KB of code and a non-zero
+  // `owner()`; the IRM's `MORPHO()` returns the Blue address; the oracle
+  // factory answers `isMorphoChainlinkOracleV2`; the V2 factory answers
+  // `isVaultV2`; the adapter factory's `morpho()` returns the Blue address;
+  // the registry answers `isInRegistry`.
+  //
+  // Like SEI, this is NOT a standard CREATE2 deployment — the canonical
+  // 0xBBBB… Morpho Blue address is empty here.
+  // ============================================================
+  4114: {
+    chainId: 4114,
+    name: 'Citrea',
+    protocol: 'morpho',
+    // `VaultFlavor` is the protocol axis (Morpho vs Moolah), not the V1/V2
+    // axis — version is detected per-vault via the factories. Same value as
+    // Pharos, which is likewise a V2-only deployment.
+    defaultVaultFlavor: 'metaMorphoV1',
+    rpcUrls: ['https://rpc.mainnet.citrea.xyz'],
+    blockExplorer: 'https://explorer.mainnet.citrea.xyz',
+    morphoBlue: '0x99D31FEcc885204b4136ea5D2ef2a37F36E3AeB8' as Address,
+    deployed: true,
+    vaultFactories: {
+      v2: '0x3137e22F379A1Df004DDb10EBbecF1CfD8CbC0e2' as Address,
+    },
+    periphery: {
+      adaptiveCurveIrm: '0x723E35C4CBb5B91669b62F130f2aC12931DF8049' as Address,
+      oracleV2Factory: '0xFd32e705E2bc6e716e2522Df0391BF26DfbADBAB' as Address,
+      v2AdapterRegistry: '0x83dd673Fa2C4DE16cAAF0e6109845EeEbb6d1E00' as Address,
+      morphoMarketV1AdapterV2Factory: '0x01Ff31888b1FB51f951273C409f653Dba5Ce8200' as Address,
+    },
+    // Not among the 14 chains blue-api.morpho.org indexes, and not in
+    // blue-sdk's ChainId enum either — RPC-only, like Pharos and XDC.
+    apiSupported: false,
+    // Measured over the last 65k blocks (2026-08), and corroborated by the
+    // explorer's own `average_block_time` of 2000ms.
+    blockTime: 2_000,
+    finality: 'probabilistic',
+    gasConfig: {
+      blockGasLimit: 30_000_000,
+      sstoreCost: 20_000,
+    },
+    nativeToken: {
+      symbol: 'cBTC',
+      decimals: 18,
+      wrapped: '0x3100000000000000000000000000000000000006' as Address,
+    },
+    // ctUSD — symbol/decimals read on-chain. 6 decimals, not 18.
+    stablecoins: [
+      {
+        address: '0x8d82c4e3c936c7b5724a382a9c5a4e6eb7ab6d5d' as Address,
+        name: 'Citrea USD',
+        symbol: 'ctUSD',
+        decimals: 6,
+      },
+    ],
+    oracleProviders: ['chainlink-push'],
+    // Morpho Blue's first block with code, binary-searched on an archive
+    // node. Bounds every history scan — leaving this at 0 would make the
+    // market scanner walk 2.5M pre-deployment blocks.
+    deploymentBlock: 2_528_230,
+    verified: true,
+    scanner: {
+      // The public RPC (rpc.mainnet.citrea.xyz) hard-caps eth_getLogs at 1000
+      // blocks; the Alchemy proxy allows 10k. This is the adaptive-split floor
+      // in marketScanner, kept under the stricter of the two so a fallback to
+      // the public endpoint still lands.
+      batchSize: 900,
+      pollIntervalMs: 5_000,
+    },
+  },
+
+  // ============================================================
   // Avalanche C-Chain (Chain ID 43114) — Morpho Blue + Vault V2
   // Addresses from Morpho docs; USDC/WAVAX verified on-chain (June 2026).
   // Morpho GraphQL API does NOT index Avalanche ("unsupported chainId") →

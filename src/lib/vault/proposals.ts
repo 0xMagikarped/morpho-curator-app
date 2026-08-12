@@ -132,6 +132,11 @@ const LOG_WINDOW_CONFIG: Record<number, LogWindowConfig> = {
   // proxy ever falls back to the public rpc.pharos.xyz, which caps at 1000,
   // getLogs over a 10k range will error — acceptable given Alchemy is primary.)
   1672: { pageWindow: 10_000n, defaultScan: 200_000n, maxScan: 4_000_000n },
+  // Citrea is proxy-only to Alchemy, which allows a 10k getLogs range (the
+  // public RPC caps at 1000 — see PROXY_ONLY_CHAINS). At ~2s blocks, 200k
+  // blocks is ~4.6 days of first-paint history; the stepped backfill walks the
+  // rest back to the deployment block (2,528,230, ~8.7M below head).
+  4114: { pageWindow: 10_000n, defaultScan: 200_000n, maxScan: 9_000_000n },
 };
 const FALLBACK_CONFIG: LogWindowConfig = {
   pageWindow: 50_000n,

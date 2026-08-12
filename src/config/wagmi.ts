@@ -87,6 +87,29 @@ export const pharos: Chain = {
   testnet: false,
 };
 
+/**
+ * Citrea chain definition (Bitcoin ZK rollup, chainId 4114).
+ * Not in wagmi/chains — defined manually.
+ *
+ * No `multicall3`: the canonical address is empty on Citrea and no deployed
+ * lookalike matches the canonical bytecode. See the note on `citrea` in
+ * lib/data/rpcClient.ts.
+ */
+export const citrea: Chain = {
+  id: 4114,
+  name: 'Citrea',
+  nativeCurrency: { name: 'Citrea Bitcoin', symbol: 'cBTC', decimals: 18 },
+  rpcUrls: {
+    default: {
+      http: ['https://rpc.mainnet.citrea.xyz'],
+    },
+  },
+  blockExplorers: {
+    default: { name: 'Citrea Explorer', url: 'https://explorer.mainnet.citrea.xyz' },
+  },
+  testnet: false,
+};
+
 // Build transport lists — env-configured RPCs (e.g. Infura) get priority.
 //
 // 3s was too aggressive: SEI reads on a healthy public endpoint can spike
@@ -129,6 +152,10 @@ const pharosTransports = [
   ...(env.pharosRpcUrl ? [http(env.pharosRpcUrl)] : []),
   http('https://rpc.pharos.xyz'),
 ];
+const citreaTransports = [
+  ...(env.citreaRpcUrl ? [http(env.citreaRpcUrl)] : []),
+  http('https://rpc.mainnet.citrea.xyz'),
+];
 const xdcTransports = [
   ...(env.xdcRpcUrl ? [http(env.xdcRpcUrl)] : []),
   http('https://rpc.xinfin.network'),
@@ -144,7 +171,7 @@ const avalancheTransports = [
 export const config = getDefaultConfig({
   appName: 'Morpho Curator Dashboard',
   projectId: env.walletConnectProjectId,
-  chains: [sei, mainnet, base, bsc, pharos, xdc, avalanche],
+  chains: [sei, mainnet, base, bsc, pharos, citrea, xdc, avalanche],
   transports: {
     // Proxied chains: Alchemy proxy primary (ordered), publics as failover.
     // Non-proxied (XDC): `rank: true` health-ranks the public endpoints.
@@ -153,6 +180,7 @@ export const config = getDefaultConfig({
     [base.id]: chainTransport(base.id, baseTransports, 'https://mainnet.base.org'),
     [bsc.id]: chainTransport(bsc.id, bnbTransports, 'https://bsc.publicnode.com'),
     [pharos.id]: chainTransport(pharos.id, pharosTransports, 'https://rpc.pharos.xyz'),
+    [citrea.id]: chainTransport(citrea.id, citreaTransports, 'https://rpc.mainnet.citrea.xyz'),
     [xdc.id]: fallback(xdcTransports, { rank: true }),
     [avalanche.id]: chainTransport(avalanche.id, avalancheTransports, 'https://api.avax.network/ext/bc/C/rpc'),
   },

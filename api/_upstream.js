@@ -9,6 +9,7 @@ export const ALCHEMY_SLUGS = {
   56: 'bnb-mainnet',
   1329: 'sei-mainnet',
   1672: 'pharos-mainnet',
+  4114: 'citrea-mainnet',
   43114: 'avax-mainnet',
 };
 
