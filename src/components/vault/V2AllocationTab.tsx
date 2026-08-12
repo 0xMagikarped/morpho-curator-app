@@ -42,7 +42,12 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
   // Find the market-v1 adapter (the one with per-market positions)
   const marketAdapter = overview?.adapters.find((a) => a.type === 'market-v1') ?? null;
 
-  const { data: allocationData, isLoading: allocLoading } = useV2AllocationData(
+  const {
+    data: allocationData,
+    isLoading: allocLoading,
+    isDiscovering,
+    isFullCapHistory,
+  } = useV2AllocationData(
     chainId,
     vaultAddress,
     totalAssets,
@@ -93,12 +98,27 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
   }
   const marketRowCount = allocationData.rows.filter((r) => r.type === 'market').length;
   if (marketRowCount === 0) {
+    // "None configured" is only true once discovery has finished. While the
+    // cap-event scan is still walking back it means "none found yet", and
+    // saying otherwise tells the curator a market they just capped doesn't
+    // exist.
     return (
       <Card className="py-8 text-center">
-        <p className="text-text-tertiary text-sm">No markets configured for this adapter.</p>
-        <p className="text-text-tertiary text-[10px] mt-1">
-          Use <span className="font-mono">Add Market</span> in the Adapters tab to register a market with caps.
-        </p>
+        {isDiscovering ? (
+          <>
+            <p className="text-text-tertiary text-sm">Scanning cap history…</p>
+            <p className="text-text-tertiary text-[10px] mt-1">
+              Reading the vault's cap events back to its deployment block.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-text-tertiary text-sm">No markets configured for this adapter.</p>
+            <p className="text-text-tertiary text-[10px] mt-1">
+              Use <span className="font-mono">Add Market</span> in the Adapters tab to register a market with caps.
+            </p>
+          </>
+        )}
       </Card>
     );
   }
@@ -167,6 +187,19 @@ export function V2AllocationTab({ chainId, vaultAddress }: V2AllocationTabProps)
         data={allocationData}
         showMarketId={showMarketId}
       />
+
+      {/* The table paints from the adapter's positions; capped-but-unallocated
+          markets arrive from the cap-event scan, which walks back to the
+          vault's deployment block a step at a time. Say so, so a market that
+          hasn't appeared yet reads as "not found yet" rather than "not
+          configured". */}
+      {(isDiscovering || !isFullCapHistory) && (
+        <p className="text-[10px] text-text-tertiary">
+          {isDiscovering
+            ? 'Scanning cap history — more configured markets may still appear.'
+            : 'Cap history is partial. Reload to continue scanning toward the deployment block.'}
+        </p>
+      )}
 
       {/* Reallocate Dialog */}
       {showReallocate && allocationData && (
