@@ -24,6 +24,10 @@ import { PublicAllocatorPanel } from './PublicAllocatorPanel';
 import { getMarketRateType } from '../../lib/utils/irm';
 import { getChainConfig } from '../../config/chains';
 import { useVaultFlavor } from '../../lib/vault/flavor';
+import {
+  canTargetUtilization,
+  targetAssetsForUtilization,
+} from '../../lib/vault/utilizationTarget';
 import { useIsVaultBlacklisted, useMoolahSingletonState } from '../../lib/hooks/useMoolahSingleton';
 import { isStablecoin } from '../../config/tokens';
 import { AlertTriangle } from 'lucide-react';
@@ -450,6 +454,24 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     });
   }, []);
 
+  // "90% UR" — parity with the V2 Allocation tab's reallocate dialog, sharing
+  // its arithmetic via lib/vault/utilizationTarget so the two can't drift.
+  //
+  // The cap is passed as the target's upper bound using this tab's existing
+  // convention (mirrored from the MAX action): a supply cap of 0 does not mean
+  // "unbounded", it means the market rejects new supply, so the bound becomes
+  // the current allocation — withdrawals stay allowed, top-ups don't.
+  const handleSet90UR = useCallback((edit: AllocationEdit) => {
+    const target = targetAssetsForUtilization({
+      allocation: edit.currentAssets,
+      totalSupplyAssets: edit.totalSupplyAssets,
+      totalBorrowAssets: edit.totalBorrowAssets,
+      maxTarget: edit.cap > 0n ? edit.cap : edit.currentAssets,
+    });
+    if (target === null) return;
+    setEdits((prev) => new Map(prev).set(edit.marketId, target));
+  }, []);
+
   const handleReset = useCallback(() => {
     setEdits(new Map());
     resetTx();
@@ -617,7 +639,7 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                     <th className="text-right py-2">APY</th>
                     <th className="text-right py-2">Supply Cap</th>
                     <th className="text-center py-2 w-8">Catcher</th>
-                    <th className="text-right py-2 w-20"></th>
+                    <th className="text-right py-2 w-28"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -792,6 +814,19 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                               >
                                 <RotateCcw size={10} />
                               </button>
+                              {canTargetUtilization({
+                                allocation: edit.currentAssets,
+                                totalSupplyAssets: edit.totalSupplyAssets,
+                                totalBorrowAssets: edit.totalBorrowAssets,
+                              }) && (
+                                <button
+                                  onClick={() => handleSet90UR(edit)}
+                                  className="text-[9px] text-text-tertiary hover:text-accent-primary px-1 py-0.5"
+                                  title="Set target so this market reaches ~90% utilization"
+                                >
+                                  90%
+                                </button>
+                              )}
                               {edit.cap > 0n && (
                                 <button
                                   onClick={() => handleQuickAction(edit.marketId, 'max', edit.currentAssets, edit.cap)}
