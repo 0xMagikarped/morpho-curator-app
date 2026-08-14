@@ -15,6 +15,11 @@ import { useV2AllocationData, type AllocationRow, type V2AllocationData } from '
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount, parseTokenAmount, truncateAddress } from '../../lib/utils/format';
 import { isUnlimited } from '../../lib/v2/capComputation';
+import {
+  canTargetUtilization,
+  targetAssetsForUtilization,
+  type UtilizationTargetInput,
+} from '../../lib/vault/utilizationTarget';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
 import { SetLiquidityDrawer } from './adapters/SetLiquidityDrawer';
@@ -704,23 +709,19 @@ function ReallocateDialog({
     setTargets((t) => ({ ...t, [marketId]: formatUnits(raw, dec) }));
   };
 
-  // Set a market's target so the market reaches ~90% utilization. The vault is
-  // treated as the marginal supplier: target total supply = borrow / 0.9, and
-  // the vault absorbs the delta. Clamped to [0, cap] and to what liquidity
-  // allows on a withdrawal. Pre-fills the input — the curator still confirms.
-  const canSet90 = (row: AllocationRow) =>
-    (row.totalBorrowAssets ?? 0n) > 0n && (row.totalSupplyAssets ?? 0n) > 0n;
+  // Set a market's target so it reaches ~90% utilization. Shared with the V1
+  // Reallocate tab — see lib/vault/utilizationTarget.ts for the arithmetic and
+  // the clamps. Pre-fills the input; the curator still confirms.
+  const urInput = (row: AllocationRow): UtilizationTargetInput => ({
+    allocation: row.allocation,
+    totalSupplyAssets: row.totalSupplyAssets ?? 0n,
+    totalBorrowAssets: row.totalBorrowAssets ?? 0n,
+    maxTarget: row.effectiveAbsCap ?? null,
+  });
+  const canSet90 = (row: AllocationRow) => canTargetUtilization(urInput(row));
   const setTo90UR = (row: AllocationRow) => {
-    const supply = row.totalSupplyAssets ?? 0n;
-    const borrow = row.totalBorrowAssets ?? 0n;
-    if (borrow <= 0n || supply <= 0n) return;
-    const targetTotalSupply = (borrow * 100n) / 90n; // borrow / 0.9
-    let target = row.allocation + (targetTotalSupply - supply);
-    // can't withdraw more than the market's available liquidity
-    const minTarget = row.allocation > (row.liquidity ?? 0n) ? row.allocation - (row.liquidity ?? 0n) : 0n;
-    if (target < minTarget) target = minTarget;
-    if (target < 0n) target = 0n;
-    if (row.effectiveAbsCap != null && target > row.effectiveAbsCap) target = row.effectiveAbsCap;
+    const target = targetAssetsForUtilization(urInput(row));
+    if (target === null) return;
     setTarget(row.marketId!, target);
   };
 
