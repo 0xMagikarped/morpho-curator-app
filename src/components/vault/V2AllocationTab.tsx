@@ -7,6 +7,7 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { SectionHeader } from '../ui/SectionHeader';
+import { RateDelta } from '../ui/RateDelta';
 import { AddressDisplay } from '../ui/AddressDisplay';
 import { useVaultInfo, useVaultRole } from '../../lib/hooks/useVault';
 import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
@@ -15,6 +16,11 @@ import { useV2AllocationData, type AllocationRow, type V2AllocationData } from '
 import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { formatTokenAmount, parseTokenAmount, truncateAddress } from '../../lib/utils/format';
 import { isUnlimited } from '../../lib/v2/capComputation';
+import {
+  canTargetUtilization,
+  targetAssetsForUtilization,
+  type UtilizationTargetInput,
+} from '../../lib/vault/utilizationTarget';
 import { metaMorphoV2Abi } from '../../lib/contracts/metaMorphoV2Abi';
 import { vaultKeys } from '../../lib/queryKeys';
 import { SetLiquidityDrawer } from './adapters/SetLiquidityDrawer';
@@ -462,46 +468,6 @@ function AllocationRowComponent({
 // Reallocate Dialog
 // ============================================================
 
-/**
- * `1.37% → 1.36%` with the arrow coloured by direction. `unit` is appended to
- * both sides so the pair reads as one quantity rather than two numbers.
- */
-function RateDelta({
-  from,
-  to,
-  digits = 2,
-  higherIsBetter = true,
-}: {
-  from: number;
-  to: number | null;
-  digits?: number;
-  higherIsBetter?: boolean;
-}) {
-  const fmt = (v: number) => `${v.toFixed(digits)}%`;
-  if (to === null) {
-    return (
-      <span className="font-mono text-text-tertiary">
-        {fmt(from)} <span aria-hidden>→</span> —
-      </span>
-    );
-  }
-  // Below the display precision the arrow would point at a change the user
-  // can't see. Treat that as unchanged rather than colouring noise.
-  const epsilon = Math.pow(10, -digits) / 2;
-  const diff = to - from;
-  const tone =
-    Math.abs(diff) < epsilon
-      ? 'text-text-tertiary'
-      : diff > 0 === higherIsBetter
-        ? 'text-accent-primary'
-        : 'text-warning';
-  return (
-    <span className="font-mono text-text-tertiary">
-      {fmt(from)} <span aria-hidden>→</span> <span className={tone}>{fmt(to)}</span>
-    </span>
-  );
-}
-
 function ReallocateDialog({
   data,
   vaultAddress,
@@ -704,23 +670,19 @@ function ReallocateDialog({
     setTargets((t) => ({ ...t, [marketId]: formatUnits(raw, dec) }));
   };
 
-  // Set a market's target so the market reaches ~90% utilization. The vault is
-  // treated as the marginal supplier: target total supply = borrow / 0.9, and
-  // the vault absorbs the delta. Clamped to [0, cap] and to what liquidity
-  // allows on a withdrawal. Pre-fills the input — the curator still confirms.
-  const canSet90 = (row: AllocationRow) =>
-    (row.totalBorrowAssets ?? 0n) > 0n && (row.totalSupplyAssets ?? 0n) > 0n;
+  // Set a market's target so it reaches ~90% utilization. Shared with the V1
+  // Reallocate tab — see lib/vault/utilizationTarget.ts for the arithmetic and
+  // the clamps. Pre-fills the input; the curator still confirms.
+  const urInput = (row: AllocationRow): UtilizationTargetInput => ({
+    allocation: row.allocation,
+    totalSupplyAssets: row.totalSupplyAssets ?? 0n,
+    totalBorrowAssets: row.totalBorrowAssets ?? 0n,
+    maxTarget: row.effectiveAbsCap ?? null,
+  });
+  const canSet90 = (row: AllocationRow) => canTargetUtilization(urInput(row));
   const setTo90UR = (row: AllocationRow) => {
-    const supply = row.totalSupplyAssets ?? 0n;
-    const borrow = row.totalBorrowAssets ?? 0n;
-    if (borrow <= 0n || supply <= 0n) return;
-    const targetTotalSupply = (borrow * 100n) / 90n; // borrow / 0.9
-    let target = row.allocation + (targetTotalSupply - supply);
-    // can't withdraw more than the market's available liquidity
-    const minTarget = row.allocation > (row.liquidity ?? 0n) ? row.allocation - (row.liquidity ?? 0n) : 0n;
-    if (target < minTarget) target = minTarget;
-    if (target < 0n) target = 0n;
-    if (row.effectiveAbsCap != null && target > row.effectiveAbsCap) target = row.effectiveAbsCap;
+    const target = targetAssetsForUtilization(urInput(row));
+    if (target === null) return;
     setTarget(row.marketId!, target);
   };
 

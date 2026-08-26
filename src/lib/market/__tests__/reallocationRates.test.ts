@@ -18,6 +18,7 @@ import {
   supplyApyPercent,
   blendedApyPercent,
   projectReallocationRates,
+  fetchMarketApyPercents,
 } from '../reallocationRates';
 import type { MarketParams } from '../../../types';
 
@@ -156,5 +157,68 @@ describe('projectReallocationRates', () => {
       { marketId: MARKET_ID, params: PARAMS, delta: 1n, targetAssets: 0n },
     ]);
     expect(out).toEqual([]);
+  });
+});
+
+/**
+ * `fetchMarketApyPercents` — the reader that unblanked APY on RPC-only chains.
+ *
+ * `fetchVaultDataViaRpc` used to hardcode `supplyAPY: 0`, so every APY on SEI,
+ * Pharos, XDC, Citrea, Avalanche and BSC rendered a confident "0.00%". These
+ * pin the two properties that made that bug so quiet: an unknown rate must come
+ * back as null (never 0), and the value must be a PERCENT, since the caller
+ * divides by 100 to store the fraction `MarketInfo` expects.
+ */
+describe('fetchMarketApyPercents', () => {
+  const state = {
+    totalSupplyAssets: SUPPLY,
+    totalSupplyShares: 0n,
+    totalBorrowAssets: BORROW,
+    totalBorrowShares: 0n,
+    lastUpdate: 0n,
+    fee: 0n,
+  };
+
+  it('returns percents matching the projection for the same market', async () => {
+    const client = fakeClient();
+    const apys = await fetchMarketApyPercents(client, PARAMS, state);
+    expect(apys).not.toBeNull();
+    // Same fixture as the projection tests: 479_449_337 wad/s ≈ 1.5245% APY.
+    expect(apys!.borrowApyPct).toBeCloseTo(apyPercentFromRatePerSecond(RATE_NOW), 9);
+    expect(apys!.utilizationPct).toBeCloseTo(utilizationPercent(BORROW, SUPPLY), 9);
+    expect(apys!.supplyApyPct).toBeCloseTo(
+      supplyApyPercent(apys!.borrowApyPct, apys!.utilizationPct, 0n),
+      9,
+    );
+    // PERCENT, not a fraction — a value near 1.5, not near 0.015.
+    expect(apys!.borrowApyPct).toBeGreaterThan(1);
+    expect(apys!.borrowApyPct).toBeLessThan(2);
+  });
+
+  it('returns null for the idle market rather than 0%', async () => {
+    // The idle "market" has a zero-address IRM. Reporting 0.00% for it is what
+    // made the whole column look like a real set of rates.
+    const idleParams = {
+      ...PARAMS,
+      irm: '0x0000000000000000000000000000000000000000',
+    } as unknown as MarketParams;
+    expect(await fetchMarketApyPercents(fakeClient(), idleParams, state)).toBeNull();
+  });
+
+  it('returns null when the IRM reverts rather than 0%', async () => {
+    const throwing = {
+      readContract: vi.fn(async () => {
+        throw new Error('execution reverted');
+      }),
+    } as unknown as PublicClient;
+    expect(await fetchMarketApyPercents(throwing, PARAMS, state)).toBeNull();
+  });
+
+  it('applies the market fee to the supply side', async () => {
+    const withFee = await fetchMarketApyPercents(fakeClient(), PARAMS, { ...state, fee: 10n ** 17n }); // 10%
+    const noFee = await fetchMarketApyPercents(fakeClient(), PARAMS, state);
+    expect(withFee!.supplyApyPct).toBeCloseTo(noFee!.supplyApyPct * 0.9, 9);
+    // The borrow side is untouched by the vault fee.
+    expect(withFee!.borrowApyPct).toBeCloseTo(noFee!.borrowApyPct, 9);
   });
 });
