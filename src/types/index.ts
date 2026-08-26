@@ -255,8 +255,13 @@ export interface MarketInfo {
   state: MarketState;
   loanToken: TokenInfo;
   collateralToken: TokenInfo;
-  supplyAPY: number;
-  borrowAPY: number;
+  /**
+   * Decimal FRACTION, not percent (0.0345 = 3.45%) — `formatApyDisplay`
+   * multiplies by 100. `null` means "not known", which is distinct from a
+   * genuine 0%: an IRM that is absent or reverts must not render as 0.00%.
+   */
+  supplyAPY: number | null;
+  borrowAPY: number | null;
   utilization: number;
   rewards: MarketReward[];
 }

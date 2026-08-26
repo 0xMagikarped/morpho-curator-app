@@ -303,7 +303,7 @@ function MarketRow({
         <div className="text-right">
           <p className="text-[10px] text-text-tertiary">Supply APY</p>
           <p className="text-xs font-mono text-accent-primary">
-            {(market.supplyAPY * 100).toFixed(2)}%
+            {market.supplyAPY == null ? '\u2014' : `${(market.supplyAPY * 100).toFixed(2)}%`}
           </p>
         </div>
         <div className="text-right">

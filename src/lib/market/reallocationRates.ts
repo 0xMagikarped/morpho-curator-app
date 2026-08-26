@@ -213,6 +213,40 @@ function borrowRate(
 }
 
 /**
+ * Live supply/borrow APY for a single market, read from its own IRM.
+ *
+ * Exported because the RPC vault path needs the same numbers the reallocate
+ * projection shows. Before this, `fetchVaultDataViaRpc` hardcoded
+ * `supplyAPY: 0`, so every APY on a non-API chain (SEI, Pharos, XDC, Citrea,
+ * Avalanche, BSC) rendered as a confident "0.00%" — not missing, wrong.
+ *
+ * Returns PERCENT values, consistent with the rest of this module. Callers
+ * storing into `MarketInfo.supplyAPY`/`borrowAPY` must divide by 100, because
+ * that type carries fractions (`formatApyDisplay` multiplies by 100).
+ *
+ * A market with no IRM (the idle market's zero address) or an IRM that reverts
+ * yields nulls, never zeros — a wrong rate is worse than an absent one.
+ */
+export async function fetchMarketApyPercents(
+  client: PublicClient,
+  params: MarketParams,
+  state: MarketState,
+): Promise<{ supplyApyPct: number; borrowApyPct: number; utilizationPct: number } | null> {
+  if (!params.irm || /^0x0{40}$/i.test(params.irm)) return null;
+  try {
+    const utilizationPct = utilizationPercent(state.totalBorrowAssets, state.totalSupplyAssets);
+    const borrowApyPct = apyPercentFromRatePerSecond(await borrowRate(client, params, state));
+    return {
+      utilizationPct,
+      borrowApyPct,
+      supplyApyPct: supplyApyPercent(borrowApyPct, utilizationPct, state.fee),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Project current and post-reallocation rates for each market.
  *
  * All reads fan out through the client's multicall batching, so a whole

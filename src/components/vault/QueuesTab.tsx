@@ -85,7 +85,7 @@ export function QueuesTab({ chainId, vaultAddress }: QueuesTabProps) {
         supplyAssets: alloc?.supplyAssets ?? 0n,
         supplyCap: alloc?.supplyCap ?? 0n,
         availableLiquidity: alloc?.availableLiquidity ?? 0n,
-        supplyAPY: m.supplyAPY,
+        supplyAPY: m.supplyAPY ?? 0,
         utilization: m.utilization,
       });
     }

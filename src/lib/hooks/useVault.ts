@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAccount } from 'wagmi';
-import type { Address } from 'viem';
+import type { Address, PublicClient } from 'viem';
 import * as Sentry from '@sentry/react';
 import {
   fetchVaultBasicInfo,
@@ -15,6 +15,7 @@ import {
   fetchPendingTimelock,
   fetchPendingGuardian,
   checkIsAllocator,
+  getPublicClient,
 } from '../data/rpcClient';
 import type { V2AdapterData } from '../data/rpcClient';
 import { isApiSupportedChain, fetchVaultFromApi, type ApiVaultData } from '../data/morphoApi';
@@ -22,6 +23,7 @@ import { isChainDeployed } from '../../config/chains';
 import type { VaultRole, AllocationState, MarketInfo, PendingAction, MarketCap, PendingCap } from '../../types';
 import type { VaultInfoV1 } from '../../types';
 import { calcUtilization } from '../utils/format';
+import { fetchMarketApyPercents } from '../market/reallocationRates';
 import { vaultKeys } from '../queryKeys';
 
 // ============================================================
@@ -112,9 +114,14 @@ async function fetchVaultDataViaRpc(
           fetchMarketParams(chainId, id),
           fetchMarketState(chainId, id),
         ]);
-        const [loanToken, collateralToken] = await Promise.all([
+        const [loanToken, collateralToken, apys] = await Promise.all([
           fetchTokenInfo(chainId, params.loanToken),
           fetchTokenInfo(chainId, params.collateralToken),
+          // Read the market's own IRM. These were hardcoded to 0, so every
+          // APY on an RPC-only chain (SEI, Pharos, XDC, Citrea, Avalanche,
+          // BSC) rendered a confident "0.00%" everywhere it appeared —
+          // Markets tab, Overview, Reallocate. Wrong, not merely missing.
+          fetchMarketApyPercents(getPublicClient(chainId) as PublicClient, params, state),
         ]);
         return {
           id,
@@ -122,8 +129,12 @@ async function fetchVaultDataViaRpc(
           state,
           loanToken,
           collateralToken,
-          supplyAPY: 0,
-          borrowAPY: 0,
+          // `MarketInfo` carries FRACTIONS (formatApyDisplay multiplies by
+          // 100); the rate module returns percents. Hence the /100.
+          // A market whose IRM is absent or reverts stays null rather than 0,
+          // so the UI can render "—" instead of asserting a rate.
+          supplyAPY: apys ? apys.supplyApyPct / 100 : null,
+          borrowAPY: apys ? apys.borrowApyPct / 100 : null,
           utilization: calcUtilization(state.totalBorrowAssets, state.totalSupplyAssets),
           rewards: [],
         } as MarketInfo;

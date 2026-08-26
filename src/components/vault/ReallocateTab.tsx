@@ -28,6 +28,10 @@ import {
   canTargetUtilization,
   targetAssetsForUtilization,
 } from '../../lib/vault/utilizationTarget';
+import { useReallocationRates } from '../../lib/hooks/useReallocationRates';
+import { blendedApyPercent } from '../../lib/market/reallocationRates';
+import { RateDelta } from '../ui/RateDelta';
+import type { MarketParams } from '../../types';
 import { useIsVaultBlacklisted, useMoolahSingletonState } from '../../lib/hooks/useMoolahSingleton';
 import { isStablecoin } from '../../config/tokens';
 import { AlertTriangle } from 'lucide-react';
@@ -68,12 +72,15 @@ interface AllocationEdit {
   label: string;
   cap: bigint;
   isIdle: boolean;
-  supplyApy: number;
+  /** Decimal fraction, or null when the rate isn't known (never 0 as a stand-in). */
+  supplyApy: number | null;
   utilization: number;
   totalSupplyAssets: bigint;
   totalBorrowAssets: bigint;
   lltv: bigint;
   irmAddress: `0x${string}`;
+  /** Full market params — required to read the IRM for a rate projection. */
+  params: MarketParams | null;
 }
 
 // ============================================================
@@ -266,12 +273,13 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
           : a.marketId.slice(0, 10),
         cap: a.supplyCap,
         isIdle,
-        supplyApy: isIdle ? 0 : (market?.supplyAPY ?? 0),
+        supplyApy: isIdle ? null : (market?.supplyAPY ?? null),
         utilization: isIdle ? 0 : (market?.utilization ?? 0),
         totalSupplyAssets: market?.state.totalSupplyAssets ?? 0n,
         totalBorrowAssets: market?.state.totalBorrowAssets ?? 0n,
         lltv: market?.params.lltv ?? 0n,
         irmAddress: (market?.params.irm ?? '0x0000000000000000000000000000000000000000') as `0x${string}`,
+        params: isIdle ? null : (market?.params ?? null),
       };
     });
   }, [allocation, markets, edits, idleMarketId]);
@@ -415,26 +423,60 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
     return ce.targetAssets >= ce.cap;
   })();
 
-  // Projected vault APY = weighted average of per-market supply APY by target allocation
-  const projectedApy = useMemo(() => {
-    if (!hasChanges || totalAllocated === 0n) return null;
-    let weightedSum = 0;
-    for (const e of finalEdits) {
-      const weight = Number(e.targetAssets) / Number(totalAllocated);
-      weightedSum += weight * e.supplyApy;
-    }
-    return weightedSum;
-  }, [finalEdits, hasChanges, totalAllocated]);
+  // What the proposed allocation does to each market's rate. Reallocating moves
+  // the vault's supply, which moves utilization, which moves the IRM — the
+  // consequence the curator is actually deciding on. Same hook the V2 dialog
+  // uses; it reads each market's own IRM, so it works on RPC-only chains.
+  const rateInputs = useMemo(
+    () =>
+      finalEdits
+        .filter((e): e is AllocationEdit & { params: MarketParams } => !e.isIdle && !!e.params)
+        .map((e) => ({
+          marketId: e.marketId,
+          params: e.params,
+          delta: e.targetAssets - e.currentAssets,
+          targetAssets: e.targetAssets,
+        })),
+    [finalEdits],
+  );
+  const { byMarket: rates, isProjecting, isError: ratesError } = useReallocationRates(
+    chainId,
+    rateInputs,
+  );
+  const haveRates = rates.size > 0;
 
-  const currentWeightedApy = useMemo(() => {
-    if (totalAllocated === 0n) return null;
-    let weightedSum = 0;
-    for (const e of finalEdits) {
-      const weight = Number(e.currentAssets) / Number(totalAllocated);
-      weightedSum += weight * e.supplyApy;
-    }
-    return weightedSum;
-  }, [finalEdits, totalAllocated]);
+  // Vault-level APY before and after, in PERCENT (RateDelta's unit — note the
+  // rest of this tab's APY values are fractions).
+  //
+  // The previous version of this was a weight-shuffle, not a projection: it
+  // applied each market's CURRENT rate to both the current and the target
+  // weights, so it could not show the thing that matters — that supplying into
+  // a market pushes its rate down and withdrawing pushes it up. On RPC-only
+  // chains it was doubly meaningless, since every per-market rate was 0.
+  const blendedNow = useMemo(
+    () =>
+      blendedApyPercent(
+        finalEdits.map((e) => ({
+          assets: e.currentAssets,
+          apyPercent: rates.get(e.marketId)?.currentSupplyApyPct ?? 0,
+        })),
+        totalAllocated,
+      ),
+    [finalEdits, rates, totalAllocated],
+  );
+  const blendedNext = useMemo(() => {
+    const positions = finalEdits.map((e) => ({
+      assets: e.targetAssets,
+      // Idle earns nothing and legitimately has no projection; a market whose
+      // projection is missing makes the total unknowable, not approximate.
+      apyPercent: e.isIdle ? 0 : (rates.get(e.marketId)?.nextSupplyApyPct ?? null),
+    }));
+    if (positions.some((p) => p.apyPercent === null)) return null;
+    return blendedApyPercent(
+      positions.map((p) => ({ assets: p.assets, apyPercent: p.apyPercent as number })),
+      totalAllocated,
+    );
+  }, [finalEdits, rates, totalAllocated]);
 
   const handleTargetChange = useCallback((marketId: string, value: bigint) => {
     setEdits((prev) => {
@@ -770,8 +812,40 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
                         </td>
 
                         {/* APY */}
-                        <td className={`text-right py-2 font-mono text-xs ${getApyColorClass(edit.supplyApy)}`}>
-                          {formatApyDisplay(edit.supplyApy)}
+                        {/* Supply APY: live rate, and where the proposed target
+                            would move it. `proj` values are PERCENT; the
+                            `edit.supplyApy` fallback is a FRACTION. */}
+                        <td className="text-right py-2 font-mono text-xs">
+                          {(() => {
+                            const proj = rates.get(edit.marketId);
+                            if (edit.isIdle) {
+                              return <span className="text-text-tertiary">&mdash;</span>;
+                            }
+                            if (!proj) {
+                              // No projection yet (or the IRM read failed) —
+                              // show the stored rate, or an em dash. Never 0%.
+                              return (
+                                <span className={getApyColorClass(edit.supplyApy)}>
+                                  {formatApyDisplay(edit.supplyApy)}
+                                </span>
+                              );
+                            }
+                            if (!isChanged) {
+                              return (
+                                <span className={getApyColorClass(proj.currentSupplyApyPct / 100)}>
+                                  {proj.currentSupplyApyPct.toFixed(2)}%
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="whitespace-nowrap">
+                                <RateDelta
+                                  from={proj.currentSupplyApyPct}
+                                  to={proj.exceedsLiquidity ? null : proj.nextSupplyApyPct}
+                                />
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* Supply Cap */}
@@ -860,20 +934,28 @@ export function ReallocateTab({ chainId, vaultAddress }: ReallocateTabProps) {
               onAutoFix={handleAutoFixIdle}
             />
 
-            {/* Projected APY */}
-            {hasChanges && projectedApy != null && currentWeightedApy != null && (
-              <div className="flex items-center gap-4 text-xs px-1">
-                <span className="text-text-tertiary">Weighted APY:</span>
-                <span className="font-mono text-text-primary">{formatApyDisplay(currentWeightedApy)}</span>
-                <span className="text-text-tertiary">&rarr;</span>
-                <span className={`font-mono font-medium ${getApyColorClass(projectedApy)}`}>
-                  {formatApyDisplay(projectedApy)}
+            {/* Blended vault APY, before and after the proposed allocation.
+                Rendered whenever rates are available — not only when there are
+                changes — because "what is this vault earning right now" is
+                itself worth showing, and on RPC-only chains it was previously
+                unavailable anywhere. */}
+            {(haveRates || isProjecting) && (
+              <div className="flex items-baseline justify-between gap-3 text-xs px-1">
+                <div>
+                  <span className="text-text-tertiary">Blended vault APY: </span>
+                  {haveRates ? (
+                    <RateDelta from={blendedNow} to={hasChanges ? blendedNext : blendedNow} />
+                  ) : (
+                    <span className="font-mono text-text-tertiary">…</span>
+                  )}
+                </div>
+                <span className="text-[10px] text-text-tertiary text-right">
+                  {isProjecting
+                    ? 'Projecting…'
+                    : ratesError
+                      ? 'Rate projection unavailable.'
+                      : 'Supply-side, across total assets (idle earns 0%). Before the performance fee.'}
                 </span>
-                {projectedApy !== currentWeightedApy && (
-                  <span className={`font-mono text-[10px] ${projectedApy > currentWeightedApy ? 'text-success' : 'text-danger'}`}>
-                    ({formatApyDisplay(projectedApy - currentWeightedApy, { showPlus: true })})
-                  </span>
-                )}
               </div>
             )}
 

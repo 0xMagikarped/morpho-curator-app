@@ -7,6 +7,7 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { SectionHeader } from '../ui/SectionHeader';
+import { RateDelta } from '../ui/RateDelta';
 import { AddressDisplay } from '../ui/AddressDisplay';
 import { useVaultInfo, useVaultRole } from '../../lib/hooks/useVault';
 import { useV2AdapterOverview } from '../../lib/hooks/useV2Adapters';
@@ -466,46 +467,6 @@ function AllocationRowComponent({
 // ============================================================
 // Reallocate Dialog
 // ============================================================
-
-/**
- * `1.37% → 1.36%` with the arrow coloured by direction. `unit` is appended to
- * both sides so the pair reads as one quantity rather than two numbers.
- */
-function RateDelta({
-  from,
-  to,
-  digits = 2,
-  higherIsBetter = true,
-}: {
-  from: number;
-  to: number | null;
-  digits?: number;
-  higherIsBetter?: boolean;
-}) {
-  const fmt = (v: number) => `${v.toFixed(digits)}%`;
-  if (to === null) {
-    return (
-      <span className="font-mono text-text-tertiary">
-        {fmt(from)} <span aria-hidden>→</span> —
-      </span>
-    );
-  }
-  // Below the display precision the arrow would point at a change the user
-  // can't see. Treat that as unchanged rather than colouring noise.
-  const epsilon = Math.pow(10, -digits) / 2;
-  const diff = to - from;
-  const tone =
-    Math.abs(diff) < epsilon
-      ? 'text-text-tertiary'
-      : diff > 0 === higherIsBetter
-        ? 'text-accent-primary'
-        : 'text-warning';
-  return (
-    <span className="font-mono text-text-tertiary">
-      {fmt(from)} <span aria-hidden>→</span> <span className={tone}>{fmt(to)}</span>
-    </span>
-  );
-}
 
 function ReallocateDialog({
   data,
