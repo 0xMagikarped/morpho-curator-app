@@ -88,7 +88,8 @@ export function CapEditDrawer({
 }: CapEditDrawerProps) {
   const [newAbsCap, setNewAbsCap] = useState('');
   const [newRelCap, setNewRelCap] = useState('');
-  const { writeContract, data: txHash, isPending, error, simulateError } = useGuardedWriteContract();
+  const { writeContract, data: txHash, isPending, error, simulateError, dispatchError } =
+    useGuardedWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
 
   const parsedAbsCap = useMemo(() => parseTokenAmount(newAbsCap, decimals), [newAbsCap, decimals]);
@@ -261,9 +262,24 @@ export function CapEditDrawer({
   return (
     <Drawer open={open} onClose={handleClose} title={label}>
       <div className="space-y-6">
+        {/* A recognised wallet failure (wrong network, session missing this
+            chain, user rejection) is explained in plain language with the step
+            that fixes it. Anything unrecognised still shows verbatim — a
+            wrong-but-friendly message would be worse than a raw one. */}
         {(simulateError || error) && (
-          <div role="alert" className="bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger">
-            {simulateError?.message ?? (error instanceof Error ? error.message : 'Transaction failed.')}
+          <div role="alert" className="bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger space-y-1">
+            {dispatchError ? (
+              <>
+                <p>{dispatchError.message}</p>
+                {dispatchError.action && (
+                  <p className="text-[11px] text-text-secondary">{dispatchError.action}</p>
+                )}
+              </>
+            ) : (
+              <p className="break-all">
+                {simulateError?.message ?? (error instanceof Error ? error.message : 'Transaction failed.')}
+              </p>
+            )}
           </div>
         )}
 

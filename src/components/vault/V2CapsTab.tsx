@@ -25,6 +25,7 @@ import {
   type MarketCapEntry,
 } from '../../hooks/useV2VaultCapEntries';
 import { useVaultPermissions } from '../../hooks/useVaultPermissions';
+import { useChainGuard } from '../../lib/hooks/useChainGuard';
 import { useV2SelectorTimelocks } from '../../lib/hooks/useV2SelectorTimelock';
 import { describeV2Timelock } from '../../lib/utils/duration';
 import { V2PendingTimelockPanel } from './V2PendingTimelockPanel';
@@ -64,7 +65,12 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
   const adapters = overview.data?.adapters ?? [];
   const decimals = vault?.assetInfo.decimals ?? 18;
   const assetSymbol = vault?.assetInfo.symbol ?? '???';
-  const canSetCaps = permissions.canCurate || permissions.isAdmin;
+  // Cap changes are writes, so they need the same network guard every other
+  // write surface has. This tab had none: with the wallet on another network
+  // (or a WalletConnect session that predates this chain) the Edit flow ran
+  // all the way to the wallet and failed there with a raw viem dump.
+  const { isMismatch, requestSwitch } = useChainGuard(chainId);
+  const canSetCaps = (permissions.canCurate || permissions.isAdmin) && !isMismatch;
   const totalAssets = vault?.totalAssets ?? 0n;
 
   // V2 has no vault-level timelock (`vault.timelock` is hardcoded 0n for V2),
@@ -142,6 +148,15 @@ export function V2CapsTab({ chainId, vaultAddress }: V2CapsTabProps) {
 
   return (
     <div className="space-y-4">
+      {isMismatch && (
+        <div className="flex items-center justify-between bg-warning/10 border border-warning/20 px-3 py-2">
+          <span className="text-xs text-warning">
+            Wallet is on the wrong network — cap changes are disabled.
+          </span>
+          <Button size="sm" variant="secondary" onClick={requestSwitch}>Switch Network</Button>
+        </div>
+      )}
+
       {/* Queued cap changes surface here — a submit() used to leave the
           tables looking untouched with no sign a timelock was running. */}
       <V2PendingTimelockPanel

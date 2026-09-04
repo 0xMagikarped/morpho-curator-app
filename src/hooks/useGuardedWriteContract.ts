@@ -2,6 +2,8 @@ import { useCallback, useState } from 'react';
 import { useAccount, useWriteContract } from 'wagmi';
 import { BaseError, ContractFunctionRevertedError, type Abi, type Hex } from 'viem';
 import { getPublicClient } from '../lib/data/rpcClient';
+import { getChainConfig } from '../config/chains';
+import { describeWalletError } from '../lib/utils/walletErrors';
 
 /**
  * Wraps wagmi's useWriteContract with (audit D4 / PR 2):
@@ -158,6 +160,22 @@ export function useGuardedWriteContract() {
     result.reset();
   }, [result]);
 
+  // The write is preflighted against the RPC before the wallet opens, so a
+  // failure coming back from the wallet is a connection-shaped problem, not a
+  // contract one. Translate the ones we recognise here — every write in the
+  // app routes through this hook, so no call site has to know about
+  // WalletConnect error codes.
+  //
+  // The target chain comes from the variables wagmi echoes back, falling back
+  // to the connected chain (writeContract dispatches there when `chainId` is
+  // omitted).
+  const targetChainId =
+    (result.variables as { chainId?: number } | undefined)?.chainId ?? connectedChainId;
+  const dispatchError = describeWalletError(
+    result.error,
+    targetChainId ? getChainConfig(targetChainId)?.name : undefined,
+  );
+
   return {
     ...result,
     writeContract: guardedWriteContract,
@@ -166,7 +184,12 @@ export function useGuardedWriteContract() {
     simulateError,
     isSimulating,
     reset,
-    walletError,
+    // A recognised wallet failure is reported here rather than as a raw
+    // `error`, so existing call sites that render `walletError` explain it
+    // without change.
+    walletError: walletError ?? (dispatchError ? dispatchError.message : null),
+    /** Full description of a recognised dispatch failure (message + action). */
+    dispatchError,
     isConnected,
   };
 }
