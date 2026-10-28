@@ -123,8 +123,8 @@ function useEventDiscoveredMarkets(
           return {
             marketId: e.marketId,
             params: e.params,
-            // Loan token info: best-effort; the AdapterMarketPosition
-            // merge fills it in from the vault's asset when missing.
+            // Loan token info isn't in the cap event; the allocation row
+            // falls back to the vault asset's symbol when missing.
             loanToken: null,
             collateralToken: e.collateralToken,
             marketState,
@@ -354,7 +354,14 @@ export function useV2AllocationData(
         marketId: pos.marketId,
         collateralSymbol: pos.collateralToken?.symbol ?? '???',
         collateralAddress: pos.params?.collateralToken,
-        loanSymbol: pos.loanToken?.symbol ?? '???',
+        // Event-discovered (cap-only) markets carry no loan token info; a
+        // market adapter lends the vault asset, so use its symbol when the
+        // params confirm it.
+        loanSymbol:
+          pos.loanToken?.symbol ??
+          (loanTokenAddress && pos.params?.loanToken.toLowerCase() === loanTokenAddress.toLowerCase()
+            ? assetSymbol
+            : '???'),
         lltv: lltv * 100,
         params: pos.params ?? undefined,
         effectiveAbsCap: caps?.absoluteCap,
